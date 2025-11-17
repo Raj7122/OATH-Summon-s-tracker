@@ -26,11 +26,14 @@ jest.mock('cheerio', () => ({
 }));
 
 // Mock Google Gemini AI
+const mockGenerateContent = jest.fn();
+const mockGetGenerativeModel = jest.fn().mockReturnValue({
+  generateContent: mockGenerateContent,
+});
+
 jest.mock('@google/generative-ai', () => ({
   GoogleGenerativeAI: jest.fn().mockImplementation(() => ({
-    getGenerativeModel: jest.fn().mockReturnValue({
-      generateContent: jest.fn(),
-    }),
+    getGenerativeModel: mockGetGenerativeModel,
   })),
 }));
 
@@ -42,13 +45,11 @@ const handler = require('./index').handler;
 
 describe('Data Extractor Lambda Function', () => {
   let mockDynamoDB;
-  let mockGenAI;
 
   beforeEach(() => {
     jest.clearAllMocks();
 
     mockDynamoDB = new AWS.DynamoDB.DocumentClient();
-    mockGenAI = new GoogleGenerativeAI('test-key');
 
     process.env.SUMMONS_TABLE = 'Summons-test';
     process.env.GEMINI_API_KEY = 'test-gemini-key';
@@ -79,11 +80,15 @@ describe('Data Extractor Lambda Function', () => {
         text: async () => mockHtml,
       });
 
-      // Mock cheerio parsing
-      const mockCheerio = {
+      // Mock cheerio parsing - properly mock the jQuery-like API
+      const mockNext = jest.fn().mockReturnValue({
         text: jest.fn().mockReturnValue('12/05/2024'),
-      };
-      cheerio.load.mockReturnValue(() => mockCheerio);
+      });
+      const mockCheerio = jest.fn().mockReturnValue({
+        next: mockNext,
+        text: jest.fn().mockReturnValue('12/05/2024'),
+      });
+      cheerio.load.mockReturnValue(mockCheerio);
 
       // Mock PDF fetch (will fail, but that's ok)
       fetch.mockResolvedValueOnce({
@@ -145,27 +150,18 @@ describe('Data Extractor Lambda Function', () => {
       fetch.mockResolvedValueOnce({
         ok: true,
         buffer: async () => mockPdfBuffer,
+        statusText: 'OK',
       });
 
-      // Mock Gemini API response
+      // Mock Gemini API response with properly formatted JSON
       const mockGeminiResponse = {
         response: {
           text: () =>
-            JSON.stringify({
-              license_plate_ocr: 'ABC1234',
-              dep_id: 'DEP-123-456',
-              vehicle_type_ocr: 'Box Truck',
-              prior_offense_status: 'First Offense',
-              violation_narrative: 'Vehicle idling for 15 minutes',
-              idling_duration_ocr: '15 minutes',
-              critical_flags_ocr: ['No driver present', 'Refrigeration unit on'],
-              name_on_summons_ocr: 'Test Company LLC',
-            }),
+            '{"license_plate_ocr":"ABC1234","dep_id":"DEP-123-456","vehicle_type_ocr":"Box Truck","prior_offense_status":"First Offense","violation_narrative":"Vehicle idling for 15 minutes","idling_duration_ocr":"15 minutes","critical_flags_ocr":["No driver present","Refrigeration unit on"],"name_on_summons_ocr":"Test Company LLC"}',
         },
       };
 
-      const mockModel = mockGenAI.getGenerativeModel();
-      mockModel.generateContent.mockResolvedValueOnce(mockGeminiResponse);
+      mockGenerateContent.mockResolvedValueOnce(mockGeminiResponse);
 
       // Mock database update
       mockDynamoDB.promise.mockResolvedValueOnce({});
@@ -194,8 +190,7 @@ describe('Data Extractor Lambda Function', () => {
       });
 
       // Mock Gemini API failure
-      const mockModel = mockGenAI.getGenerativeModel();
-      mockModel.generateContent.mockRejectedValueOnce(new Error('Gemini API error'));
+      mockGenerateContent.mockRejectedValueOnce(new Error('Gemini API error'));
 
       const result = await handler(event);
 
@@ -218,8 +213,7 @@ describe('Data Extractor Lambda Function', () => {
       });
 
       // Mock Gemini returning non-JSON
-      const mockModel = mockGenAI.getGenerativeModel();
-      mockModel.generateContent.mockResolvedValueOnce({
+      mockGenerateContent.mockResolvedValueOnce({
         response: {
           text: () => 'This is not valid JSON',
         },
@@ -264,10 +258,15 @@ describe('Data Extractor Lambda Function', () => {
         text: async () => mockHtml,
       });
 
-      const mockCheerio = {
+      // Mock cheerio parsing - properly mock the jQuery-like API
+      const mockNext = jest.fn().mockReturnValue({
         text: jest.fn().mockReturnValue('12/05/2024'),
-      };
-      cheerio.load.mockReturnValue(() => mockCheerio);
+      });
+      const mockCheerio = jest.fn().mockReturnValue({
+        next: mockNext,
+        text: jest.fn().mockReturnValue('12/05/2024'),
+      });
+      cheerio.load.mockReturnValue(mockCheerio);
 
       // Mock database update
       mockDynamoDB.promise.mockResolvedValueOnce({});
