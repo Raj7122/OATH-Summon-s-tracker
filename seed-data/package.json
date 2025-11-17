@@ -1,0 +1,13 @@
+{
+  "name": "oath-tracker-seed-data",
+  "version": "1.0.0",
+  "description": "Seed script to bulk import clients into NYC OATH Summons Tracker",
+  "main": "seed-clients.js",
+  "scripts": {
+    "seed": "node seed-clients.js"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1500.0",
+    "uuid": "^9.0.1"
+  }
+}
