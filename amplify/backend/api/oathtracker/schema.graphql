@@ -1,0 +1,58 @@
+# NYC OATH Summons Tracker - GraphQL Schema
+# This schema defines the data models for AWS Amplify (DynamoDB + AppSync)
+
+type Client @model @auth(rules: [{ allow: owner }]) {
+  id: ID!
+  name: String!
+  akas: [String]
+  contact_name: String
+  contact_address: String
+  contact_phone1: String
+  contact_email1: String
+  contact_phone2: String
+  contact_email2: String
+  summonses: [Summons] @hasMany(indexName: "byClient", fields: ["id"])
+}
+
+type Summons @model @auth(rules: [{ allow: owner }]) {
+  id: ID!
+  clientID: ID! @index(name: "byClient", sortKeyFields: ["hearing_date"])
+  client: Client @belongsTo(fields: ["clientID"])
+
+  # Core API Fields (from NYC Open Data)
+  summons_number: String! @index(name: "bySummonsNumber", queryField: "summonsBySummonsNumber")
+  respondent_name: String
+  hearing_date: AWSDateTime
+  status: String
+  license_plate: String
+  base_fine: Float
+  amount_due: Float
+  violation_date: AWSDateTime
+  violation_location: String
+
+  # Generated Links
+  summons_pdf_link: AWSURL
+  video_link: AWSURL
+
+  # Scraper Fields (from FR-09)
+  video_created_date: AWSDateTime
+  lag_days: Int
+
+  # User-Input Fields (FR-05, FR-06, FR-07)
+  notes: String
+  added_to_calendar: Boolean @default(value: "false")
+  evidence_reviewed: Boolean @default(value: "false")
+  evidence_requested: Boolean @default(value: "false")
+  evidence_requested_date: AWSDateTime
+  evidence_received: Boolean @default(value: "false")
+
+  # OCR Fields (from Google Gemini)
+  dep_id: String
+  license_plate_ocr: String
+  vehicle_type_ocr: String
+  prior_offense_status: String
+  violation_narrative: String
+  idling_duration_ocr: String
+  critical_flags_ocr: [String]
+  name_on_summons_ocr: String
+}
