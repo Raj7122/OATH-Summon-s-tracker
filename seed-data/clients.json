@@ -1,0 +1,347 @@
+[
+  {
+    "primary_name": "AAA EGG DEPOT",
+    "aliases": [
+      "AAA EGG DEPOT",
+      "EGG DEPOT"
+    ]
+  },
+  {
+    "primary_name": "BELMONT",
+    "aliases": [
+      "BELMONT"
+    ]
+  },
+  {
+    "primary_name": "BORWEGAN",
+    "aliases": [
+      "BORWEGAN"
+    ]
+  },
+  {
+    "primary_name": "BROADWAY LIMO",
+    "aliases": [
+      "BROADWAY LIMO"
+    ]
+  },
+  {
+    "primary_name": "CAMPBELL'S",
+    "aliases": [
+      "CAMPBELL'S"
+    ]
+  },
+  {
+    "primary_name": "CASANOVA",
+    "aliases": [
+      "CASANOVA",
+      "JLSHM"
+    ]
+  },
+  {
+    "primary_name": "CELTIC WOOD FLOORS",
+    "aliases": [
+      "CELTIC WOOD FLOORS",
+      "CELTIC FLOORS INC"
+    ]
+  },
+  {
+    "primary_name": "CENTENNIAL",
+    "aliases": [
+      "CENTENNIAL",
+      "CSI SECURITY & ELECTRIC INC",
+      "CENTENNIAL SECURITY INTEGRATION"
+    ]
+  },
+  {
+    "primary_name": "CENTRAL NATIONAL",
+    "aliases": [
+      "CENTRAL NATIONAL",
+      "LINDENMYER"
+    ]
+  },
+  {
+    "primary_name": "CERCONE",
+    "aliases": [
+      "CERCONE"
+    ]
+  },
+  {
+    "primary_name": "COMPASS GROUP",
+    "aliases": [
+      "COMPASS GROUP"
+    ]
+  },
+  {
+    "primary_name": "CORPORATE EXPRESS",
+    "aliases": [
+      "CORPORATE EXPRESS"
+    ]
+  },
+  {
+    "primary_name": "CREST",
+    "aliases": [
+      "CREST"
+    ]
+  },
+  {
+    "primary_name": "CRYSTAL",
+    "aliases": [
+      "CRYSTAL",
+      "NYC"
+    ]
+  },
+  {
+    "primary_name": "DeSantis Despatch",
+    "aliases": [
+      "DeSantis Despatch",
+      "DESANTI DISPATCH"
+    ]
+  },
+  {
+    "primary_name": "ECOLAB",
+    "aliases": [
+      "ECOLAB"
+    ]
+  },
+  {
+    "primary_name": "ESS CORP",
+    "aliases": [
+      "ESS CORP",
+      "EMPIRE STATE SUPPLY"
+    ]
+  },
+  {
+    "primary_name": "EXQUISITE",
+    "aliases": [
+      "EXQUISITE",
+      "EWF",
+      "E W F"
+    ]
+  },
+  {
+    "primary_name": "FERGUSON",
+    "aliases": [
+      "FERGUSON"
+    ]
+  },
+  {
+    "primary_name": "G & F DESIGN",
+    "aliases": [
+      "G & F DESIGN",
+      "G&F"
+    ]
+  },
+  {
+    "primary_name": "GC Warehouse",
+    "aliases": [
+      "GC Warehouse",
+      "G.C. Whse"
+    ]
+  },
+  {
+    "primary_name": "GENERAL WELDING",
+    "aliases": [
+      "GENERAL WELDING"
+    ]
+  },
+  {
+    "primary_name": "GOLDEN KRUST",
+    "aliases": [
+      "GOLDEN KRUST"
+    ]
+  },
+  {
+    "primary_name": "GREEN JEWELRY",
+    "aliases": [
+      "GREEN JEWELRY"
+    ]
+  },
+  {
+    "primary_name": "Griffin Landscaping",
+    "aliases": [
+      "Griffin Landscaping"
+    ]
+  },
+  {
+    "primary_name": "HD LIFTING",
+    "aliases": [
+      "HD LIFTING",
+      "HD HEAVY LIFTING"
+    ]
+  },
+  {
+    "primary_name": "HICKS NURSERIES",
+    "aliases": [
+      "HICKS NURSERIES"
+    ]
+  },
+  {
+    "primary_name": "HILDEBRANDT",
+    "aliases": [
+      "HILDEBRANDT",
+      "GEORGE HILDEBRANDT INC"
+    ]
+  },
+  {
+    "primary_name": "IKEA",
+    "aliases": [
+      "IKEA"
+    ]
+  },
+  {
+    "primary_name": "JAD",
+    "aliases": [
+      "JAD"
+    ]
+  },
+  {
+    "primary_name": "KRISPY KREME",
+    "aliases": [
+      "KRISPY KREME"
+    ]
+  },
+  {
+    "primary_name": "LAND O'LAKES",
+    "aliases": [
+      "LAND O'LAKES"
+    ]
+  },
+  {
+    "primary_name": "M & M",
+    "aliases": [
+      "M & M",
+      "M&M"
+    ]
+  },
+  {
+    "primary_name": "MARTIN",
+    "aliases": [
+      "MARTIN"
+    ]
+  },
+  {
+    "primary_name": "MCKESSON",
+    "aliases": [
+      "MCKESSON"
+    ]
+  },
+  {
+    "primary_name": "N Y P",
+    "aliases": [
+      "N Y P",
+      "NYP",
+      "NEW YORK PRESBYTERIAN"
+    ]
+  },
+  {
+    "primary_name": "NATIONAL GRID",
+    "aliases": [
+      "NATIONAL GRID"
+    ]
+  },
+  {
+    "primary_name": "NEBR",
+    "aliases": [
+      "NEBR",
+      "NEW ENGLAND BRANDS"
+    ]
+  },
+  {
+    "primary_name": "P C RICHARD",
+    "aliases": [
+      "P C RICHARD",
+      "PC RICHARD"
+    ]
+  },
+  {
+    "primary_name": "PARAMOUNT",
+    "aliases": [
+      "PARAMOUNT",
+      "P C B",
+      "PCB"
+    ]
+  },
+  {
+    "primary_name": "PEPSI",
+    "aliases": [
+      "PEPSI",
+      "PEPSI COLA"
+    ]
+  },
+  {
+    "primary_name": "REPUBLIC",
+    "aliases": [
+      "REPUBLIC"
+    ]
+  },
+  {
+    "primary_name": "RIVERHEAD",
+    "aliases": [
+      "RIVERHEAD"
+    ]
+  },
+  {
+    "primary_name": "SCHINDLER",
+    "aliases": [
+      "SCHINDLER"
+    ]
+  },
+  {
+    "primary_name": "SCHWAN'S",
+    "aliases": [
+      "SCHWAN'S"
+    ]
+  },
+  {
+    "primary_name": "SITE ONE",
+    "aliases": [
+      "SITE ONE",
+      "SITEONE"
+    ]
+  },
+  {
+    "primary_name": "SPRINT",
+    "aliases": [
+      "SPRINT"
+    ]
+  },
+  {
+    "primary_name": "SYSCO",
+    "aliases": [
+      "SYSCO"
+    ]
+  },
+  {
+    "primary_name": "T & T",
+    "aliases": [
+      "T & T",
+      "T&T"
+    ]
+  },
+  {
+    "primary_name": "TARGET",
+    "aliases": [
+      "TARGET"
+    ]
+  },
+  {
+    "primary_name": "TRINET",
+    "aliases": [
+      "TRINET"
+    ]
+  },
+  {
+    "primary_name": "USPS",
+    "aliases": [
+      "USPS",
+      "UNITED STATES POSTAL SERVICE",
+      "POSTAL SERVICE"
+    ]
+  },
+  {
+    "primary_name": "WASTE MANAGEMENT",
+    "aliases": [
+      "WASTE MANAGEMENT"
+    ]
+  }
+]

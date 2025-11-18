@@ -1,0 +1,20 @@
+{
+  "dev": {
+    "awscloudformation": {
+      "AuthRoleName": "amplify-oathtracker-dev-cb165-authRole",
+      "UnauthRoleArn": "arn:aws:iam::568438992037:role/amplify-oathtracker-dev-cb165-unauthRole",
+      "AuthRoleArn": "arn:aws:iam::568438992037:role/amplify-oathtracker-dev-cb165-authRole",
+      "Region": "us-east-1",
+      "DeploymentBucketName": "amplify-oathtracker-dev-cb165-deployment",
+      "UnauthRoleName": "amplify-oathtracker-dev-cb165-unauthRole",
+      "StackName": "amplify-oathtracker-dev-cb165",
+      "StackId": "arn:aws:cloudformation:us-east-1:568438992037:stack/amplify-oathtracker-dev-cb165/03e120f0-c40d-11f0-b503-0e7e2f3fbad1",
+      "AmplifyAppId": "dvfmz1xxsmuk7"
+    },
+    "categories": {
+      "auth": {
+        "oathtrackerb279d67c": {}
+      }
+    }
+  }
+}
