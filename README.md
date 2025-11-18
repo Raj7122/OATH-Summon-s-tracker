@@ -22,28 +22,481 @@ This system replaces the firm's manual process of downloading and filtering publ
 - ✅ Web scraping for video evidence metadata
 - ✅ Responsive design for mobile access
 
+## Architecture
+
+### System Overview
+
+The NYC OATH Summons Tracker follows a serverless, event-driven architecture built on AWS Amplify Gen 1:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         CLIENT LAYER                            │
+│  React SPA (Vite) + MUI Components + Amplify DataStore Client  │
+└───────────────────────┬─────────────────────────────────────────┘
+                        │ HTTPS (Amplify Hosting)
+                        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      AWS AMPLIFY (API LAYER)                    │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
+│  │   Cognito    │  │   AppSync    │  │  EventBridge Cron    │  │
+│  │  User Pool   │  │   GraphQL    │  │  (Daily @ 6:00 UTC)  │  │
+│  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘  │
+│         │                 │                      │              │
+│         │                 │                      ▼              │
+│         │                 │            ┌──────────────────┐     │
+│         │                 │            │ dailySweep       │     │
+│         │                 │            │ Lambda Function  │     │
+│         │                 │            └─────────┬────────┘     │
+│         │                 │                      │              │
+│         ▼                 ▼                      ▼              │
+└─────────────────────────────────────────────────────────────────┘
+                        │ DynamoDB Streams
+                        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      DATA LAYER                                 │
+│  ┌──────────────────────────────┐  ┌──────────────────────────┐│
+│  │  DynamoDB Table: Client      │  │  DynamoDB Table: Summons ││
+│  │  - PK: id (owner-specific)   │  │  - PK: id                ││
+│  │  - name, akas, contacts      │  │  - GSI: clientID         ││
+│  │  - @auth(owner isolation)    │  │  - @auth(owner isolation)││
+│  └──────────────────────────────┘  └──────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+                        │
+                        ▼ (Triggers on INSERT)
+              ┌──────────────────────┐
+              │  dataExtractor       │
+              │  Lambda Function     │
+              │  - Scrapes NYC site  │
+              │  - Calls Gemini OCR  │
+              │  - Updates Summons   │
+              └──────────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   EXTERNAL SERVICES                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐│
+│  │ NYC Open     │  │ Google       │  │ NYC PDF/Video Services ││
+│  │ Data API     │  │ Gemini API   │  │ - Summons PDFs         ││
+│  │ (OATH Data)  │  │ (OCR)        │  │ - Idling Video Portal  ││
+│  └──────────────┘  └──────────────┘  └────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow
+
+#### 1. Daily Sweep Flow (Automated)
+```
+EventBridge Scheduler (6:00 AM UTC)
+  → Trigger dailySweep Lambda
+    → Fetch IDLING summonses from NYC Open Data API
+    → Query all Clients from DynamoDB (with owner context)
+    → Match respondent_name to client.name or client.akas[]
+    → For each match:
+      → Check if summons exists (by summons_number)
+      → INSERT new summons OR UPDATE existing summons
+      → Generate PDF link, video link
+    → Return summary (e.g., "10 new, 5 updated")
+  → DynamoDB Stream triggers dataExtractor Lambda (for new summonses only)
+```
+
+#### 2. Data Extraction Flow (Automated)
+```
+DynamoDB Stream (on Summons INSERT)
+  → Trigger dataExtractor Lambda
+    → Web Scrape: Fetch video_created_date from NYC idling portal
+    → OCR: Download PDF summons → Send to Gemini API
+    → Parse Gemini response (JSON with license_plate_ocr, dep_id, etc.)
+    → UPDATE summons record with all extracted fields
+  → User sees updated data in DataGrid (auto-refresh via DataStore)
+```
+
+#### 3. User Interaction Flow
+```
+User Login
+  → Cognito authenticates
+  → AuthContext sets user state
+  → Protected routes allow access
+
+Dashboard Page Load
+  → DataStore.query(Summons) with @auth filter (owner-specific)
+  → Display all matching summonses in DataGrid
+  → Calculate dashboard summary widgets (critical deadlines, top clients)
+
+User Edits Evidence Checkbox
+  → handleCheckboxChange() → DataStore.save()
+  → AppSync GraphQL mutation with @auth check
+  → DynamoDB UPDATE (if owner matches)
+  → DataStore sync → UI updates immediately
+```
+
+### Security Architecture
+
+**Multi-Layer Security:**
+
+1. **Authentication**: AWS Cognito User Pools with email/password
+2. **Authorization**: GraphQL `@auth(rules: [{ allow: owner }])` on all models
+3. **Data Isolation**: DynamoDB queries automatically filter by `owner` (Cognito sub)
+4. **API Security**:
+   - NYC API token in Lambda environment variables (not exposed to frontend)
+   - Gemini API key in Lambda environment variables (not exposed to frontend)
+5. **HTTPS**: Enforced by AWS Amplify Hosting (TLS 1.2+)
+
+### Scalability Considerations
+
+- **DynamoDB**: Auto-scales read/write capacity
+- **Lambda**: Auto-scales with concurrent executions
+- **AppSync**: GraphQL queries support pagination via `@connection`
+- **Amplify DataStore**: Offline-first sync with conflict resolution
+
+---
+
 ## Tech Stack
 
 ### Frontend
 - **Framework**: React 18+ with Vite
 - **UI Library**: Material UI (MUI) v5+
+  - `@mui/material` - Core components
+  - `@mui/x-data-grid` - Professional DataGrid with sorting, filtering, CSV export
+  - `@mui/x-date-pickers` - Date picker for evidence tracking
+  - `@mui/x-charts` - Dashboard summary widgets (FR-10)
+  - `@mui/icons-material` - Material Design icons
 - **Routing**: React Router v6+
-- **State Management**: React Context API
-- **Data Fetching**: AWS Amplify DataStore
+- **State Management**: React Context API (`AuthContext`)
+- **Data Fetching**: AWS Amplify DataStore (GraphQL client)
+- **Date Handling**: date-fns library
 
-### Backend (AWS Amplify)
-- **Authentication**: Amazon Cognito
-- **Database**: Amazon DynamoDB
-- **API**: AWS AppSync (GraphQL)
-- **Functions**: AWS Lambda
-- **Scheduling**: Amazon EventBridge
-- **Hosting**: AWS Amplify Hosting
+### Backend (AWS Amplify Gen 1)
+- **Authentication**: Amazon Cognito User Pools
+- **Database**: Amazon DynamoDB (NoSQL)
+- **API**: AWS AppSync (GraphQL with subscriptions)
+- **Functions**: AWS Lambda (Node.js runtime)
+- **Scheduling**: Amazon EventBridge Scheduler
+- **Hosting**: AWS Amplify Hosting (CDN + CI/CD)
+- **Storage**: Amazon S3 (for deployment artifacts)
 
 ### External Services
-- NYC Open Data API (OATH Hearings)
-- NYC Summons PDF Service
-- NYC Idling Video Evidence Portal
-- Google Gemini API (OCR)
+- **NYC Open Data API**: OATH Hearings Division Case Status
+  - Endpoint: `https://data.cityofnewyork.us/resource/jz4z-kudi.json`
+  - Rate Limit: 1,000 requests/day with app token
+- **NYC Summons PDF Service**: PDF document retrieval
+  - Pattern: `https://a820-ecbticketfinder.nyc.gov/GetViolationImage?violationNumber={summons_number}`
+- **NYC Idling Video Portal**: Web scraping for video metadata
+  - Pattern: `https://nycidling.azurewebsites.net/idlingevidence/video/{summons_number}`
+- **Google Gemini API**: OCR for PDF summons extraction
+  - Model: `gemini-2.5-flash`
+  - Rate Limit: Check Google Cloud Console quota
+
+---
+
+## API Endpoints
+
+### GraphQL API (AWS AppSync)
+
+All API requests go through AWS AppSync GraphQL endpoint. Authentication is required via Cognito JWT token.
+
+#### Client Queries
+
+```graphql
+# Get all clients (filtered by owner)
+query ListClients {
+  listClients {
+    items {
+      id
+      name
+      akas
+      contact_name
+      contact_address
+      contact_phone1
+      contact_email1
+      contact_phone2
+      contact_email2
+      createdAt
+      updatedAt
+    }
+  }
+}
+
+# Get single client by ID
+query GetClient {
+  getClient(id: "abc-123") {
+    id
+    name
+    summonses {
+      items {
+        id
+        summons_number
+        hearing_date
+        status
+      }
+    }
+  }
+}
+
+# Create client
+mutation CreateClient {
+  createClient(input: {
+    name: "GC Warehouse Inc"
+    akas: ["G.C. Whse", "GC Whse Inc"]
+    contact_name: "John Smith"
+    contact_phone1: "(555) 123-4567"
+    contact_email1: "john@gcwarehouse.com"
+  }) {
+    id
+    name
+  }
+}
+
+# Update client
+mutation UpdateClient {
+  updateClient(input: {
+    id: "abc-123"
+    contact_phone2: "(555) 987-6543"
+  }) {
+    id
+    name
+  }
+}
+
+# Delete client
+mutation DeleteClient {
+  deleteClient(input: { id: "abc-123" }) {
+    id
+  }
+}
+```
+
+#### Summons Queries
+
+```graphql
+# Get all summonses (filtered by owner)
+query ListSummonses {
+  listSummonses(limit: 100) {
+    items {
+      id
+      clientID
+      summons_number
+      respondent_name
+      hearing_date
+      status
+      amount_due
+      lag_days
+      evidence_reviewed
+      added_to_calendar
+      notes
+    }
+    nextToken
+  }
+}
+
+# Get summonses for specific client
+query SummonsesByClient {
+  summonsesByClient(
+    clientID: "abc-123"
+    sortDirection: DESC
+  ) {
+    items {
+      id
+      summons_number
+      hearing_date
+      status
+    }
+  }
+}
+
+# Get single summons
+query GetSummons {
+  getSummons(id: "summons-456") {
+    id
+    summons_number
+    respondent_name
+    hearing_date
+    status
+    license_plate
+    license_plate_ocr
+    dep_id
+    vehicle_type_ocr
+    violation_date
+    violation_location
+    violation_narrative
+    idling_duration_ocr
+    prior_offense_status
+    base_fine
+    amount_due
+    summons_pdf_link
+    video_link
+    video_created_date
+    lag_days
+    evidence_reviewed
+    evidence_requested
+    evidence_requested_date
+    evidence_received
+    added_to_calendar
+    notes
+    critical_flags_ocr
+    createdAt
+    updatedAt
+  }
+}
+
+# Update summons (evidence tracking, notes)
+mutation UpdateSummons {
+  updateSummons(input: {
+    id: "summons-456"
+    evidence_reviewed: true
+    notes: "Reviewed video evidence - strong case for dismissal"
+  }) {
+    id
+    evidence_reviewed
+    notes
+  }
+}
+```
+
+### Lambda Function APIs (Internal - Not Exposed to Frontend)
+
+#### dailySweep Lambda
+
+**Trigger**: EventBridge Scheduler (daily at 6:00 AM UTC)
+
+**Environment Variables**:
+- `NYC_OPEN_DATA_APP_TOKEN` - NYC Open Data API token
+
+**Logic**:
+1. Fetch up to 5,000 recent IDLING summonses from NYC Open Data
+2. Query all Clients for the authenticated owner
+3. Match `respondent_name` to `client.name` or `client.akas[]` (case-insensitive)
+4. For each match:
+   - Generate `summons_pdf_link` and `video_link`
+   - Check if summons exists by `summons_number`
+   - INSERT new summons or UPDATE existing summons
+5. Return summary (e.g., "10 new, 5 updated")
+
+**NYC Open Data API Request**:
+```
+GET https://data.cityofnewyork.us/resource/jz4z-kudi.json
+  ?$limit=5000
+  &code_description=IDLING
+  &$order=hearing_date DESC
+Headers:
+  X-App-Token: {NYC_OPEN_DATA_APP_TOKEN}
+```
+
+**NYC Open Data Response Fields Used**:
+- `summons_number` (unique identifier)
+- `respondent_name` (matched to clients)
+- `hearing_date` (ISO 8601 timestamp)
+- `status` (e.g., "HEARING SCHEDULED", "DEFAULT JUDGMENT")
+- `violation_date` (ISO 8601 timestamp)
+- `violation_location` (street address)
+- `license_plate` (from API, may be redacted)
+- `base_fine` (float)
+- `amount_due` (float)
+
+#### dataExtractor Lambda
+
+**Trigger**: DynamoDB Stream (on Summons INSERT)
+
+**Environment Variables**:
+- `GEMINI_API_KEY` - Google Gemini API key
+
+**Logic**:
+1. Receive new summons event from DynamoDB Stream
+2. **Web Scraping**:
+   - Fetch HTML from `https://nycidling.azurewebsites.net/idlingevidence/video/{summons_number}`
+   - Use cheerio to extract "Video Created Date" from page
+   - Calculate `lag_days` = days between `video_created_date` and `violation_date`
+3. **OCR Extraction**:
+   - Fetch PDF from `summons_pdf_link`
+   - Send PDF buffer to Google Gemini API with structured extraction prompt
+   - Parse JSON response containing:
+     - `license_plate_ocr` (OCR'd license plate)
+     - `dep_id` (DEP identification number)
+     - `vehicle_type_ocr` (e.g., "BOX TRUCK")
+     - `prior_offense_status` (e.g., "FIRST", "REPEAT")
+     - `violation_narrative` (full narrative description)
+     - `idling_duration_ocr` (e.g., "3+ MINUTES")
+     - `critical_flags_ocr` (array of flags like "NO PLACARD", "ENGINE RUNNING")
+     - `name_on_summons_ocr` (respondent name from PDF)
+4. UPDATE summons record with all extracted fields
+
+**Google Gemini API Request**:
+```
+POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
+Headers:
+  Content-Type: application/json
+  Authorization: Bearer {GEMINI_API_KEY}
+Body:
+{
+  "contents": [{
+    "parts": [
+      { "text": "Extract structured data from this NYC OATH summons PDF..." },
+      { "inline_data": { "mime_type": "application/pdf", "data": "<base64>" } }
+    ]
+  }]
+}
+```
+
+**Gemini Response Format** (JSON extraction):
+```json
+{
+  "license_plate": "ABC1234",
+  "dep_id": "DEP-2024-12345",
+  "vehicle_type": "BOX TRUCK",
+  "prior_offense": "FIRST",
+  "violation_narrative": "Vehicle observed idling for more than 3 minutes...",
+  "idling_duration": "5 MINUTES",
+  "critical_flags": ["ENGINE RUNNING", "NO PLACARD"],
+  "name_on_summons": "GC Warehouse Inc"
+}
+```
+
+---
+
+## External API Documentation
+
+### NYC Open Data OATH API
+
+**Base URL**: `https://data.cityofnewyork.us/resource/jz4z-kudi.json`
+
+**Authentication**: X-App-Token header (sign up at data.cityofnewyork.us)
+
+**Rate Limits**:
+- Without token: 1,000 requests/day
+- With token: 50,000 requests/day
+
+**Query Parameters**:
+- `$limit` - Number of records (max 50,000 per request)
+- `$offset` - Pagination offset
+- `$order` - Sort field (e.g., `hearing_date DESC`)
+- `code_description` - Filter by violation type (use `IDLING`)
+- `$where` - SQL-like filter (e.g., `hearing_date > '2025-01-01'`)
+
+**Example Request**:
+```bash
+curl -X GET \
+  'https://data.cityofnewyork.us/resource/jz4z-kudi.json?$limit=10&code_description=IDLING&$order=hearing_date DESC' \
+  -H 'X-App-Token: YOUR_TOKEN'
+```
+
+**Sample Response**:
+```json
+[
+  {
+    "summons_number": "123456789",
+    "respondent_name": "GC WAREHOUSE INC",
+    "hearing_date": "2025-12-15T09:30:00.000",
+    "status": "HEARING SCHEDULED",
+    "violation_date": "2025-11-01T14:20:00.000",
+    "violation_location": "123 MAIN ST, BROOKLYN",
+    "license_plate": "ABC1234",
+    "base_fine": "350.00",
+    "amount_due": "350.00",
+    "code_description": "IDLING"
+  }
+]
+```
+
+---
 
 ## Prerequisites
 

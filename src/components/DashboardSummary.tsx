@@ -1,9 +1,34 @@
+/**
+ * Dashboard Summary Widgets Component
+ *
+ * Implements FR-10: Dashboard Summary Widgets from TRD v1.5
+ * Provides "Green Light" visualizations for critical deadlines and client activity.
+ *
+ * Features:
+ * - Critical Deadlines Card: Shows hearings ≤ 3 days (red accent)
+ * - Approaching Deadlines Card: Shows hearings 4-7 days (yellow accent)
+ * - Top 5 Clients Bar Chart: Horizontal chart of most active clients
+ *
+ * Layout:
+ * - Desktop: 30% left (deadline cards) + 70% right (bar chart)
+ * - Mobile: Stacked vertically
+ *
+ * @module components/DashboardSummary
+ * @see TRD.md FR-10 for specifications
+ */
+
 import { useMemo } from 'react';
 import { Box, Card, CardContent, Typography, Grid, useTheme, useMediaQuery, Chip } from '@mui/material';
 import { BarChart } from '@mui/x-charts/BarChart';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import EventIcon from '@mui/icons-material/Event';
 
+/**
+ * Summons data interface
+ * Represents a single NYC OATH summons record with all API and OCR fields
+ *
+ * @interface Summons
+ */
 interface Summons {
   id: string;
   clientID: string;
@@ -37,15 +62,47 @@ interface Summons {
   updatedAt?: string;
 }
 
+/**
+ * Props for DashboardSummary component
+ *
+ * @interface DashboardSummaryProps
+ * @property {Summons[]} summonses - Array of summons records to analyze
+ */
 interface DashboardSummaryProps {
   summonses: Summons[];
 }
 
+/**
+ * Dashboard Summary Component
+ *
+ * Renders three summary widgets that provide at-a-glance metrics for case management:
+ * 1. Critical Deadlines Card - Hearings within 3 days (red theme)
+ * 2. Approaching Deadlines Card - Hearings in 4-7 days (yellow theme)
+ * 3. Top Clients Bar Chart - Top 5 clients by active summons count
+ *
+ * All calculations are performed client-side using useMemo for performance.
+ * No additional API calls are made - data is derived from the summonses prop.
+ *
+ * @param {DashboardSummaryProps} props - Component props
+ * @returns {JSX.Element} Rendered dashboard summary section
+ *
+ * @example
+ * ```tsx
+ * <DashboardSummary summonses={allSummonses} />
+ * ```
+ */
 const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
-  // Calculate Critical Deadlines (≤ 3 days)
+  /**
+   * Calculate Critical Deadlines (hearings ≤ 3 days from now)
+   *
+   * Filters summonses to find those with hearing dates within the next 3 days.
+   * Used to populate the red "Critical Deadlines" card.
+   *
+   * @returns {Summons[]} Array of summonses with imminent hearing dates
+   */
   const criticalDeadlines = useMemo(() => {
     const now = new Date();
     const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
@@ -57,7 +114,14 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses }) => {
     });
   }, [summonses]);
 
-  // Calculate Approaching Deadlines (4-7 days)
+  /**
+   * Calculate Approaching Deadlines (hearings in 4-7 days from now)
+   *
+   * Filters summonses to find those with hearing dates between 4 and 7 days from now.
+   * Used to populate the yellow "Approaching Deadlines" card.
+   *
+   * @returns {Summons[]} Array of summonses with upcoming hearing dates in the 4-7 day range
+   */
   const approachingDeadlines = useMemo(() => {
     const now = new Date();
     const fourDaysFromNow = new Date(now.getTime() + 4 * 24 * 60 * 60 * 1000);
@@ -70,7 +134,17 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses }) => {
     });
   }, [summonses]);
 
-  // Calculate Top 5 Clients by active summons count
+  /**
+   * Calculate Top 5 Clients by Active Summons Count
+   *
+   * Aggregates summonses by client name (respondent_name), counts the total for each client,
+   * sorts by count in descending order, and returns the top 5 clients.
+   * Used to populate the horizontal bar chart on the right side of the dashboard.
+   *
+   * @returns {Object} Object containing labels (client names) and data (summons counts)
+   * @returns {string[]} returns.labels - Array of top 5 client names
+   * @returns {number[]} returns.data - Array of corresponding summons counts
+   */
   const topClients = useMemo(() => {
     const clientCounts = new Map<string, number>();
 
