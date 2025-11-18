@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Box, Typography, Paper, Button, CircularProgress } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SummonsTable from '../components/SummonsTable';
+import DashboardSummary from '../components/DashboardSummary';
 
 // TODO: Replace with actual Amplify DataStore queries after backend setup
 interface Summons {
@@ -66,6 +67,7 @@ const Dashboard = () => {
 
   return (
     <Box>
+      {/* Header Section */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4">Dashboard</Typography>
         <Button
@@ -83,9 +85,15 @@ const Dashboard = () => {
           <CircularProgress />
         </Box>
       ) : (
-        <Paper sx={{ p: 2 }}>
-          <SummonsTable summonses={summonses} onUpdate={loadSummonses} />
-        </Paper>
+        <>
+          {/* Summary Widgets Section - FR-10 */}
+          <DashboardSummary summonses={summonses} />
+
+          {/* DataGrid Section */}
+          <Paper sx={{ p: 2 }}>
+            <SummonsTable summonses={summonses} onUpdate={loadSummonses} />
+          </Paper>
+        </>
       )}
     </Box>
   );
