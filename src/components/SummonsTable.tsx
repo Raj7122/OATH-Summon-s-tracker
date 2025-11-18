@@ -1,3 +1,28 @@
+/**
+ * Summons Table Component
+ *
+ * Professional UX implementation of the main summons data grid with evidence-based design principles.
+ * Implements features from TRD.md FR-04, FR-05, FR-06, FR-07, FR-08 and professional UX refinements.
+ *
+ * Key Features:
+ * - Color-coded Status chips (Red/Blue/Green) for instant visual triage (Don't Make Me Think)
+ * - Conditional formatting for Lag Days >60 (legal timeliness threshold)
+ * - Master-Detail expandable rows for progressive disclosure (Miller's Law - 7±2 items)
+ * - Mobile Bottom Sheet with large Switch components (Fitts's Law - 44px touch targets)
+ * - "New" badges for rows updated in last 24 hours (Hooked Model - variable rewards)
+ * - Auto-save notes with visual feedback (1 second debounce)
+ * - Default visible columns reduced to "Actionable 7" to minimize cognitive load
+ *
+ * UX Design Principles Applied:
+ * - Don't Make Me Think (Steve Krug): Visual signaling via color-coded chips
+ * - Miller's Law: Progressive disclosure - 9 default columns, 30+ hidden secondary columns
+ * - Fitts's Law: Large touch targets on mobile (Switch components vs tiny checkboxes)
+ * - Hooked Model (Nir Eyal): Variable rewards through "New" badges and auto-save feedback
+ *
+ * @module components/SummonsTable
+ * @see TRD.md FR-04, FR-05, FR-06, FR-07, FR-08 for specifications
+ */
+
 import { useState, useEffect } from 'react';
 import {
   DataGrid,
@@ -37,6 +62,12 @@ import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import FiberNewIcon from '@mui/icons-material/FiberNew';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
+/**
+ * Summons data interface
+ * Represents a single NYC OATH summons record with all API fields, OCR fields, and user-input fields
+ *
+ * @interface Summons
+ */
 interface Summons {
   id: string;
   clientID: string;
@@ -70,11 +101,41 @@ interface Summons {
   updatedAt?: string; // For "new" indicator
 }
 
+/**
+ * Props for SummonsTable component
+ *
+ * @interface SummonsTableProps
+ * @property {Summons[]} summonses - Array of summons records to display in the data grid
+ * @property {Function} onUpdate - Callback function to trigger data refresh after updates
+ */
 interface SummonsTableProps {
   summonses: Summons[];
   onUpdate: () => void;
 }
 
+/**
+ * Summons Table Component
+ *
+ * Main data grid component displaying all summons with professional UX enhancements.
+ * Renders an MUI DataGrid with 9 default visible columns and 30+ hidden secondary columns.
+ * Supports mobile-responsive design with Bottom Sheet for evidence tracking on small screens.
+ *
+ * Features:
+ * - Sortable, filterable, searchable columns via GridToolbar
+ * - Master-Detail expandable rows showing additional summons data
+ * - Color-coded Status chips and conditional Lag Days formatting
+ * - Auto-save notes with 1-second debounce and visual feedback
+ * - Large touch-friendly Switch components on mobile
+ * - CSV export via GridToolbar
+ *
+ * @param {SummonsTableProps} props - Component props
+ * @returns {JSX.Element} Rendered data grid with toolbar and dialogs
+ *
+ * @example
+ * ```tsx
+ * <SummonsTable summonses={allSummonses} onUpdate={refreshData} />
+ * ```
+ */
 const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -106,6 +167,19 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     }
   }, [notesValue]);
 
+  /**
+   * Handle checkbox state changes for evidence tracking fields
+   *
+   * Updates a boolean field (evidence_reviewed, added_to_calendar, evidence_requested, evidence_received)
+   * for a specific summons record. Will eventually use Amplify DataStore for persistence.
+   *
+   * @param {string} id - Summons record ID
+   * @param {keyof Summons} field - Field name to update
+   * @param {boolean} value - New boolean value
+   * @returns {Promise<void>}
+   *
+   * @throws {Error} If DataStore update fails (logged to console)
+   */
   const handleCheckboxChange = async (id: string, field: keyof Summons, value: boolean) => {
     try {
       // TODO: Update via Amplify DataStore
@@ -119,6 +193,19 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     }
   };
 
+  /**
+   * Handle date picker changes for evidence_requested_date field
+   *
+   * Updates the evidence_requested_date field for a specific summons record.
+   * Will eventually use Amplify DataStore for persistence.
+   *
+   * @param {string} id - Summons record ID
+   * @param {keyof Summons} field - Field name to update (typically 'evidence_requested_date')
+   * @param {Date | null} date - New date value or null to clear
+   * @returns {Promise<void>}
+   *
+   * @throws {Error} If DataStore update fails (logged to console)
+   */
   const handleDateChange = async (id: string, field: keyof Summons, date: Date | null) => {
     try {
       // TODO: Update via Amplify DataStore
@@ -129,12 +216,32 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     }
   };
 
+  /**
+   * Open the notes dialog for a specific summons
+   *
+   * Sets the dialog state and initializes the notes text field with existing notes.
+   * Resets the auto-save "saved" indicator.
+   *
+   * @param {Summons} summons - Summons record to edit notes for
+   * @returns {void}
+   */
   const handleNotesOpen = (summons: Summons) => {
     setNotesValue(summons.notes || '');
     setNotesDialog({ open: true, summons });
     setNotesSaved(false);
   };
 
+  /**
+   * Auto-save notes after 1 second of inactivity (debounced)
+   *
+   * Triggered by useEffect when notesValue changes and differs from original.
+   * Shows visual feedback (checkmark icon) for 2 seconds after successful save.
+   * Will eventually use Amplify DataStore for persistence.
+   *
+   * @returns {Promise<void>}
+   *
+   * @throws {Error} If DataStore update fails (logged to console)
+   */
   const handleNotesAutoSave = async () => {
     if (notesDialog.summons) {
       setNotesSaving(true);
@@ -151,6 +258,16 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     }
   };
 
+  /**
+   * Manual save notes when "Save" button is clicked in dialog
+   *
+   * Saves the current notes value and closes the dialog.
+   * Will eventually use Amplify DataStore for persistence.
+   *
+   * @returns {Promise<void>}
+   *
+   * @throws {Error} If DataStore update fails (logged to console)
+   */
   const handleNotesSave = async () => {
     if (notesDialog.summons) {
       try {
@@ -164,10 +281,28 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     }
   };
 
+  /**
+   * Open mobile Bottom Sheet drawer for evidence tracking
+   *
+   * Opens the mobile-responsive drawer with large Switch components for evidence tracking fields.
+   * Provides touch-friendly controls (44px minimum) per Fitts's Law.
+   *
+   * @param {Summons} summons - Summons record to manage evidence tracking for
+   * @returns {void}
+   */
   const handleMobileDrawerOpen = (summons: Summons) => {
     setMobileDrawer({ open: true, summons });
   };
 
+  /**
+   * Toggle Master-Detail row expansion
+   *
+   * Adds or removes a summons ID from the expandedRows Set to show/hide the detail panel.
+   * Implements progressive disclosure pattern per Miller's Law.
+   *
+   * @param {string} id - Summons record ID to expand/collapse
+   * @returns {void}
+   */
   const toggleRowExpansion = (id: string) => {
     const newExpanded = new Set(expandedRows);
     if (newExpanded.has(id)) {
@@ -178,7 +313,15 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     setExpandedRows(newExpanded);
   };
 
-  // Check if a summons is "new" (updated in last 24 hours)
+  /**
+   * Check if a summons is "new" (updated in last 24 hours)
+   *
+   * Calculates time difference between now and updatedAt timestamp.
+   * Used to show "New" badge per Hooked Model (variable rewards).
+   *
+   * @param {Summons} summons - Summons record to check
+   * @returns {boolean} True if updated within last 24 hours, false otherwise
+   */
   const isNewSummons = (summons: Summons): boolean => {
     if (!summons.updatedAt) return false;
     const updatedDate = new Date(summons.updatedAt);
@@ -187,7 +330,18 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     return diffHours < 24;
   };
 
-  // Get color for Status chip
+  /**
+   * Get MUI color for Status chip based on text value
+   *
+   * Implements "Don't Make Me Think" principle via visual signaling:
+   * - Red (error): DEFAULT JUDGMENT - urgent action required
+   * - Blue (info): SCHEDULED/HEARING - active case
+   * - Green (success): DISMISSED/CLOSED - completed case
+   * - Gray (default): Unknown status
+   *
+   * @param {string} status - Status text from summons record
+   * @returns {'error' | 'info' | 'success' | 'default'} MUI Chip color
+   */
   const getStatusColor = (status: string): 'error' | 'info' | 'success' | 'default' => {
     const statusUpper = status?.toUpperCase() || '';
     if (statusUpper.includes('DEFAULT') || statusUpper.includes('JUDGMENT')) return 'error';
@@ -196,7 +350,15 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     return 'default';
   };
 
-  // Render Status with color-coded Chip (UX Improvement #1)
+  /**
+   * Render Status column with color-coded Chip
+   *
+   * UX Improvement #1: Visual signaling per "Don't Make Me Think" principle.
+   * Enables instant visual triage without reading text.
+   *
+   * @param {GridRenderCellParams} params - MUI DataGrid cell parameters
+   * @returns {JSX.Element} Colored Chip component
+   */
   const renderStatusCell = (params: GridRenderCellParams) => {
     const status = params.value || 'Unknown';
     return (
@@ -209,7 +371,15 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     );
   };
 
-  // Render Lag Days with conditional formatting (UX Improvement #2)
+  /**
+   * Render Lag Days column with conditional formatting
+   *
+   * UX Improvement #2: Highlights values >60 days (legal timeliness threshold) in bold red.
+   * Enables instant identification of cases approaching statute limitations.
+   *
+   * @param {GridRenderCellParams} params - MUI DataGrid cell parameters
+   * @returns {JSX.Element | string} Typography component with conditional styling, or em dash for null values
+   */
   const renderLagDaysCell = (params: GridRenderCellParams) => {
     const lagDays = params.value;
     if (lagDays === null || lagDays === undefined) return '—';
@@ -229,7 +399,16 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     );
   };
 
-  // Render "New" badge for recently updated rows (UX Improvement #6)
+  /**
+   * Render Client column with "New" badge for recently updated rows
+   *
+   * UX Improvement #6: Shows "New" badge for records updated in last 24 hours.
+   * Implements Hooked Model (variable rewards) to encourage regular engagement.
+   * Also provides clickable area to open notes dialog (desktop) or mobile drawer (mobile).
+   *
+   * @param {GridRenderCellParams} params - MUI DataGrid cell parameters
+   * @returns {JSX.Element} Box container with optional badge and client name
+   */
   const renderClientCell = (params: GridRenderCellParams) => {
     const isNew = isNewSummons(params.row);
 
@@ -251,7 +430,15 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     );
   };
 
-  // Master-Detail: Expandable row button
+  /**
+   * Render expand/collapse button for Master-Detail rows
+   *
+   * UX Improvement #3: Implements progressive disclosure pattern.
+   * Shows down arrow when collapsed, up arrow when expanded.
+   *
+   * @param {GridRenderCellParams} params - MUI DataGrid cell parameters
+   * @returns {JSX.Element} IconButton with arrow icon
+   */
   const renderExpandButton = (params: GridRenderCellParams) => {
     const isExpanded = expandedRows.has(params.row.id);
     return (
@@ -446,7 +633,16 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     { field: 'name_on_summons_ocr', headerName: 'Name (OCR)', width: 150, hide: true },
   ];
 
-  // Master-Detail: Expandable row details (UX Improvement #3)
+  /**
+   * Render Master-Detail expandable panel for secondary summons data
+   *
+   * UX Improvement #3: Implements progressive disclosure (Miller's Law).
+   * Shows 30+ secondary fields only when user expands a row to avoid cognitive overload.
+   * Displays violation info, vehicle info, financial info, and document links in a grid layout.
+   *
+   * @param {GridRowParams} params - MUI DataGrid row parameters
+   * @returns {JSX.Element | null} Collapse component with detail cards, or null if collapsed
+   */
   const renderDetailPanel = (params: GridRowParams) => {
     const summons = params.row as Summons;
     const isExpanded = expandedRows.has(summons.id);
