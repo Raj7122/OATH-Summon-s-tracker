@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "api": {
+      "oathtracker": [
+        "read",
+        "update"
+      ]
+    }
+  }
+}
