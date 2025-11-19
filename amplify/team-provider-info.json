@@ -19,8 +19,14 @@
         "oathsummonstracker": {}
       },
       "function": {
-        "dailySweep": {},
-        "dataExtractor": {}
+        "dailySweep": {
+          "deploymentBucketName": "amplify-oathsummonstracker-dev-0fcf6-deployment",
+          "s3Key": "amplify-builds/dailySweep-735034676e37616f527a-build.zip"
+        },
+        "dataExtractor": {
+          "deploymentBucketName": "amplify-oathsummonstracker-dev-0fcf6-deployment",
+          "s3Key": "amplify-builds/dataExtractor-616a796d534f5176504c-build.zip"
+        }
       }
     }
   }

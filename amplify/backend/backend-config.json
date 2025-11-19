@@ -84,5 +84,39 @@
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
     }
+  },
+  "parameters": {
+    "AMPLIFY_function_dailySweep_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "dailySweep"
+        }
+      ]
+    },
+    "AMPLIFY_function_dailySweep_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "dailySweep"
+        }
+      ]
+    },
+    "AMPLIFY_function_dataExtractor_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "dataExtractor"
+        }
+      ]
+    },
+    "AMPLIFY_function_dataExtractor_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "dataExtractor"
+        }
+      ]
+    }
   }
 }
