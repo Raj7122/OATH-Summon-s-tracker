@@ -25,7 +25,7 @@
         },
         "dataExtractor": {
           "deploymentBucketName": "amplify-oathsummonstracker-dev-0fcf6-deployment",
-          "s3Key": "amplify-builds/dataExtractor-646946474d68586e4370-build.zip"
+          "s3Key": "amplify-builds/dataExtractor-2f6e54485375776e6d36-build.zip"
         }
       }
     }
