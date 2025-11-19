@@ -1,10 +1,12 @@
 {
   "permissions": {
     "api": {
-      "oathtracker": [
-        "read",
-        "update"
+      "oathsummonstracker": [
+        "Query",
+        "Mutation",
+        "Subscription"
       ]
     }
-  }
+  },
+  "lambdaLayers": []
 }

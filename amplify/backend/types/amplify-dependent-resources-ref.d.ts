@@ -1,12 +1,12 @@
 export type AmplifyDependentResourcesAttributes = {
   "api": {
-    "oathtracker": {
+    "oathsummonstracker": {
       "GraphQLAPIEndpointOutput": "string",
       "GraphQLAPIIdOutput": "string"
     }
   },
   "auth": {
-    "oathtrackerb279d67c": {
+    "oathsummonstracker8a6d84c8": {
       "AppClientID": "string",
       "AppClientIDWeb": "string",
       "IdentityPoolId": "string",
@@ -19,6 +19,7 @@ export type AmplifyDependentResourcesAttributes = {
   "function": {
     "dailySweep": {
       "Arn": "string",
+      "CloudWatchEventRule": "string",
       "LambdaExecutionRole": "string",
       "LambdaExecutionRoleArn": "string",
       "Name": "string",

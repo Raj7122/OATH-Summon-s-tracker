@@ -1,12 +1,12 @@
 {
   "permissions": {
     "api": {
-      "oathtracker": [
-        "create",
-        "read",
-        "update"
+      "oathsummonstracker": [
+        "Query",
+        "Mutation",
+        "Subscription"
       ]
     }
   },
-  "CloudWatchRule": "rate(1 day)"
+  "lambdaLayers": []
 }

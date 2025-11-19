@@ -1,15 +1,23 @@
 {
   "api": {
-    "oathtracker": {
-      "dependsOn": [],
+    "oathsummonstracker": {
+      "dependsOn": [
+        {
+          "attributes": [
+            "UserPoolId"
+          ],
+          "category": "auth",
+          "resourceName": "oathsummonstracker8a6d84c8"
+        }
+      ],
       "output": {
         "authConfig": {
           "additionalAuthenticationProviders": [],
           "defaultAuthentication": {
-            "apiKeyConfig": {
-              "apiKeyExpirationDays": 7
-            },
-            "authenticationType": "API_KEY"
+            "authenticationType": "AMAZON_COGNITO_USER_POOLS",
+            "userPoolConfig": {
+              "userPoolId": "authoathsummonstracker8a6d84c8"
+            }
           }
         }
       },
@@ -18,7 +26,7 @@
     }
   },
   "auth": {
-    "oathtrackerb279d67c": {
+    "oathsummonstracker8a6d84c8": {
       "customAuth": false,
       "dependsOn": [],
       "frontendAuthConfig": {
@@ -55,7 +63,7 @@
             "GraphQLAPIEndpointOutput"
           ],
           "category": "api",
-          "resourceName": "oathtracker"
+          "resourceName": "oathsummonstracker"
         }
       ],
       "providerPlugin": "awscloudformation",
@@ -70,7 +78,7 @@
             "GraphQLAPIEndpointOutput"
           ],
           "category": "api",
-          "resourceName": "oathtracker"
+          "resourceName": "oathsummonstracker"
         }
       ],
       "providerPlugin": "awscloudformation",

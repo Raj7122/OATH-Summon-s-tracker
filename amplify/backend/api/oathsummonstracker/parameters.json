@@ -1,0 +1,12 @@
+{
+  "AppSyncApiName": "oathsummonstracker",
+  "DynamoDBBillingMode": "PAY_PER_REQUEST",
+  "DynamoDBEnableServerSideEncryption": false,
+  "AuthCognitoUserPoolId": {
+    "Fn::GetAtt": [
+      "authoathsummonstracker8a6d84c8",
+      "Outputs.UserPoolId"
+    ]
+  },
+  "AuthModeLastUpdated": "2025-11-19T03:47:07.994Z"
+}
