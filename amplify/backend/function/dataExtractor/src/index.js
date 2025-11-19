@@ -31,7 +31,27 @@ exports.handler = async (event) => {
   console.log('Starting data extraction...', JSON.stringify(event));
 
   try {
-    const { summons_id, summons_number, pdf_link, video_link, violation_date } = event;
+    // Parse DynamoDB Stream event format
+    let summons_id, summons_number, pdf_link, video_link, violation_date;
+
+    if (event.Records && event.Records.length > 0) {
+      // DynamoDB Stream trigger format
+      const record = event.Records[0];
+      const newImage = record.dynamodb.NewImage;
+
+      // Unmarshall DynamoDB attribute values
+      summons_id = newImage.id?.S;
+      summons_number = newImage.summons_number?.S;
+      pdf_link = newImage.summons_pdf_link?.S;
+      video_link = newImage.video_link?.S;
+      violation_date = newImage.violation_date?.S;
+
+      console.log('Parsed DynamoDB stream event:', { summons_id, summons_number, pdf_link, video_link });
+    } else {
+      // Direct invocation format (for testing)
+      ({ summons_id, summons_number, pdf_link, video_link, violation_date } = event);
+      console.log('Direct invocation event:', { summons_id, summons_number, pdf_link, video_link });
+    }
 
     if (!summons_id || !summons_number) {
       throw new Error('Missing required parameters: summons_id or summons_number');
@@ -318,5 +338,3 @@ function calculateLagDays(violationDate, videoCreatedDate) {
     return null;
   }
 }
-// Updated Wed Nov 19 09:48:24 EST 2025
-
