@@ -133,6 +133,9 @@ async function fetchNYCData() {
     url.searchParams.append('code_description', 'IDLING');
     url.searchParams.append('$order', 'hearing_date DESC');
 
+    console.log('Fetching from NYC API:', url.toString());
+    console.log('NYC_API_TOKEN present:', !!NYC_API_TOKEN);
+
     const headers = {
       'X-App-Token': NYC_API_TOKEN,
       'Content-Type': 'application/json',
@@ -141,7 +144,9 @@ async function fetchNYCData() {
     const response = await fetch(url.toString(), { headers });
 
     if (!response.ok) {
-      throw new Error(`NYC API returned ${response.status}: ${response.statusText}`);
+      const errorBody = await response.text();
+      console.error('NYC API error response:', errorBody);
+      throw new Error(`NYC API returned ${response.status}: ${response.statusText} - ${errorBody}`);
     }
 
     const data = await response.json();
