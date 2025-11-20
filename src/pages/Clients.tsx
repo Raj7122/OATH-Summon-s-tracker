@@ -124,8 +124,8 @@ const Clients = () => {
       headerName: 'AKAs',
       flex: 1,
       minWidth: 200,
-      valueGetter: (value: any, row: Client) => {
-        const akas = row.akas;
+      renderCell: (params) => {
+        const akas = params.row?.akas;
         if (!akas || !Array.isArray(akas)) return '';
         return akas.join(', ');
       },
