@@ -129,8 +129,9 @@ function buildClientNameMap(clients) {
 async function fetchNYCData() {
   try {
     const url = new URL(NYC_API_URL);
-    url.searchParams.append('$limit', '10'); // Temporarily reduced to inspect fields
-    // TEMPORARILY REMOVED: url.searchParams.append('code_description', 'IDLING');
+    url.searchParams.append('$limit', API_LIMIT);
+    // Filter for IDLING violations using charge code description fields
+    url.searchParams.append('$where', "charge_1_code_description like '%IDLING%' OR charge_2_code_description like '%IDLING%' OR charge_3_code_description like '%IDLING%'");
     url.searchParams.append('$order', 'hearing_date DESC');
 
     console.log('Fetching from NYC API:', url.toString());
@@ -150,12 +151,7 @@ async function fetchNYCData() {
     }
 
     const data = await response.json();
-
-    // Log first record to inspect available fields
-    if (data && data.length > 0) {
-      console.log('Sample record fields:', Object.keys(data[0]));
-      console.log('First record sample:', JSON.stringify(data[0], null, 2));
-    }
+    console.log(`Successfully fetched ${data.length} IDLING summonses from NYC API`);
 
     return data || [];
   } catch (error) {
@@ -179,8 +175,14 @@ async function processSummonses(apiSummonses, clientNameMap) {
 
   for (const apiSummons of apiSummonses) {
     try {
+      // Map NYC API fields to our expected fields
+      const ticketNumber = apiSummons.ticket_number;
+      const respondentFirstName = apiSummons.respondent_first_name || '';
+      const respondentLastName = apiSummons.respondent_last_name || '';
+      const respondentFullName = `${respondentFirstName} ${respondentLastName}`.trim();
+
       // Check if respondent name matches any client
-      const respondentName = (apiSummons.respondent || '').toLowerCase().trim();
+      const respondentName = respondentFullName.toLowerCase().trim();
 
       if (!respondentName) {
         continue; // Skip summonses with no respondent name
@@ -195,39 +197,52 @@ async function processSummonses(apiSummonses, clientNameMap) {
       matched++;
 
       // Auto-generate links (FR-03)
-      const pdfLink = `https://a820-ecbticketfinder.nyc.gov/GetViolationImage?violationNumber=${apiSummons.summons_number}`;
-      const videoLink = `https://nycidling.azurewebsites.net/idlingevidence/video/${apiSummons.summons_number}`;
+      const pdfLink = `https://a820-ecbticketfinder.nyc.gov/GetViolationImage?violationNumber=${ticketNumber}`;
+      const videoLink = `https://nycidling.azurewebsites.net/idlingevidence/video/${ticketNumber}`;
 
       // Check if summons already exists
-      const existingSummons = await findExistingSummons(apiSummons.summons_number);
+      const existingSummons = await findExistingSummons(ticketNumber);
+
+      // Map API fields to database fields
+      const status = apiSummons.hearing_status || apiSummons.hearing_result || 'Unknown';
+      const balanceDue = parseFloat(apiSummons.balance_due) || 0;
+      const totalViolationAmount = parseFloat(apiSummons.total_violation_amount) || 0;
 
       if (existingSummons) {
         // Update if status or amount_due changed
         if (
-          existingSummons.status !== apiSummons.status ||
-          existingSummons.amount_due !== parseFloat(apiSummons.amount_due)
+          existingSummons.status !== status ||
+          existingSummons.amount_due !== balanceDue
         ) {
           await updateSummons(existingSummons.id, {
-            status: apiSummons.status,
-            amount_due: parseFloat(apiSummons.amount_due) || 0,
+            status: status,
+            amount_due: balanceDue,
           });
           updated++;
-          console.log(`Updated summons: ${apiSummons.summons_number}`);
+          console.log(`Updated summons: ${ticketNumber}`);
         }
       } else {
+        // Build violation location string
+        const violationLocation = [
+          apiSummons.violation_location_house,
+          apiSummons.violation_location_street_name,
+          apiSummons.violation_location_city,
+          apiSummons.violation_location_zip_code
+        ].filter(Boolean).join(', ');
+
         // Create new summons record
         const newSummons = {
           id: generateUUID(),
           clientID: matchedClient.id,
-          summons_number: apiSummons.summons_number,
-          respondent_name: apiSummons.respondent,
+          summons_number: ticketNumber,
+          respondent_name: respondentFullName,
           hearing_date: apiSummons.hearing_date || null,
-          status: apiSummons.status || 'Unknown',
+          status: status,
           license_plate: apiSummons.license_plate || '',
-          base_fine: parseFloat(apiSummons.fine_amount) || 0,
-          amount_due: parseFloat(apiSummons.amount_due) || 0,
+          base_fine: totalViolationAmount,
+          amount_due: balanceDue,
           violation_date: apiSummons.violation_date || null,
-          violation_location: apiSummons.violation_location || '',
+          violation_location: violationLocation,
           summons_pdf_link: pdfLink,
           video_link: videoLink,
           added_to_calendar: false,
@@ -238,13 +253,13 @@ async function processSummonses(apiSummonses, clientNameMap) {
 
         await createSummons(newSummons);
         created++;
-        console.log(`Created new summons: ${apiSummons.summons_number}`);
+        console.log(`Created new summons: ${ticketNumber}`);
 
         // Asynchronously invoke data-extractor function (FR-03, FR-09)
         await invokeDataExtractor(newSummons);
       }
     } catch (error) {
-      console.error(`Error processing summons ${apiSummons.summons_number}:`, error);
+      console.error(`Error processing summons ${apiSummons.ticket_number}:`, error);
       errors++;
     }
   }
