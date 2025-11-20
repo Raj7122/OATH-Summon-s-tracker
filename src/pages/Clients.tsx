@@ -85,30 +85,35 @@ const Clients = () => {
   const handleSave = async (clientData: Partial<Client>) => {
     try {
       if (editingClient) {
-        // Update existing client
-        await client.graphql({
+        // Update existing client - only send changed fields
+        const { id, ...updateData } = { id: editingClient.id, ...clientData };
+        const result = await client.graphql({
           query: updateClient,
           variables: {
-            input: {
-              id: editingClient.id,
-              ...clientData,
-            },
+            input: updateData,
           },
         });
+        console.log('Update result:', result);
       } else {
         // Create new client
-        await client.graphql({
+        const result = await client.graphql({
           query: createClient,
           variables: {
             input: clientData,
           },
         });
+        console.log('Create result:', result);
       }
       setDialogOpen(false);
       loadClients();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving client:', error);
-      alert('Failed to save client. Check console for details.');
+      if (error.errors) {
+        console.error('GraphQL errors:', error.errors);
+        alert(`Failed to save: ${error.errors[0]?.message || 'Unknown error'}`);
+      } else {
+        alert('Failed to save client. Check console for details.');
+      }
     }
   };
 
@@ -119,7 +124,11 @@ const Clients = () => {
       headerName: 'AKAs',
       flex: 1,
       minWidth: 200,
-      valueFormatter: (value: string[]) => value?.join(', ') || '',
+      valueGetter: (value: any, row: Client) => {
+        const akas = row.akas;
+        if (!akas || !Array.isArray(akas)) return '';
+        return akas.join(', ');
+      },
     },
     { field: 'contact_name', headerName: 'Contact Name', flex: 1, minWidth: 150 },
     { field: 'contact_email1', headerName: 'Email', flex: 1, minWidth: 200 },
