@@ -1,12 +1,14 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { fetchAuthSession, signIn, signOut, getCurrentUser, AuthUser } from 'aws-amplify/auth';
+import { fetchAuthSession, signIn, signOut, getCurrentUser, AuthUser, confirmSignIn } from 'aws-amplify/auth';
 
 interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
   signIn: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  completeNewPassword: (newPassword: string) => Promise<void>;
   isAuthenticated: boolean;
+  requiresPasswordChange: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -14,6 +16,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [requiresPasswordChange, setRequiresPasswordChange] = useState(false);
 
   // Check if user is already authenticated on mount
   useEffect(() => {
@@ -37,10 +40,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const handleSignIn = async (username: string, password: string) => {
     try {
-      await signIn({ username, password });
+      const signInResult = await signIn({ username, password });
+
+      // Check if password change is required
+      if (signInResult.nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
+        console.log('Password change required');
+        setRequiresPasswordChange(true);
+        throw new Error('NEW_PASSWORD_REQUIRED');
+      }
+
       await checkUser();
     } catch (error) {
       console.error('Error signing in:', error);
+      if (error instanceof Error && error.message === 'NEW_PASSWORD_REQUIRED') {
+        // Don't rethrow, just set the state
+        return;
+      }
+      throw error;
+    }
+  };
+
+  const handleCompleteNewPassword = async (newPassword: string) => {
+    try {
+      await confirmSignIn({ challengeResponse: newPassword });
+      setRequiresPasswordChange(false);
+      await checkUser();
+    } catch (error) {
+      console.error('Error completing password change:', error);
       throw error;
     }
   };
@@ -60,7 +86,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     loading,
     signIn: handleSignIn,
     signOut: handleSignOut,
+    completeNewPassword: handleCompleteNewPassword,
     isAuthenticated: !!user,
+    requiresPasswordChange,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
