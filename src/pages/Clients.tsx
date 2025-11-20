@@ -15,9 +15,13 @@ import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { DataGrid, GridColDef, GridActionsCellItem } from '@mui/x-data-grid';
+import { generateClient } from 'aws-amplify/api';
+import { listClients } from '../graphql/queries';
+import { createClient, updateClient, deleteClient } from '../graphql/mutations';
 import ClientForm from '../components/ClientForm';
 
-// TODO: Replace with actual Amplify DataStore model after backend setup
+const client = generateClient();
+
 interface Client {
   id: string;
   name: string;
@@ -43,12 +47,10 @@ const Clients = () => {
   const loadClients = async () => {
     setLoading(true);
     try {
-      // TODO: Replace with actual Amplify DataStore query
-      // const data = await DataStore.query(Client);
-      // setClients(data);
-
-      // Placeholder: Empty array for now
-      setClients([]);
+      const result = await client.graphql({
+        query: listClients,
+      });
+      setClients(result.data.listClients.items as Client[]);
     } catch (error) {
       console.error('Error loading clients:', error);
     } finally {
@@ -69,9 +71,10 @@ const Clients = () => {
   const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this client?')) {
       try {
-        // TODO: Replace with actual Amplify DataStore delete
-        // await DataStore.delete(Client, id);
-        console.log('Deleting client:', id);
+        await client.graphql({
+          query: deleteClient,
+          variables: { input: { id } },
+        });
         loadClients();
       } catch (error) {
         console.error('Error deleting client:', error);
@@ -82,20 +85,30 @@ const Clients = () => {
   const handleSave = async (clientData: Partial<Client>) => {
     try {
       if (editingClient) {
-        // TODO: Update existing client
-        // await DataStore.save(Client.copyOf(editingClient, updated => {
-        //   Object.assign(updated, clientData);
-        // }));
-        console.log('Updating client:', editingClient.id, clientData);
+        // Update existing client
+        await client.graphql({
+          query: updateClient,
+          variables: {
+            input: {
+              id: editingClient.id,
+              ...clientData,
+            },
+          },
+        });
       } else {
-        // TODO: Create new client
-        // await DataStore.save(new Client(clientData));
-        console.log('Creating client:', clientData);
+        // Create new client
+        await client.graphql({
+          query: createClient,
+          variables: {
+            input: clientData,
+          },
+        });
       }
       setDialogOpen(false);
       loadClients();
     } catch (error) {
       console.error('Error saving client:', error);
+      alert('Failed to save client. Check console for details.');
     }
   };
 
