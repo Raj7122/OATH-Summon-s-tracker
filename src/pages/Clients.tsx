@@ -85,21 +85,25 @@ const Clients = () => {
   const handleSave = async (clientData: Partial<Client>) => {
     try {
       if (editingClient) {
-        // Update existing client - only send changed fields
-        const { id, ...updateData } = { id: editingClient.id, ...clientData };
+        // Update existing client - filter out read-only fields
+        const { createdAt, updatedAt, owner, summonses, __typename, ...cleanData } = clientData as any;
         const result = await client.graphql({
           query: updateClient,
           variables: {
-            input: updateData,
+            input: {
+              id: editingClient.id,
+              ...cleanData,
+            },
           },
         });
         console.log('Update result:', result);
       } else {
-        // Create new client
+        // Create new client - filter out read-only fields
+        const { createdAt, updatedAt, owner, summonses, __typename, ...cleanData } = clientData as any;
         const result = await client.graphql({
           query: createClient,
           variables: {
-            input: clientData,
+            input: cleanData,
           },
         });
         console.log('Create result:', result);
@@ -124,8 +128,8 @@ const Clients = () => {
       headerName: 'AKAs',
       flex: 1,
       minWidth: 200,
-      valueGetter: (value: any, row: Client) => {
-        const akas = row.akas;
+      renderCell: (params) => {
+        const akas = params.row?.akas;
         if (!akas || !Array.isArray(akas)) return '';
         return akas.join(', ');
       },
