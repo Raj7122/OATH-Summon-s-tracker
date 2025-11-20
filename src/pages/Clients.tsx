@@ -119,7 +119,10 @@ const Clients = () => {
       headerName: 'AKAs',
       flex: 1,
       minWidth: 200,
-      valueFormatter: (value: string[]) => value?.join(', ') || '',
+      valueGetter: (value: string[] | null | undefined) => {
+        if (!value || !Array.isArray(value)) return '';
+        return value.join(', ');
+      },
     },
     { field: 'contact_name', headerName: 'Contact Name', flex: 1, minWidth: 150 },
     { field: 'contact_email1', headerName: 'Email', flex: 1, minWidth: 200 },
