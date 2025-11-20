@@ -129,8 +129,8 @@ function buildClientNameMap(clients) {
 async function fetchNYCData() {
   try {
     const url = new URL(NYC_API_URL);
-    url.searchParams.append('$limit', API_LIMIT);
-    url.searchParams.append('code_description', 'IDLING');
+    url.searchParams.append('$limit', '10'); // Temporarily reduced to inspect fields
+    // TEMPORARILY REMOVED: url.searchParams.append('code_description', 'IDLING');
     url.searchParams.append('$order', 'hearing_date DESC');
 
     console.log('Fetching from NYC API:', url.toString());
@@ -150,6 +150,13 @@ async function fetchNYCData() {
     }
 
     const data = await response.json();
+
+    // Log first record to inspect available fields
+    if (data && data.length > 0) {
+      console.log('Sample record fields:', Object.keys(data[0]));
+      console.log('First record sample:', JSON.stringify(data[0], null, 2));
+    }
+
     return data || [];
   } catch (error) {
     console.error('Error fetching NYC Open Data:', error);
