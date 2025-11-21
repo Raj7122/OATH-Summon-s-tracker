@@ -35,6 +35,8 @@ interface Summons {
   idling_duration_ocr?: string;
   critical_flags_ocr?: string[];
   name_on_summons_ocr?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 const Dashboard = () => {

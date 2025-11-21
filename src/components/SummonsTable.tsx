@@ -98,7 +98,8 @@ interface Summons {
   idling_duration_ocr?: string;
   critical_flags_ocr?: string[];
   name_on_summons_ocr?: string;
-  updatedAt?: string; // For "new" indicator
+  createdAt?: string; // For activity badge logic
+  updatedAt?: string; // For freshness indicator
 }
 
 /**
@@ -314,20 +315,70 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   };
 
   /**
-   * Check if a summons is "new" (updated in last 24 hours)
+   * Check if a summons is "fresh" (updated in last 24 hours)
    *
    * Calculates time difference between now and updatedAt timestamp.
-   * Used to show "New" badge per Hooked Model (variable rewards).
+   * Used for row highlighting per the "24-Hour Freshness Rule".
    *
    * @param {Summons} summons - Summons record to check
    * @returns {boolean} True if updated within last 24 hours, false otherwise
    */
-  const isNewSummons = (summons: Summons): boolean => {
+  const isFreshSummons = (summons: Summons): boolean => {
     if (!summons.updatedAt) return false;
     const updatedDate = new Date(summons.updatedAt);
     const now = new Date();
     const diffHours = (now.getTime() - updatedDate.getTime()) / (1000 * 60 * 60);
     return diffHours < 24;
+  };
+
+  /**
+   * Check if a summons is a brand new record (created within last 24 hours)
+   *
+   * Logic: createdAt equals updatedAt (within 1 second tolerance) AND within 24 hours.
+   * Used to show [🆕 NEW] badge in Status column.
+   *
+   * @param {Summons} summons - Summons record to check
+   * @returns {boolean} True if brand new, false otherwise
+   */
+  const isNewRecord = (summons: Summons): boolean => {
+    if (!summons.createdAt || !summons.updatedAt) return false;
+
+    const createdDate = new Date(summons.createdAt);
+    const updatedDate = new Date(summons.updatedAt);
+    const now = new Date();
+
+    // Check if within 24 hours
+    const diffHours = (now.getTime() - updatedDate.getTime()) / (1000 * 60 * 60);
+    if (diffHours >= 24) return false;
+
+    // Check if createdAt equals updatedAt (within 1 second tolerance)
+    const timeDiff = Math.abs(updatedDate.getTime() - createdDate.getTime());
+    return timeDiff < 1000; // Less than 1 second difference
+  };
+
+  /**
+   * Check if a summons was recently updated (not new, but status/amount changed)
+   *
+   * Logic: updatedAt is newer than createdAt AND within last 24 hours.
+   * Used to show [⚠️ UPDATED] badge in Status column.
+   *
+   * @param {Summons} summons - Summons record to check
+   * @returns {boolean} True if recently updated, false otherwise
+   */
+  const isUpdatedRecord = (summons: Summons): boolean => {
+    if (!summons.createdAt || !summons.updatedAt) return false;
+
+    const createdDate = new Date(summons.createdAt);
+    const updatedDate = new Date(summons.updatedAt);
+    const now = new Date();
+
+    // Check if within 24 hours
+    const diffHours = (now.getTime() - updatedDate.getTime()) / (1000 * 60 * 60);
+    if (diffHours >= 24) return false;
+
+    // Check if updatedAt is meaningfully newer than createdAt
+    const timeDiff = updatedDate.getTime() - createdDate.getTime();
+    return timeDiff >= 1000; // At least 1 second difference
   };
 
   /**
@@ -351,23 +402,49 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   };
 
   /**
-   * Render Status column with color-coded Chip
+   * Render Status column with Activity Badge + color-coded Chip
    *
    * UX Improvement #1: Visual signaling per "Don't Make Me Think" principle.
-   * Enables instant visual triage without reading text.
+   * UX Improvement #8: Activity Badge - Shows [🆕 NEW] (Blue) or [⚠️ UPDATED] (Orange) if fresh.
    *
    * @param {GridRenderCellParams} params - MUI DataGrid cell parameters
-   * @returns {JSX.Element} Colored Chip component
+   * @returns {JSX.Element} Box with optional badge + Chip component
    */
   const renderStatusCell = (params: GridRenderCellParams) => {
     const status = params.value || 'Unknown';
+    const summons = params.row as Summons;
+    const isNew = isNewRecord(summons);
+    const isUpdated = isUpdatedRecord(summons);
+
     return (
-      <Chip
-        label={status}
-        color={getStatusColor(status)}
-        size="small"
-        sx={{ fontWeight: 'bold' }}
-      />
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        {/* Activity Badge */}
+        {isNew && (
+          <Chip
+            label="NEW"
+            icon={<FiberNewIcon />}
+            color="info"
+            size="small"
+            sx={{ fontWeight: 'bold', fontSize: '0.7rem' }}
+          />
+        )}
+        {isUpdated && !isNew && (
+          <Chip
+            label="UPDATED"
+            color="warning"
+            size="small"
+            sx={{ fontWeight: 'bold', fontSize: '0.7rem' }}
+          />
+        )}
+
+        {/* Status Chip */}
+        <Chip
+          label={status}
+          color={getStatusColor(status)}
+          size="small"
+          sx={{ fontWeight: 'bold' }}
+        />
+      </Box>
     );
   };
 
@@ -400,32 +477,21 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   };
 
   /**
-   * Render Client column with "New" badge for recently updated rows
+   * Render Client column - clickable to open notes/drawer
    *
-   * UX Improvement #6: Shows "New" badge for records updated in last 24 hours.
-   * Implements Hooked Model (variable rewards) to encourage regular engagement.
-   * Also provides clickable area to open notes dialog (desktop) or mobile drawer (mobile).
+   * Provides clickable area to open notes dialog (desktop) or mobile drawer (mobile).
+   * Removed "New" badge here since it's now shown in Status column.
    *
    * @param {GridRenderCellParams} params - MUI DataGrid cell parameters
-   * @returns {JSX.Element} Box container with optional badge and client name
+   * @returns {JSX.Element} Clickable Box with client name
    */
   const renderClientCell = (params: GridRenderCellParams) => {
-    const isNew = isNewSummons(params.row);
-
     return (
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        {isNew && (
-          <Badge
-            badgeContent={<FiberNewIcon sx={{ fontSize: 16 }} />}
-            color="error"
-          />
-        )}
-        <Box
-          sx={{ cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
-          onClick={() => isMobile ? handleMobileDrawerOpen(params.row) : handleNotesOpen(params.row)}
-        >
-          {params.value}
-        </Box>
+      <Box
+        sx={{ cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+        onClick={() => isMobile ? handleMobileDrawerOpen(params.row) : handleNotesOpen(params.row)}
+      >
+        {params.value}
       </Box>
     );
   };
@@ -631,6 +697,21 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     { field: 'prior_offense_status', headerName: 'Prior Offense', width: 120, hide: true },
     { field: 'idling_duration_ocr', headerName: 'Idling Duration', width: 130, hide: true },
     { field: 'name_on_summons_ocr', headerName: 'Name (OCR)', width: 150, hide: true },
+    // Timestamp columns for sorting and activity detection
+    {
+      field: 'updatedAt',
+      headerName: 'Last Updated',
+      width: 150,
+      hide: true,
+      valueFormatter: (value: string) => (value ? new Date(value).toLocaleString() : ''),
+    },
+    {
+      field: 'createdAt',
+      headerName: 'Created At',
+      width: 150,
+      hide: true,
+      valueFormatter: (value: string) => (value ? new Date(value).toLocaleString() : ''),
+    },
   ];
 
   /**
@@ -732,6 +813,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
           pagination: {
             paginationModel: { pageSize: 50 },
           },
+          sorting: {
+            sortModel: [{ field: 'updatedAt', sort: 'desc' }],
+          },
         }}
         slots={{ toolbar: GridToolbar }}
         slotProps={{
@@ -741,11 +825,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
               fileName: `oath-summonses-${new Date().toISOString().split('T')[0]}`,
             },
           },
-          row: {
-            style: (params: GridRowParams) => ({
-              backgroundColor: isNewSummons(params.row) ? 'rgba(255, 152, 0, 0.08)' : undefined,
-            }),
-          },
+        }}
+        getRowClassName={(params: GridRowParams) => {
+          return isFreshSummons(params.row) ? 'fresh-row' : '';
         }}
         getRowHeight={() => 'auto'}
         disableRowSelectionOnClick
@@ -756,6 +838,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
           },
           '& .MuiDataGrid-row:hover': {
             cursor: 'pointer',
+          },
+          '& .fresh-row': {
+            backgroundColor: '#FFFDE7', // Pale "Attention Yellow" for 24-hour freshness
           },
         }}
         getDetailPanelContent={renderDetailPanel}
