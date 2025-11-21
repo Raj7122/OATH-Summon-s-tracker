@@ -187,10 +187,9 @@ async function extractPDFData(pdfUrl) {
     // Convert PDF buffer to base64 for Gemini API
     const pdfBase64 = pdfBuffer.toString('base64');
 
-    // Initialize Gemini model (using gemini-1.5-flash with v1beta API for Free Tier compatibility)
+    // Initialize Gemini model (using specific pinned version for reliability)
     const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
-      apiVersion: 'v1beta'
+      model: 'gemini-1.5-flash-001' // Using pinned version instead of alias
     });
 
     // Prompt for structured extraction (from TRD FR-09)

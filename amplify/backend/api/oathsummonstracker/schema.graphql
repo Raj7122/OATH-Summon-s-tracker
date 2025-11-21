@@ -38,13 +38,18 @@ type Summons @model @auth(rules: [{ allow: owner }]) {
   video_created_date: AWSDateTime
   lag_days: Int
 
-  # User-Input Fields (FR-05, FR-06, FR-07)
+  # User-Input Fields (FR-05, FR-06, FR-07, TRD v1.8)
   notes: String
   added_to_calendar: Boolean @default(value: "false")
   evidence_reviewed: Boolean @default(value: "false")
   evidence_requested: Boolean @default(value: "false")
   evidence_requested_date: AWSDateTime
   evidence_received: Boolean @default(value: "false")
+
+  # TRD v1.8: Client Feedback Updates
+  internal_status: String @default(value: "New")
+  offense_level: String
+  agency_id_number: String
 
   # OCR Fields (from Google Gemini)
   dep_id: String

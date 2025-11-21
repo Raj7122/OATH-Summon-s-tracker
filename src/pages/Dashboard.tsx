@@ -39,6 +39,10 @@ interface Summons {
   idling_duration_ocr?: string;
   critical_flags_ocr?: string[];
   name_on_summons_ocr?: string;
+  // TRD v1.8: Client Feedback Updates
+  internal_status?: string;
+  offense_level?: string;
+  agency_id_number?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -82,6 +86,7 @@ const Dashboard = () => {
 
   /**
    * Filter summonses based on active deadline filter
+   * TRD v1.8: Updated thresholds based on client feedback
    * @returns Filtered array of summonses
    */
   const getFilteredSummonses = (): Summons[] => {
@@ -90,23 +95,23 @@ const Dashboard = () => {
     const now = new Date();
 
     if (activeFilter === 'critical') {
-      // Hearings within 3 days
-      const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
-      return summonses.filter((summons) => {
-        if (!summons.hearing_date) return false;
-        const hearingDate = new Date(summons.hearing_date);
-        return hearingDate >= now && hearingDate <= threeDaysFromNow;
-      });
-    }
-
-    if (activeFilter === 'approaching') {
-      // Hearings in 4-7 days
-      const fourDaysFromNow = new Date(now.getTime() + 4 * 24 * 60 * 60 * 1000);
+      // Hearings within 7 days (updated from 3 days in TRD v1.8)
       const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
       return summonses.filter((summons) => {
         if (!summons.hearing_date) return false;
         const hearingDate = new Date(summons.hearing_date);
-        return hearingDate >= fourDaysFromNow && hearingDate <= sevenDaysFromNow;
+        return hearingDate >= now && hearingDate <= sevenDaysFromNow;
+      });
+    }
+
+    if (activeFilter === 'approaching') {
+      // Hearings in 8-21 days (updated from 4-7 days in TRD v1.8)
+      const eightDaysFromNow = new Date(now.getTime() + 8 * 24 * 60 * 60 * 1000);
+      const twentyOneDaysFromNow = new Date(now.getTime() + 21 * 24 * 60 * 60 * 1000);
+      return summonses.filter((summons) => {
+        if (!summons.hearing_date) return false;
+        const hearingDate = new Date(summons.hearing_date);
+        return hearingDate >= eightDaysFromNow && hearingDate <= twentyOneDaysFromNow;
       });
     }
 
