@@ -1,8 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Box, Typography, Paper, Button, CircularProgress } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import { generateClient } from 'aws-amplify/api';
+import { listSummons } from '../graphql/queries';
 import SummonsTable from '../components/SummonsTable';
 import DashboardSummary from '../components/DashboardSummary';
+
+const client = generateClient();
 
 // TODO: Replace with actual Amplify DataStore queries after backend setup
 interface Summons {
@@ -35,6 +39,8 @@ interface Summons {
   idling_duration_ocr?: string;
   critical_flags_ocr?: string[];
   name_on_summons_ocr?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 const Dashboard = () => {
@@ -48,12 +54,11 @@ const Dashboard = () => {
   const loadSummonses = async () => {
     setLoading(true);
     try {
-      // TODO: Replace with actual Amplify DataStore query
-      // const data = await DataStore.query(Summons);
-      // setSummonses(data);
-
-      // Placeholder: Empty array for now
-      setSummonses([]);
+      const result = await client.graphql({
+        query: listSummons,
+      });
+      console.log('Loaded summonses:', result.data.listSummons.items);
+      setSummonses(result.data.listSummons.items as Summons[]);
     } catch (error) {
       console.error('Error loading summonses:', error);
     } finally {
