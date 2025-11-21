@@ -53,6 +53,8 @@ import {
   Badge,
   Snackbar,
   Alert,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -98,6 +100,10 @@ interface Summons {
   idling_duration_ocr?: string;
   critical_flags_ocr?: string[];
   name_on_summons_ocr?: string;
+  // TRD v1.8: Client Feedback Updates
+  internal_status?: string;
+  offense_level?: string;
+  agency_id_number?: string;
   createdAt?: string; // For activity badge logic
   updatedAt?: string; // For freshness indicator
 }
@@ -214,6 +220,29 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       onUpdate();
     } catch (error) {
       console.error('Error updating summons date:', error);
+    }
+  };
+
+  /**
+   * Handle select/dropdown changes for Internal Status field
+   *
+   * Updates the internal_status field for a specific summons record.
+   * TRD v1.8: Client Feedback Updates
+   * Will eventually use Amplify DataStore for persistence.
+   *
+   * @param {string} id - Summons record ID
+   * @param {string} value - New status value
+   * @returns {Promise<void>}
+   *
+   * @throws {Error} If DataStore update fails (logged to console)
+   */
+  const handleInternalStatusChange = async (id: string, value: string) => {
+    try {
+      // TODO: Update via Amplify DataStore / GraphQL mutation
+      console.log('Updating internal status:', id, value);
+      onUpdate();
+    } catch (error) {
+      console.error('Error updating internal status:', error);
     }
   };
 
@@ -558,6 +587,40 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       headerName: 'Lag (Days)',
       width: 110,
       renderCell: renderLagDaysCell,
+    },
+    // TRD v1.8: Client Feedback Updates - New columns for manual workflow tracking
+    {
+      field: 'internal_status',
+      headerName: 'Internal Status',
+      width: 170,
+      renderCell: (params: GridRenderCellParams) => {
+        const internalStatusOptions = ['New', 'Reviewing', 'Hearing Complete', 'Summons Paid', 'Archived'];
+        return (
+          <Select
+            value={params.value || 'New'}
+            onChange={(e) => handleInternalStatusChange(params.row.id, e.target.value)}
+            size="small"
+            fullWidth
+            sx={{ fontSize: '0.875rem' }}
+          >
+            {internalStatusOptions.map((option) => (
+              <MenuItem key={option} value={option}>
+                {option}
+              </MenuItem>
+            ))}
+          </Select>
+        );
+      },
+    },
+    {
+      field: 'offense_level',
+      headerName: 'Offense Level',
+      width: 130,
+    },
+    {
+      field: 'agency_id_number',
+      headerName: 'ID Number',
+      width: 120,
     },
     // Evidence checkboxes - Hidden on mobile (UX Improvement #4)
     {

@@ -59,6 +59,10 @@ interface Summons {
   idling_duration_ocr?: string;
   critical_flags_ocr?: string[];
   name_on_summons_ocr?: string;
+  // TRD v1.8: Client Feedback Updates
+  internal_status?: string;
+  offense_level?: string;
+  agency_id_number?: string;
   updatedAt?: string;
 }
 
@@ -100,41 +104,43 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
   /**
-   * Calculate Critical Deadlines (hearings ≤ 3 days from now)
+   * Calculate Critical Deadlines (hearings ≤ 7 days from now)
    *
-   * Filters summonses to find those with hearing dates within the next 3 days.
+   * Filters summonses to find those with hearing dates within the next 7 days.
    * Used to populate the red "Critical Deadlines" card.
+   * Updated in TRD v1.8 based on client feedback (changed from 3 days to 7 days).
    *
    * @returns {Summons[]} Array of summonses with imminent hearing dates
    */
   const criticalDeadlines = useMemo(() => {
     const now = new Date();
-    const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
-
-    return summonses.filter((summons) => {
-      if (!summons.hearing_date) return false;
-      const hearingDate = new Date(summons.hearing_date);
-      return hearingDate >= now && hearingDate <= threeDaysFromNow;
-    });
-  }, [summonses]);
-
-  /**
-   * Calculate Approaching Deadlines (hearings in 4-7 days from now)
-   *
-   * Filters summonses to find those with hearing dates between 4 and 7 days from now.
-   * Used to populate the yellow "Approaching Deadlines" card.
-   *
-   * @returns {Summons[]} Array of summonses with upcoming hearing dates in the 4-7 day range
-   */
-  const approachingDeadlines = useMemo(() => {
-    const now = new Date();
-    const fourDaysFromNow = new Date(now.getTime() + 4 * 24 * 60 * 60 * 1000);
     const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
     return summonses.filter((summons) => {
       if (!summons.hearing_date) return false;
       const hearingDate = new Date(summons.hearing_date);
-      return hearingDate >= fourDaysFromNow && hearingDate <= sevenDaysFromNow;
+      return hearingDate >= now && hearingDate <= sevenDaysFromNow;
+    });
+  }, [summonses]);
+
+  /**
+   * Calculate Approaching Deadlines (hearings in 8-21 days from now)
+   *
+   * Filters summonses to find those with hearing dates between 8 and 21 days from now.
+   * Used to populate the yellow "Approaching Deadlines" card.
+   * Updated in TRD v1.8 based on client feedback (changed from 4-7 days to 8-21 days).
+   *
+   * @returns {Summons[]} Array of summonses with upcoming hearing dates in the 8-21 day range
+   */
+  const approachingDeadlines = useMemo(() => {
+    const now = new Date();
+    const eightDaysFromNow = new Date(now.getTime() + 8 * 24 * 60 * 60 * 1000);
+    const twentyOneDaysFromNow = new Date(now.getTime() + 21 * 24 * 60 * 60 * 1000);
+
+    return summonses.filter((summons) => {
+      if (!summons.hearing_date) return false;
+      const hearingDate = new Date(summons.hearing_date);
+      return hearingDate >= eightDaysFromNow && hearingDate <= twentyOneDaysFromNow;
     });
   }, [summonses]);
 
@@ -201,7 +207,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
                     {criticalDeadlines.length}
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    Hearings within 3 days
+                    Hearings within 7 days
                   </Typography>
                   {criticalDeadlines.length > 0 && (
                     <Box sx={{ mt: 2 }}>
@@ -253,7 +259,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
                     {approachingDeadlines.length}
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    Hearings in 4-7 days
+                    Hearings in 8-21 days
                   </Typography>
                   {approachingDeadlines.length > 0 && (
                     <Box sx={{ mt: 2 }}>
