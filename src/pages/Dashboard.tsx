@@ -46,6 +46,7 @@ interface Summons {
 const Dashboard = () => {
   const [summonses, setSummonses] = useState<Summons[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeFilter, setActiveFilter] = useState<'critical' | 'approaching' | null>(null);
 
   useEffect(() => {
     loadSummonses();
@@ -70,6 +71,50 @@ const Dashboard = () => {
     loadSummonses();
   };
 
+  /**
+   * Handle deadline card click - toggle filter on/off
+   * @param filter - The filter type ('critical' or 'approaching')
+   */
+  const handleFilterClick = (filter: 'critical' | 'approaching') => {
+    // Toggle: if clicking the same filter, turn it off; otherwise, switch to new filter
+    setActiveFilter(activeFilter === filter ? null : filter);
+  };
+
+  /**
+   * Filter summonses based on active deadline filter
+   * @returns Filtered array of summonses
+   */
+  const getFilteredSummonses = (): Summons[] => {
+    if (!activeFilter) return summonses;
+
+    const now = new Date();
+
+    if (activeFilter === 'critical') {
+      // Hearings within 3 days
+      const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+      return summonses.filter((summons) => {
+        if (!summons.hearing_date) return false;
+        const hearingDate = new Date(summons.hearing_date);
+        return hearingDate >= now && hearingDate <= threeDaysFromNow;
+      });
+    }
+
+    if (activeFilter === 'approaching') {
+      // Hearings in 4-7 days
+      const fourDaysFromNow = new Date(now.getTime() + 4 * 24 * 60 * 60 * 1000);
+      const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      return summonses.filter((summons) => {
+        if (!summons.hearing_date) return false;
+        const hearingDate = new Date(summons.hearing_date);
+        return hearingDate >= fourDaysFromNow && hearingDate <= sevenDaysFromNow;
+      });
+    }
+
+    return summonses;
+  };
+
+  const filteredSummonses = getFilteredSummonses();
+
   return (
     <Box>
       {/* Header Section */}
@@ -91,12 +136,24 @@ const Dashboard = () => {
         </Box>
       ) : (
         <>
-          {/* Summary Widgets Section - FR-10 */}
-          <DashboardSummary summonses={summonses} />
+          {/* Summary Widgets Section - FR-10 with Interactive Quick Filters */}
+          <DashboardSummary
+            summonses={summonses}
+            activeFilter={activeFilter}
+            onFilterClick={handleFilterClick}
+          />
 
-          {/* DataGrid Section */}
+          {/* DataGrid Section - Shows filtered results when a deadline card is clicked */}
           <Paper sx={{ p: 2 }}>
-            <SummonsTable summonses={summonses} onUpdate={loadSummonses} />
+            <SummonsTable summonses={filteredSummonses} onUpdate={loadSummonses} />
+            {activeFilter && (
+              <Box sx={{ mt: 2, textAlign: 'center' }}>
+                <Typography variant="caption" color="text.secondary">
+                  Showing {filteredSummonses.length} {activeFilter === 'critical' ? 'critical' : 'approaching'} deadline
+                  {filteredSummonses.length !== 1 ? 's' : ''}. Click the card again to view all summonses.
+                </Typography>
+              </Box>
+            )}
           </Paper>
         </>
       )}
