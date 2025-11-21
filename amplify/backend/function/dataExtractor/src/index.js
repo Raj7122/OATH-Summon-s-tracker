@@ -187,8 +187,8 @@ async function extractPDFData(pdfUrl) {
     // Convert PDF buffer to base64 for Gemini API
     const pdfBase64 = pdfBuffer.toString('base64');
 
-    // Initialize Gemini model
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    // Initialize Gemini model (using gemini-2.5-flash per TRD requirements)
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
 
     // Prompt for structured extraction (from TRD FR-09)
     const prompt = `You are an expert legal assistant analyzing a NYC OATH summons PDF for an idling violation. Extract the following fields and return ONLY a valid JSON object with no additional text or formatting:
