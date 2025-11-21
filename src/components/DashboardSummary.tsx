@@ -67,9 +67,13 @@ interface Summons {
  *
  * @interface DashboardSummaryProps
  * @property {Summons[]} summonses - Array of summons records to analyze
+ * @property {string | null} activeFilter - Currently active filter ('critical' | 'approaching' | null)
+ * @property {Function} onFilterClick - Callback when a deadline card is clicked
  */
 interface DashboardSummaryProps {
   summonses: Summons[];
+  activeFilter: 'critical' | 'approaching' | null;
+  onFilterClick: (filter: 'critical' | 'approaching') => void;
 }
 
 /**
@@ -91,7 +95,7 @@ interface DashboardSummaryProps {
  * <DashboardSummary summonses={allSummonses} />
  * ```
  */
-const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses }) => {
+const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFilter, onFilterClick }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
@@ -169,15 +173,21 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses }) => {
         {/* Left Side: Deadline Cards (30% width on desktop) */}
         <Grid item xs={12} md={4}>
           <Grid container spacing={2}>
-            {/* Critical Deadlines Card (Red Accent) */}
+            {/* Critical Deadlines Card (Red Accent) - Clickable Quick Filter */}
             <Grid item xs={12}>
               <Card
+                onClick={() => onFilterClick('critical')}
                 sx={{
                   borderLeft: 6,
                   borderColor: 'error.main',
-                  boxShadow: 3,
-                  '&:hover': { boxShadow: 6 },
-                  transition: 'box-shadow 0.3s',
+                  boxShadow: activeFilter === 'critical' ? 6 : 3,
+                  backgroundColor: activeFilter === 'critical' ? theme.palette.action.selected : 'background.paper',
+                  cursor: 'pointer',
+                  '&:hover': {
+                    boxShadow: 8,
+                    transform: 'translateY(-2px)',
+                  },
+                  transition: 'all 0.3s ease',
                 }}
               >
                 <CardContent>
@@ -215,15 +225,21 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses }) => {
               </Card>
             </Grid>
 
-            {/* Approaching Deadlines Card (Yellow Accent) */}
+            {/* Approaching Deadlines Card (Yellow Accent) - Clickable Quick Filter */}
             <Grid item xs={12}>
               <Card
+                onClick={() => onFilterClick('approaching')}
                 sx={{
                   borderLeft: 6,
                   borderColor: 'warning.main',
-                  boxShadow: 3,
-                  '&:hover': { boxShadow: 6 },
-                  transition: 'box-shadow 0.3s',
+                  boxShadow: activeFilter === 'approaching' ? 6 : 3,
+                  backgroundColor: activeFilter === 'approaching' ? theme.palette.action.selected : 'background.paper',
+                  cursor: 'pointer',
+                  '&:hover': {
+                    boxShadow: 8,
+                    transform: 'translateY(-2px)',
+                  },
+                  transition: 'all 0.3s ease',
                 }}
               >
                 <CardContent>
