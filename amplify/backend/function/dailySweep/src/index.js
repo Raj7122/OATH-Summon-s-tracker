@@ -209,17 +209,42 @@ async function processSummonses(apiSummonses, clientNameMap) {
       const totalViolationAmount = parseFloat(apiSummons.total_violation_amount) || 0;
 
       if (existingSummons) {
-        // Update if status or amount_due changed
-        if (
-          existingSummons.status !== status ||
-          existingSummons.amount_due !== balanceDue
-        ) {
+        // Prepare new values for comparison
+        const newHearingDate = apiSummons.hearing_date || null;
+
+        // Strict diff logic: Track changes in critical fields
+        const changes = [];
+
+        if (existingSummons.status !== status) {
+          changes.push(`Status: '${existingSummons.status}' → '${status}'`);
+        }
+
+        if (existingSummons.amount_due !== balanceDue) {
+          changes.push(`Amount Due: $${existingSummons.amount_due || 0} → $${balanceDue}`);
+        }
+
+        // Compare hearing dates (handle null/undefined safely)
+        const existingDate = existingSummons.hearing_date || null;
+        const newDate = newHearingDate;
+        if (existingDate !== newDate) {
+          const oldDateStr = existingDate ? new Date(existingDate).toLocaleDateString() : 'None';
+          const newDateStr = newDate ? new Date(newDate).toLocaleDateString() : 'None';
+          changes.push(`Hearing Date: ${oldDateStr} → ${newDateStr}`);
+        }
+
+        // If any changes detected, update the record
+        if (changes.length > 0) {
+          const changeSummary = changes.join('; ');
+
           await updateSummons(existingSummons.id, {
             status: status,
             amount_due: balanceDue,
+            hearing_date: newHearingDate,
+            last_change_summary: changeSummary,
+            last_change_at: new Date().toISOString(),
           });
           updated++;
-          console.log(`Updated summons: ${ticketNumber}`);
+          console.log(`Updated summons ${ticketNumber}: ${changeSummary}`);
         }
       } else {
         // Build violation location string
@@ -310,24 +335,55 @@ async function createSummons(summons) {
 }
 
 /**
- * Update an existing summons record
+ * Update an existing summons record with change tracking
  * @param {string} id - Summons ID
- * @param {Object} updates - Fields to update
+ * @param {Object} updates - Fields to update (including last_change_summary and last_change_at)
  */
 async function updateSummons(id, updates) {
   try {
+    // Build dynamic update expression based on provided fields
+    const updateExpressions = [];
+    const expressionAttributeNames = {};
+    const expressionAttributeValues = {};
+
+    if (updates.status !== undefined) {
+      updateExpressions.push('#status = :status');
+      expressionAttributeNames['#status'] = 'status';
+      expressionAttributeValues[':status'] = updates.status;
+    }
+
+    if (updates.amount_due !== undefined) {
+      updateExpressions.push('amount_due = :amount_due');
+      expressionAttributeValues[':amount_due'] = updates.amount_due;
+    }
+
+    if (updates.hearing_date !== undefined) {
+      updateExpressions.push('hearing_date = :hearing_date');
+      expressionAttributeValues[':hearing_date'] = updates.hearing_date;
+    }
+
+    if (updates.last_change_summary !== undefined) {
+      updateExpressions.push('last_change_summary = :last_change_summary');
+      expressionAttributeValues[':last_change_summary'] = updates.last_change_summary;
+    }
+
+    if (updates.last_change_at !== undefined) {
+      updateExpressions.push('last_change_at = :last_change_at');
+      expressionAttributeValues[':last_change_at'] = updates.last_change_at;
+    }
+
     const params = {
       TableName: SUMMONS_TABLE,
       Key: { id },
-      UpdateExpression: 'SET #status = :status, amount_due = :amount_due',
-      ExpressionAttributeNames: {
-        '#status': 'status',
-      },
-      ExpressionAttributeValues: {
-        ':status': updates.status,
-        ':amount_due': updates.amount_due,
-      },
+      UpdateExpression: `SET ${updateExpressions.join(', ')}`,
+      ExpressionAttributeNames: Object.keys(expressionAttributeNames).length > 0 ? expressionAttributeNames : undefined,
+      ExpressionAttributeValues: expressionAttributeValues,
     };
+
+    // Remove undefined properties
+    if (params.ExpressionAttributeNames === undefined) {
+      delete params.ExpressionAttributeNames;
+    }
 
     await dynamodb.update(params).promise();
   } catch (error) {

@@ -43,6 +43,9 @@ interface Summons {
   internal_status?: string;
   offense_level?: string;
   agency_id_number?: string;
+  // Change Tracking (for UPDATED badge transparency)
+  last_change_summary?: string;
+  last_change_at?: string;
   createdAt?: string;
   updatedAt?: string;
 }

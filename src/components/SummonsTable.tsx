@@ -104,6 +104,9 @@ interface Summons {
   internal_status?: string;
   offense_level?: string;
   agency_id_number?: string;
+  // Change Tracking (for UPDATED badge transparency)
+  last_change_summary?: string;
+  last_change_at?: string;
   createdAt?: string; // For activity badge logic
   updatedAt?: string; // For freshness indicator
 }
@@ -435,6 +438,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
    *
    * UX Improvement #1: Visual signaling per "Don't Make Me Think" principle.
    * UX Improvement #8: Activity Badge - Shows [🆕 NEW] (Blue) or [⚠️ UPDATED] (Orange) if fresh.
+   * Change Tracking: UPDATED badge shows tooltip with exact changes (last_change_summary).
    *
    * @param {GridRenderCellParams} params - MUI DataGrid cell parameters
    * @returns {JSX.Element} Box with optional badge + Chip component
@@ -462,7 +466,12 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
             label="UPDATED"
             color="warning"
             size="small"
-            sx={{ fontWeight: 'bold', fontSize: '0.7rem' }}
+            title={summons.last_change_summary || 'Record was recently updated'}
+            sx={{
+              fontWeight: 'bold',
+              fontSize: '0.7rem',
+              cursor: 'help',
+            }}
           />
         )}
 
