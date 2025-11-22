@@ -51,6 +51,10 @@ type Summons @model @auth(rules: [{ allow: owner }]) {
   offense_level: String
   agency_id_number: String
 
+  # Change Tracking (for UPDATED badge transparency)
+  last_change_summary: String
+  last_change_at: AWSDateTime
+
   # OCR Fields (from Google Gemini)
   dep_id: String
   license_plate_ocr: String

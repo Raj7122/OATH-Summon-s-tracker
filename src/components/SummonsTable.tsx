@@ -55,6 +55,7 @@ import {
   Alert,
   Select,
   MenuItem,
+  Tooltip,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -104,6 +105,9 @@ interface Summons {
   internal_status?: string;
   offense_level?: string;
   agency_id_number?: string;
+  // Change Tracking (for UPDATED badge transparency)
+  last_change_summary?: string;
+  last_change_at?: string;
   createdAt?: string; // For activity badge logic
   updatedAt?: string; // For freshness indicator
 }
@@ -431,10 +435,37 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   };
 
   /**
+   * Format change timestamp for tooltip display
+   *
+   * Formats the last_change_at ISO timestamp into a readable date/time string.
+   * Used in the UPDATED badge tooltip to show when the change occurred.
+   *
+   * @param {string | undefined} dateString - ISO date string from last_change_at
+   * @returns {string} Formatted date string (e.g., "11/22/2024 3:45 PM")
+   */
+  const formatChangeDate = (dateString: string | undefined): string => {
+    if (!dateString) return 'Unknown date';
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleString('en-US', {
+        month: 'numeric',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+    } catch (error) {
+      return 'Invalid date';
+    }
+  };
+
+  /**
    * Render Status column with Activity Badge + color-coded Chip
    *
    * UX Improvement #1: Visual signaling per "Don't Make Me Think" principle.
    * UX Improvement #8: Activity Badge - Shows [🆕 NEW] (Blue) or [⚠️ UPDATED] (Orange) if fresh.
+   * Change Tracking: UPDATED badge shows MUI Tooltip with exact changes (last_change_summary) and timestamp.
    *
    * @param {GridRenderCellParams} params - MUI DataGrid cell parameters
    * @returns {JSX.Element} Box with optional badge + Chip component
@@ -445,9 +476,14 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     const isNew = isNewRecord(summons);
     const isUpdated = isUpdatedRecord(summons);
 
+    // Build tooltip content for UPDATED badge
+    const changeTooltip = summons.last_change_summary
+      ? `Change Detected: ${summons.last_change_summary} (${formatChangeDate(summons.last_change_at)})`
+      : 'Record was recently updated';
+
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        {/* Activity Badge */}
+        {/* Activity Badge - NEW */}
         {isNew && (
           <Chip
             label="NEW"
@@ -457,13 +493,21 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
             sx={{ fontWeight: 'bold', fontSize: '0.7rem' }}
           />
         )}
+
+        {/* Activity Badge - UPDATED with MUI Tooltip */}
         {isUpdated && !isNew && (
-          <Chip
-            label="UPDATED"
-            color="warning"
-            size="small"
-            sx={{ fontWeight: 'bold', fontSize: '0.7rem' }}
-          />
+          <Tooltip title={changeTooltip} arrow placement="top">
+            <Chip
+              label="UPDATED"
+              color="warning"
+              size="small"
+              sx={{
+                fontWeight: 'bold',
+                fontSize: '0.7rem',
+                cursor: 'help',
+              }}
+            />
+          </Tooltip>
         )}
 
         {/* Status Chip */}
