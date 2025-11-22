@@ -22,6 +22,7 @@ import { Box, Card, CardContent, Typography, Grid, useTheme, useMediaQuery, Chip
 import { BarChart } from '@mui/x-charts/BarChart';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import EventIcon from '@mui/icons-material/Event';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 /**
  * Summons data interface
@@ -71,13 +72,44 @@ interface Summons {
  *
  * @interface DashboardSummaryProps
  * @property {Summons[]} summonses - Array of summons records to analyze
- * @property {string | null} activeFilter - Currently active filter ('critical' | 'approaching' | null)
+ * @property {string | null} activeFilter - Currently active filter ('critical' | 'approaching' | 'hearing_complete' | null)
  * @property {Function} onFilterClick - Callback when a deadline card is clicked
  */
 interface DashboardSummaryProps {
   summonses: Summons[];
-  activeFilter: 'critical' | 'approaching' | null;
-  onFilterClick: (filter: 'critical' | 'approaching') => void;
+  activeFilter: 'critical' | 'approaching' | 'hearing_complete' | null;
+  onFilterClick: (filter: 'critical' | 'approaching' | 'hearing_complete') => void;
+}
+
+/**
+ * Calculate the number of business days (weekdays) between two dates
+ *
+ * TRD v1.8: Business Day Logic - Excludes weekends (Saturday and Sunday)
+ * Used for deadline calculations to match firm's business operations.
+ *
+ * @param {Date} startDate - The starting date (typically today)
+ * @param {Date} endDate - The ending date (typically hearing date)
+ * @returns {number} Number of business days between the two dates
+ */
+function getBusinessDays(startDate: Date, endDate: Date): number {
+  let count = 0;
+  const current = new Date(startDate);
+
+  // Normalize time to avoid time zone issues
+  current.setHours(0, 0, 0, 0);
+  const end = new Date(endDate);
+  end.setHours(0, 0, 0, 0);
+
+  while (current <= end) {
+    const dayOfWeek = current.getDay();
+    // Count if it's a weekday (1 = Monday, 5 = Friday)
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      count++;
+    }
+    current.setDate(current.getDate() + 1);
+  }
+
+  return count;
 }
 
 /**
@@ -104,43 +136,61 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
   /**
-   * Calculate Critical Deadlines (hearings ≤ 7 days from now)
+   * Calculate Critical Deadlines (hearings ≤ 7 business days from now)
    *
-   * Filters summonses to find those with hearing dates within the next 7 days.
+   * Filters summonses to find those with hearing dates within the next 7 business days.
    * Used to populate the red "Critical Deadlines" card.
-   * Updated in TRD v1.8 based on client feedback (changed from 3 days to 7 days).
+   * Updated in TRD v1.8: Changed to business day calculation (excludes weekends).
    *
    * @returns {Summons[]} Array of summonses with imminent hearing dates
    */
   const criticalDeadlines = useMemo(() => {
     const now = new Date();
-    const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
     return summonses.filter((summons) => {
       if (!summons.hearing_date) return false;
       const hearingDate = new Date(summons.hearing_date);
-      return hearingDate >= now && hearingDate <= sevenDaysFromNow;
+      if (hearingDate < now) return false; // Skip past dates
+
+      const businessDays = getBusinessDays(now, hearingDate);
+      return businessDays <= 7;
     });
   }, [summonses]);
 
   /**
-   * Calculate Approaching Deadlines (hearings in 8-21 days from now)
+   * Calculate Approaching Deadlines (hearings in 8-21 business days from now)
    *
-   * Filters summonses to find those with hearing dates between 8 and 21 days from now.
+   * Filters summonses to find those with hearing dates between 8 and 21 business days from now.
    * Used to populate the yellow "Approaching Deadlines" card.
-   * Updated in TRD v1.8 based on client feedback (changed from 4-7 days to 8-21 days).
+   * Updated in TRD v1.8: Changed to business day calculation (excludes weekends).
    *
-   * @returns {Summons[]} Array of summonses with upcoming hearing dates in the 8-21 day range
+   * @returns {Summons[]} Array of summonses with upcoming hearing dates in the 8-21 business day range
    */
   const approachingDeadlines = useMemo(() => {
     const now = new Date();
-    const eightDaysFromNow = new Date(now.getTime() + 8 * 24 * 60 * 60 * 1000);
-    const twentyOneDaysFromNow = new Date(now.getTime() + 21 * 24 * 60 * 60 * 1000);
 
     return summonses.filter((summons) => {
       if (!summons.hearing_date) return false;
       const hearingDate = new Date(summons.hearing_date);
-      return hearingDate >= eightDaysFromNow && hearingDate <= twentyOneDaysFromNow;
+      if (hearingDate < now) return false; // Skip past dates
+
+      const businessDays = getBusinessDays(now, hearingDate);
+      return businessDays >= 8 && businessDays <= 21;
+    });
+  }, [summonses]);
+
+  /**
+   * Calculate Hearing Complete Count (summonses marked as "Hearing Complete")
+   *
+   * Filters summonses to find those with internal_status set to "Hearing Complete".
+   * Used to populate the green "Hearing Complete" card.
+   * TRD v1.8: Client Feedback - Track progress on completed hearings.
+   *
+   * @returns {Summons[]} Array of summonses marked as hearing complete
+   */
+  const hearingComplete = useMemo(() => {
+    return summonses.filter((summons) => {
+      return summons.internal_status === 'Hearing Complete';
     });
   }, [summonses]);
 
@@ -176,11 +226,8 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
   return (
     <Box sx={{ mb: 3 }}>
       <Grid container spacing={3}>
-        {/* Left Side: Deadline Cards (30% width on desktop) */}
+        {/* Critical Deadlines Card (Red Accent) - Clickable Quick Filter */}
         <Grid item xs={12} md={4}>
-          <Grid container spacing={2}>
-            {/* Critical Deadlines Card (Red Accent) - Clickable Quick Filter */}
-            <Grid item xs={12}>
               <Card
                 onClick={() => onFilterClick('critical')}
                 sx={{
@@ -207,7 +254,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
                     {criticalDeadlines.length}
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    Hearings within 7 days
+                    Hearings within 7 business days
                   </Typography>
                   {criticalDeadlines.length > 0 && (
                     <Box sx={{ mt: 2 }}>
@@ -229,10 +276,10 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
                   )}
                 </CardContent>
               </Card>
-            </Grid>
+        </Grid>
 
-            {/* Approaching Deadlines Card (Yellow Accent) - Clickable Quick Filter */}
-            <Grid item xs={12}>
+        {/* Approaching Deadlines Card (Yellow Accent) - Clickable Quick Filter */}
+        <Grid item xs={12} md={4}>
               <Card
                 onClick={() => onFilterClick('approaching')}
                 sx={{
@@ -259,7 +306,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
                     {approachingDeadlines.length}
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    Hearings in 8-21 days
+                    Hearings in 8-21 business days
                   </Typography>
                   {approachingDeadlines.length > 0 && (
                     <Box sx={{ mt: 2 }}>
@@ -281,12 +328,62 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
                   )}
                 </CardContent>
               </Card>
-            </Grid>
-          </Grid>
         </Grid>
 
-        {/* Right Side: Top Clients Bar Chart (70% width on desktop) */}
-        <Grid item xs={12} md={8}>
+        {/* Hearing Complete Card (Green Accent) - Clickable Quick Filter */}
+        <Grid item xs={12} md={4}>
+          <Card
+            onClick={() => onFilterClick('hearing_complete')}
+            sx={{
+              borderLeft: 6,
+              borderColor: 'success.main',
+              boxShadow: activeFilter === 'hearing_complete' ? 6 : 3,
+              backgroundColor: activeFilter === 'hearing_complete' ? theme.palette.action.selected : 'background.paper',
+              cursor: 'pointer',
+              '&:hover': {
+                boxShadow: 8,
+                transform: 'translateY(-2px)',
+              },
+              transition: 'all 0.3s ease',
+            }}
+          >
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <CheckCircleIcon sx={{ color: 'success.main', mr: 1, fontSize: 28 }} />
+                <Typography variant="h6" component="div" color="success.main">
+                  Hearing Complete
+                </Typography>
+              </Box>
+              <Typography variant="h3" component="div" sx={{ fontWeight: 'bold', color: 'success.main' }}>
+                {hearingComplete.length}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Completed hearings tracked
+              </Typography>
+              {hearingComplete.length > 0 && (
+                <Box sx={{ mt: 2 }}>
+                  {hearingComplete.slice(0, 3).map((summons) => (
+                    <Chip
+                      key={summons.id}
+                      label={`${summons.respondent_name} - ${summons.summons_number}`}
+                      size="small"
+                      color="success"
+                      sx={{ mt: 0.5, mr: 0.5 }}
+                    />
+                  ))}
+                  {hearingComplete.length > 3 && (
+                    <Typography variant="caption" color="text.secondary">
+                      +{hearingComplete.length - 3} more
+                    </Typography>
+                  )}
+                </Box>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Bottom Row: Top Clients Bar Chart (Full width) */}
+        <Grid item xs={12}>
           <Card sx={{ boxShadow: 3, height: '100%' }}>
             <CardContent>
               <Typography variant="h6" component="div" gutterBottom>
