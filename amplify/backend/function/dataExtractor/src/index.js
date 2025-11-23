@@ -279,6 +279,13 @@ async function updateSummonsWithExtractedData(summonsId, extractedData) {
       return;
     }
 
+    // CRITICAL: Always update updatedAt timestamp (required by Amplify @model)
+    const updatedAtAttr = `#attr${attrIndex}`;
+    const updatedAtValue = `:val${attrIndex}`;
+    updateExpressions.push(`${updatedAtAttr} = ${updatedAtValue}`);
+    expressionAttributeNames[updatedAtAttr] = 'updatedAt';
+    expressionAttributeValues[updatedAtValue] = new Date().toISOString();
+
     const params = {
       TableName: SUMMONS_TABLE,
       Key: { id: summonsId },
