@@ -100,6 +100,13 @@ const Dashboard = () => {
       setSummonses(result.data.listSummons.items as Summons[]);
     } catch (error) {
       console.error('Error loading summonses:', error);
+      // Log detailed error information for debugging
+      if (error instanceof Error) {
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+      }
+      // Log the full error object
+      console.error('Full error object:', JSON.stringify(error, null, 2));
     } finally {
       setLoading(false);
     }
