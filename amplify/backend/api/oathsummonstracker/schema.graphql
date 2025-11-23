@@ -1,7 +1,7 @@
 # NYC OATH Summons Tracker - GraphQL Schema
 # This schema defines the data models for AWS Amplify (DynamoDB + AppSync)
 
-type Client @model @auth(rules: [{ allow: owner }]) {
+type Client @model @auth(rules: [{ allow: private }]) {
   id: ID!
   name: String!
   akas: [String]
@@ -14,7 +14,7 @@ type Client @model @auth(rules: [{ allow: owner }]) {
   summonses: [Summons] @hasMany(indexName: "byClient", fields: ["id"])
 }
 
-type Summons @model @auth(rules: [{ allow: owner }]) {
+type Summons @model @auth(rules: [{ allow: private }]) {
   id: ID!
   clientID: ID! @index(name: "byClient", sortKeyFields: ["hearing_date"])
   client: Client @belongsTo(fields: ["clientID"])
