@@ -6,6 +6,33 @@
  * to registered clients, and creates/updates records in DynamoDB.
  *
  * FR-03: Automated Daily Data Sweep
+ *
+ * **STRICT DIFF ENGINE (TRD v1.9)**
+ * Prevents false-positive [UPDATED] badges by only updating records when critical fields change:
+ *
+ * 1. **Critical Fields Monitored:**
+ *    - hearing_status (NYC API field)
+ *    - hearing_date (NYC API field)
+ *    - balance_due/amount_due (NYC API field)
+ *
+ * 2. **Normalization:**
+ *    - Amounts: "600" vs 600 vs null → all normalized to number
+ *    - Dates: null vs undefined vs "2025-01-01" → all normalized to ISO format or null
+ *    - Floating point: Uses toFixed(2) to avoid 600.00 vs 600.001 differences
+ *
+ * 3. **Update Logic:**
+ *    - IF NO CHANGES: Skip DynamoDB write entirely (preserves updatedAt timestamp)
+ *    - IF CHANGES: Update only changed fields + metadata (last_change_summary, last_change_at, updatedAt)
+ *
+ * 4. **User Field Preservation:**
+ *    - updateSummons() uses dynamic UPDATE expressions
+ *    - NEVER overwrites: notes, internal_status, evidence_reviewed, evidence_requested,
+ *      evidence_received, added_to_calendar (these are user-entered fields)
+ *
+ * 5. **Logging:**
+ *    - ✓ Updated summons: Shows exact changes
+ *    - ○ Skipped summons: No changes detected
+ *    - + Created new summons
  */
 
 const AWS = require('aws-sdk');
@@ -54,6 +81,7 @@ exports.handler = async (event) => {
     // Step 4: Process and match summonses
     const results = await processSummonses(apiSummonses, clientNameMap);
     console.log('Processing complete:', results);
+    console.log(`Summary: ${results.created} created, ${results.updated} updated, ${results.skipped} skipped (no changes)`);
 
     return {
       statusCode: 200,
@@ -161,6 +189,78 @@ async function fetchNYCData() {
 }
 
 /**
+ * Normalize amount values (handle string, number, null, undefined)
+ * Ensures consistent comparison for currency fields
+ *
+ * @param {string|number|null|undefined} value - Raw amount from API
+ * @returns {number} Normalized number (0 if invalid/null)
+ */
+function normalizeAmount(value) {
+  if (value === null || value === undefined || value === '') {
+    return 0;
+  }
+  const parsed = typeof value === 'string' ? parseFloat(value) : value;
+  return isNaN(parsed) ? 0 : parsed;
+}
+
+/**
+ * Normalize date values (handle null, undefined, ensure ISO format)
+ * Ensures consistent comparison for date fields
+ *
+ * @param {string|null|undefined} value - Raw date from API
+ * @returns {string|null} Normalized ISO date string with 'Z' suffix, or null
+ */
+function normalizeDate(value) {
+  if (!value) return null;
+  return ensureISOFormat(value);
+}
+
+/**
+ * Strict Diff Engine: Calculate changes between existing and incoming records
+ * Only compares critical fields: status, amount_due, hearing_date
+ * Uses normalized values to prevent false positives (e.g., "600" vs 600)
+ *
+ * @param {Object} existingRecord - Current record in DynamoDB
+ * @param {Object} incomingData - New data from NYC API (normalized)
+ * @param {string} incomingData.status - Normalized status value
+ * @param {number} incomingData.amount_due - Normalized amount (number)
+ * @param {string|null} incomingData.hearing_date - Normalized ISO date or null
+ * @returns {Object} { hasChanges: boolean, summary: string }
+ */
+function calculateChanges(existingRecord, incomingData) {
+  const changes = [];
+
+  // Compare Status (string comparison)
+  const oldStatus = existingRecord.status || 'Unknown';
+  const newStatus = incomingData.status || 'Unknown';
+  if (oldStatus !== newStatus) {
+    changes.push(`Status: '${oldStatus}' → '${newStatus}'`);
+  }
+
+  // Compare Amount Due (normalize both sides for comparison)
+  const oldAmount = normalizeAmount(existingRecord.amount_due);
+  const newAmount = normalizeAmount(incomingData.amount_due);
+  // Use toFixed(2) comparison to avoid floating point issues (600.00 vs 600.001)
+  if (oldAmount.toFixed(2) !== newAmount.toFixed(2)) {
+    changes.push(`Amount Due: $${oldAmount.toFixed(2)} → $${newAmount.toFixed(2)}`);
+  }
+
+  // Compare Hearing Date (normalize both sides - handle null/undefined)
+  const oldDate = normalizeDate(existingRecord.hearing_date);
+  const newDate = normalizeDate(incomingData.hearing_date);
+  if (oldDate !== newDate) {
+    const oldDateDisplay = oldDate ? new Date(oldDate).toLocaleDateString('en-US') : 'None';
+    const newDateDisplay = newDate ? new Date(newDate).toLocaleDateString('en-US') : 'None';
+    changes.push(`Hearing Date: ${oldDateDisplay} → ${newDateDisplay}`);
+  }
+
+  return {
+    hasChanges: changes.length > 0,
+    summary: changes.join('; '),
+  };
+}
+
+/**
  * Process summonses: match to clients, create/update records
  *
  * @param {Array} apiSummonses - Summonses from NYC API
@@ -171,6 +271,7 @@ async function processSummonses(apiSummonses, clientNameMap) {
   let matched = 0;
   let created = 0;
   let updated = 0;
+  let skipped = 0; // Track records with no changes
   let errors = 0;
 
   for (const apiSummons of apiSummonses) {
@@ -203,48 +304,34 @@ async function processSummonses(apiSummonses, clientNameMap) {
       // Check if summons already exists
       const existingSummons = await findExistingSummons(ticketNumber);
 
-      // Map API fields to database fields
-      const status = apiSummons.hearing_status || apiSummons.hearing_result || 'Unknown';
-      const balanceDue = parseFloat(apiSummons.balance_due) || 0;
-      const totalViolationAmount = parseFloat(apiSummons.total_violation_amount) || 0;
+      // Extract and normalize NYC API data
+      const incomingStatus = apiSummons.hearing_status || apiSummons.hearing_result || 'Unknown';
+      const incomingAmountDue = normalizeAmount(apiSummons.balance_due);
+      const incomingHearingDate = normalizeDate(apiSummons.hearing_date);
 
       if (existingSummons) {
-        // Prepare new values for comparison
-        const newHearingDate = apiSummons.hearing_date || null;
+        // **STRICT DIFF ENGINE** - Only update if critical fields changed
+        const changeResult = calculateChanges(existingSummons, {
+          status: incomingStatus,
+          amount_due: incomingAmountDue,
+          hearing_date: incomingHearingDate,
+        });
 
-        // Strict diff logic: Track changes in critical fields
-        const changes = [];
-
-        if (existingSummons.status !== status) {
-          changes.push(`Status: '${existingSummons.status}' → '${status}'`);
-        }
-
-        if (existingSummons.amount_due !== balanceDue) {
-          changes.push(`Amount Due: $${existingSummons.amount_due || 0} → $${balanceDue}`);
-        }
-
-        // Compare hearing dates (handle null/undefined safely)
-        const existingDate = existingSummons.hearing_date || null;
-        const newDate = newHearingDate;
-        if (existingDate !== newDate) {
-          const oldDateStr = existingDate ? new Date(existingDate).toLocaleDateString() : 'None';
-          const newDateStr = newDate ? new Date(newDate).toLocaleDateString() : 'None';
-          changes.push(`Hearing Date: ${oldDateStr} → ${newDateStr}`);
-        }
-
-        // If any changes detected, update the record
-        if (changes.length > 0) {
-          const changeSummary = changes.join('; ');
-
+        if (changeResult.hasChanges) {
+          // Changes detected - update with change tracking
           await updateSummons(existingSummons.id, {
-            status: status,
-            amount_due: balanceDue,
-            hearing_date: newHearingDate,
-            last_change_summary: changeSummary,
+            status: incomingStatus,
+            amount_due: incomingAmountDue,
+            hearing_date: incomingHearingDate,
+            last_change_summary: changeResult.summary,
             last_change_at: new Date().toISOString(),
           });
           updated++;
-          console.log(`Updated summons ${ticketNumber}: ${changeSummary}`);
+          console.log(`✓ Updated summons ${ticketNumber}: ${changeResult.summary}`);
+        } else {
+          // No changes - skip update to preserve updatedAt timestamp
+          skipped++;
+          console.log(`○ Skipped summons ${ticketNumber}: No changes detected`);
         }
       } else {
         // Build violation location string
@@ -260,6 +347,9 @@ async function processSummonses(apiSummonses, clientNameMap) {
         const violationDate = apiSummons.violation_date ? ensureISOFormat(apiSummons.violation_date) : null;
         const now = new Date().toISOString();
 
+        // Parse base fine
+        const totalViolationAmount = normalizeAmount(apiSummons.total_violation_amount);
+
         // Create new summons record with proper timestamps
         const newSummons = {
           id: generateUUID(),
@@ -267,10 +357,10 @@ async function processSummonses(apiSummonses, clientNameMap) {
           summons_number: ticketNumber,
           respondent_name: respondentFullName,
           hearing_date: hearingDate,
-          status: status,
+          status: incomingStatus,
           license_plate: apiSummons.license_plate || '',
           base_fine: totalViolationAmount,
-          amount_due: balanceDue,
+          amount_due: incomingAmountDue,
           violation_date: violationDate,
           violation_location: violationLocation,
           summons_pdf_link: pdfLink,
@@ -286,7 +376,7 @@ async function processSummonses(apiSummonses, clientNameMap) {
 
         await createSummons(newSummons);
         created++;
-        console.log(`Created new summons: ${ticketNumber}`);
+        console.log(`+ Created new summons: ${ticketNumber}`);
 
         // Asynchronously invoke data-extractor function (FR-03, FR-09)
         await invokeDataExtractor(newSummons);
@@ -297,7 +387,7 @@ async function processSummonses(apiSummonses, clientNameMap) {
     }
   }
 
-  return { matched, created, updated, errors };
+  return { matched, created, updated, skipped, errors };
 }
 
 /**
