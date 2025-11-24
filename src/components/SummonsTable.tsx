@@ -664,11 +664,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       headerName: 'Offense Level',
       width: 130,
     },
-    {
-      field: 'agency_id_number',
-      headerName: 'ID Number',
-      width: 120,
-    },
     // Evidence checkboxes - Hidden on mobile (UX Improvement #4)
     {
       field: 'evidence_reviewed',
@@ -804,7 +799,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
         </Box>
       ),
     },
-    { field: 'dep_id', headerName: 'DEP ID', width: 100, hide: true },
+    { field: 'dep_id', headerName: 'ID Number', width: 120, hide: true },
     { field: 'vehicle_type_ocr', headerName: 'Vehicle Type', width: 120, hide: true },
     { field: 'prior_offense_status', headerName: 'Prior Offense', width: 120, hide: true },
     { field: 'idling_duration_ocr', headerName: 'Idling Duration', width: 130, hide: true },
@@ -863,7 +858,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
               <Typography variant="subtitle2" color="text.secondary">Vehicle Info</Typography>
               <Typography variant="body2">License Plate: {summons.license_plate_ocr || 'N/A'}</Typography>
               <Typography variant="body2">Vehicle Type: {summons.vehicle_type_ocr || 'N/A'}</Typography>
-              <Typography variant="body2">DEP ID: {summons.dep_id || 'N/A'}</Typography>
+              <Typography variant="body2">ID Number: {summons.dep_id || 'N/A'}</Typography>
             </Box>
 
             {/* Financial Info */}
