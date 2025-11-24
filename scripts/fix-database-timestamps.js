@@ -56,7 +56,7 @@ async function scanAndFixSummons() {
     try {
       const scanParams = {
         TableName: SUMMONS_TABLE,
-        ExclusiveStartKey: lastEvaluatedKey,
+        ...(lastEvaluatedKey && { ExclusiveStartKey: lastEvaluatedKey }),
       };
 
       const scanResult = await dynamodb.send(new ScanCommand(scanParams));
