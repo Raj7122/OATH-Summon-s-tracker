@@ -614,10 +614,19 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       headerName: 'Hearing Date',
       width: 150,
       valueFormatter: (value: string) => {
-        if (!value) return '';
+        console.log('hearing_date valueFormatter called with:', value, typeof value);
+        if (!value) {
+          console.log('hearing_date is empty/null');
+          return '';
+        }
         try {
-          return format(new Date(value), 'MMMM d, yyyy');
-        } catch {
+          const date = new Date(value);
+          console.log('Created Date object:', date);
+          const formatted = format(date, 'MMMM d, yyyy');
+          console.log('Formatted result:', formatted);
+          return formatted;
+        } catch (error) {
+          console.error('Error formatting hearing_date:', error);
           return '';
         }
       },
