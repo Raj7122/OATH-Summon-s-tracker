@@ -613,20 +613,12 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       field: 'hearing_date',
       headerName: 'Hearing Date',
       width: 150,
-      valueFormatter: (value: string) => {
-        console.log('hearing_date valueFormatter called with:', value, typeof value);
-        if (!value) {
-          console.log('hearing_date is empty/null');
-          return '';
-        }
+      valueFormatter: (params: any) => {
+        const value = params.value || params;
+        if (!value || typeof value !== 'string') return '';
         try {
-          const date = new Date(value);
-          console.log('Created Date object:', date);
-          const formatted = format(date, 'MMMM d, yyyy');
-          console.log('Formatted result:', formatted);
-          return formatted;
-        } catch (error) {
-          console.error('Error formatting hearing_date:', error);
+          return format(new Date(value), 'MMMM d, yyyy');
+        } catch {
           return '';
         }
       },
@@ -717,8 +709,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       headerName: 'Violation Date',
       width: 140,
       hide: true,
-      valueFormatter: (value: string) => {
-        if (!value) return '';
+      valueFormatter: (params: any) => {
+        const value = params.value || params;
+        if (!value || typeof value !== 'string') return '';
         try {
           return format(new Date(value), 'MMMM d, yyyy');
         } catch {
@@ -731,8 +724,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       headerName: 'Video Created',
       width: 140,
       hide: true,
-      valueFormatter: (value: string) => {
-        if (!value) return '';
+      valueFormatter: (params: any) => {
+        const value = params.value || params;
+        if (!value || typeof value !== 'string') return '';
         try {
           return format(new Date(value), 'MMMM d, yyyy');
         } catch {
