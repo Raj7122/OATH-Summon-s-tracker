@@ -14,13 +14,15 @@
  *   - Correct DynamoDB table name set in SUMMONS_TABLE variable below
  */
 
-const AWS = require('aws-sdk');
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 
 // Configuration - UPDATE THESE VALUES
 const REGION = 'us-east-1';
 const SUMMONS_TABLE = 'Summons-y3ftocckkvaqrn43xz6cn6vfgq-dev'; // Your actual table name
 
-const dynamodb = new AWS.DynamoDB.DocumentClient({ region: REGION });
+const client = new DynamoDBClient({ region: REGION });
+const dynamodb = DynamoDBDocumentClient.from(client);
 
 /**
  * Ensure date is in proper ISO 8601 format with timezone
@@ -57,7 +59,7 @@ async function scanAndFixSummons() {
         ExclusiveStartKey: lastEvaluatedKey,
       };
 
-      const scanResult = await dynamodb.scan(scanParams).promise();
+      const scanResult = await dynamodb.send(new ScanCommand(scanParams));
       scannedCount += scanResult.Items.length;
 
       for (const item of scanResult.Items) {
@@ -168,7 +170,7 @@ async function checkAndFixSummons(summons) {
     ExpressionAttributeValues: expressionAttributeValues,
   };
 
-  await dynamodb.update(updateParams).promise();
+  await dynamodb.send(new UpdateCommand(updateParams));
   console.log(`✓ Fixed successfully`);
 
   return true;
