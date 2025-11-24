@@ -624,7 +624,10 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       field: 'amount_due',
       headerName: 'Amount Due',
       width: 120,
-      valueFormatter: (value: number) => (value ? `$${value.toFixed(2)}` : ''),
+      valueFormatter: (value: number | string | null) => {
+        const num = typeof value === 'string' ? parseFloat(value) : value;
+        return num != null && !isNaN(num) ? `$${num.toFixed(2)}` : '';
+      },
     },
     {
       field: 'lag_days',
@@ -717,7 +720,10 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       headerName: 'Base Fine',
       width: 100,
       hide: true,
-      valueFormatter: (value: number) => (value ? `$${value.toFixed(2)}` : ''),
+      valueFormatter: (value: number | string | null) => {
+        const num = typeof value === 'string' ? parseFloat(value) : value;
+        return num != null && !isNaN(num) ? `$${num.toFixed(2)}` : '';
+      },
     },
     {
       field: 'summons_pdf_link',
