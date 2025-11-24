@@ -699,8 +699,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       ),
     },
     // Secondary columns - Hidden by default (Progressive Disclosure)
-    { field: 'license_plate', headerName: 'License Plate', width: 120, hide: true },
-    { field: 'license_plate_ocr', headerName: 'LP (OCR)', width: 100, hide: true },
+    { field: 'license_plate_ocr', headerName: 'License Plate', width: 120, hide: true },
     {
       field: 'violation_date',
       headerName: 'Violation Date',
@@ -862,8 +861,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
             {/* Vehicle/License Info */}
             <Box>
               <Typography variant="subtitle2" color="text.secondary">Vehicle Info</Typography>
-              <Typography variant="body2">License: {summons.license_plate || 'N/A'}</Typography>
-              <Typography variant="body2">LP (OCR): {summons.license_plate_ocr || 'N/A'}</Typography>
+              <Typography variant="body2">License Plate: {summons.license_plate_ocr || 'N/A'}</Typography>
               <Typography variant="body2">Vehicle Type: {summons.vehicle_type_ocr || 'N/A'}</Typography>
               <Typography variant="body2">DEP ID: {summons.dep_id || 'N/A'}</Typography>
             </Box>
