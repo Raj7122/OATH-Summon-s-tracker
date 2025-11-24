@@ -24,6 +24,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { format } from 'date-fns';
 import {
   DataGrid,
   GridColDef,
@@ -611,8 +612,15 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     {
       field: 'hearing_date',
       headerName: 'Hearing Date',
-      width: 130,
-      valueFormatter: (value: string) => (value ? new Date(value).toLocaleDateString() : ''),
+      width: 150,
+      valueFormatter: (value: string) => {
+        if (!value) return '';
+        try {
+          return format(new Date(value), 'MMMM d, yyyy');
+        } catch {
+          return '';
+        }
+      },
     },
     {
       field: 'status',
@@ -698,16 +706,30 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     {
       field: 'violation_date',
       headerName: 'Violation Date',
-      width: 120,
+      width: 140,
       hide: true,
-      valueFormatter: (value: string) => (value ? new Date(value).toLocaleDateString() : ''),
+      valueFormatter: (value: string) => {
+        if (!value) return '';
+        try {
+          return format(new Date(value), 'MMMM d, yyyy');
+        } catch {
+          return '';
+        }
+      },
     },
     {
       field: 'video_created_date',
       headerName: 'Video Created',
-      width: 120,
+      width: 140,
       hide: true,
-      valueFormatter: (value: string) => (value ? new Date(value).toLocaleDateString() : ''),
+      valueFormatter: (value: string) => {
+        if (!value) return '';
+        try {
+          return format(new Date(value), 'MMMM d, yyyy');
+        } catch {
+          return '';
+        }
+      },
     },
     {
       field: 'base_fine',
@@ -803,7 +825,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     { field: 'vehicle_type_ocr', headerName: 'Vehicle Type', width: 120, hide: true },
     { field: 'prior_offense_status', headerName: 'Prior Offense', width: 120, hide: true },
     { field: 'idling_duration_ocr', headerName: 'Idling Duration', width: 130, hide: true },
-    { field: 'name_on_summons_ocr', headerName: 'Name (OCR)', width: 150, hide: true },
     // Timestamp columns for sorting and activity detection
     {
       field: 'updatedAt',
@@ -848,7 +869,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
             {/* Violation Information */}
             <Box>
               <Typography variant="subtitle2" color="text.secondary">Violation Info</Typography>
-              <Typography variant="body2">Date: {summons.violation_date ? new Date(summons.violation_date).toLocaleDateString() : 'N/A'}</Typography>
+              <Typography variant="body2">
+                Date: {summons.violation_date ? format(new Date(summons.violation_date), 'MMMM d, yyyy') : 'N/A'}
+              </Typography>
               <Typography variant="body2">Location: {summons.violation_location || 'N/A'}</Typography>
               <Typography variant="body2">Duration: {summons.idling_duration_ocr || 'N/A'}</Typography>
             </Box>
@@ -878,7 +901,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
                 View Video Evidence
               </Link>
               <Typography variant="body2" sx={{ mt: 1 }}>
-                Video Created: {summons.video_created_date ? new Date(summons.video_created_date).toLocaleDateString() : 'N/A'}
+                Video Created: {summons.video_created_date ? format(new Date(summons.video_created_date), 'MMMM d, yyyy') : 'N/A'}
               </Typography>
             </Box>
           </Box>
