@@ -255,18 +255,23 @@ async function processSummonses(apiSummonses, clientNameMap) {
           apiSummons.violation_location_zip_code
         ].filter(Boolean).join(', ');
 
-        // Create new summons record
+        // Ensure dates are in proper ISO 8601 format with timezone
+        const hearingDate = apiSummons.hearing_date ? ensureISOFormat(apiSummons.hearing_date) : null;
+        const violationDate = apiSummons.violation_date ? ensureISOFormat(apiSummons.violation_date) : null;
+        const now = new Date().toISOString();
+
+        // Create new summons record with proper timestamps
         const newSummons = {
           id: generateUUID(),
           clientID: matchedClient.id,
           summons_number: ticketNumber,
           respondent_name: respondentFullName,
-          hearing_date: apiSummons.hearing_date || null,
+          hearing_date: hearingDate,
           status: status,
           license_plate: apiSummons.license_plate || '',
           base_fine: totalViolationAmount,
           amount_due: balanceDue,
-          violation_date: apiSummons.violation_date || null,
+          violation_date: violationDate,
           violation_location: violationLocation,
           summons_pdf_link: pdfLink,
           video_link: videoLink,
@@ -274,6 +279,9 @@ async function processSummonses(apiSummonses, clientNameMap) {
           evidence_reviewed: false,
           evidence_requested: false,
           evidence_received: false,
+          createdAt: now,  // Required by Amplify @model directive
+          updatedAt: now,  // Required by Amplify @model directive
+          owner: matchedClient.owner,  // Required for @auth(rules: [{ allow: private }])
         };
 
         await createSummons(newSummons);
@@ -358,8 +366,10 @@ async function updateSummons(id, updates) {
     }
 
     if (updates.hearing_date !== undefined) {
+      // Ensure hearing_date is in proper ISO format
+      const hearingDate = updates.hearing_date ? ensureISOFormat(updates.hearing_date) : null;
       updateExpressions.push('hearing_date = :hearing_date');
-      expressionAttributeValues[':hearing_date'] = updates.hearing_date;
+      expressionAttributeValues[':hearing_date'] = hearingDate;
     }
 
     if (updates.last_change_summary !== undefined) {
@@ -371,6 +381,10 @@ async function updateSummons(id, updates) {
       updateExpressions.push('last_change_at = :last_change_at');
       expressionAttributeValues[':last_change_at'] = updates.last_change_at;
     }
+
+    // CRITICAL: Always update updatedAt timestamp (required by Amplify @model)
+    updateExpressions.push('updatedAt = :updatedAt');
+    expressionAttributeValues[':updatedAt'] = new Date().toISOString();
 
     const params = {
       TableName: SUMMONS_TABLE,
@@ -418,6 +432,26 @@ async function invokeDataExtractor(summons) {
     // Log but don't fail the sweep if data extraction fails
     console.error('Error invoking data-extractor:', error);
   }
+}
+
+/**
+ * Ensure date is in proper ISO 8601 format with timezone
+ * NYC API returns dates like "2026-05-06T00:00:00.000" without timezone
+ * AWS requires "2026-05-06T00:00:00.000Z" format
+ *
+ * @param {string} dateString - Date string from NYC API
+ * @returns {string} ISO 8601 date with timezone
+ */
+function ensureISOFormat(dateString) {
+  if (!dateString) return null;
+
+  // If date already has timezone (Z or +00:00), return as-is
+  if (dateString.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dateString)) {
+    return dateString;
+  }
+
+  // Add 'Z' timezone suffix for UTC
+  return `${dateString}Z`;
 }
 
 /**
