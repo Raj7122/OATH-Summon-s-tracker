@@ -18,7 +18,7 @@ const AWS = require('aws-sdk');
 
 // Configuration - UPDATE THESE VALUES
 const REGION = 'us-east-1';
-const SUMMONS_TABLE = 'Summons-q2d5w5h7ifepzeykhhw3zcjzsu-dev'; // CHANGE THIS to your actual table name
+const SUMMONS_TABLE = 'Summons-y3ftocckkvaqrn43xz6cn6vfgq-dev'; // Your actual table name
 
 const dynamodb = new AWS.DynamoDB.DocumentClient({ region: REGION });
 
