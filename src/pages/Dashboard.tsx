@@ -16,12 +16,18 @@ interface Summons {
   summons_number: string;
   respondent_name: string;
   hearing_date: string;
+  hearing_time?: string;
+  hearing_result?: string;
   status: string;
   license_plate: string;
   base_fine: number;
   amount_due: number;
+  paid_amount?: number;
+  penalty_imposed?: number;
   violation_date: string;
+  violation_time?: string;
   violation_location: string;
+  code_description?: string;
   summons_pdf_link: string;
   video_link: string;
   video_created_date?: string;
