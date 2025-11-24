@@ -1,7 +1,7 @@
 # NYC OATH Summons Tracker - Dashboard Wireframe & UX Guide
 
-**Version**: 1.0
-**Date**: November 24, 2025
+**Version**: 1.1
+**Date**: November 24, 2025 (Updated to TRD v1.9 specifications)
 **Purpose**: User Experience documentation for the main Dashboard interface
 
 ---
@@ -39,13 +39,13 @@ The NYC OATH Summons Tracker Dashboard is the primary interface for managing idl
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                               │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  DASHBOARD SUMMARY CARDS (Top Row)                                  │   │
+│  │  DASHBOARD SUMMARY CARDS (Top Row - 4 Cards)                        │   │
 │  ├─────────────┬─────────────┬─────────────┬─────────────────────────┤   │
-│  │  CRITICAL   │  APPROACHING│  HEARING    │  EVIDENCE PENDING       │   │
-│  │  (Red)      │  (Blue)     │  COMPLETE   │  (Yellow)               │   │
-│  │             │             │  (Green)    │                         │   │
+│  │  CRITICAL   │  APPROACHING│  EVIDENCE   │  HEARING COMPLETE       │   │
+│  │  (Red)      │  (Yellow)   │  PENDING    │  (Green)                │   │
+│  │             │             │  (Blue)     │                         │   │
 │  │  [Count]    │  [Count]    │  [Count]    │  [Count]                │   │
-│  │  < 7 days   │  7-30 days  │  Done       │  Requested not received │   │
+│  │  ≤7 bus.days│  8-21 b.day │  Requested  │  Done                   │   │
 │  └─────────────┴─────────────┴─────────────┴─────────────────────────┘   │
 │                                                                               │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
@@ -196,22 +196,25 @@ When row tapped:
 - **Data Source**: `hearing_date` from NYC API, formatted via `date-fns`
 
 **Why this field matters:**
-> Missing a hearing date can result in default judgments. This is the most time-sensitive piece of information in the entire system.
+> Missing a hearing date can result in default judgments. This is the most time-sensitive piece of information in the entire system. Business day calculation ensures Arthur doesn't miss Friday deadlines over the weekend.
 
-**Related Dashboard Summary Cards:**
-- **CRITICAL**: Hearings < 7 days away (RED)
-- **APPROACHING**: Hearings 7-30 days away (BLUE)
+**Related Dashboard Summary Cards (TRD v1.9 - Business Days):**
+- **CRITICAL**: Hearings ≤ 7 business days away (RED)
+- **APPROACHING**: Hearings 8-21 business days away (YELLOW/ORANGE)
+- **EVIDENCE PENDING**: Requested but not received (BLUE)
+- **HEARING COMPLETE**: User-marked as done (GREEN)
 
 ---
 
 #### 5. **Status** (status)
 - **Location**: Fifth column
-- **Format**: Color-coded chip with optional "NEW" badge
-- **Purpose**: Current state of the summons in NYC's system
+- **Format**: Color-coded chip with optional activity badges
+- **Purpose**: Current state of the summons in NYC's system + recent activity tracking
 - **UX Rationale**:
   - **Visual triage** using color psychology (Don't Make Me Think principle)
   - Instant recognition without reading text
-  - "NEW" badge creates urgency (Hooked Model - variable rewards)
+  - Activity badges create urgency (Hooked Model - variable rewards)
+  - **72-hour freshness window** (TRD v1.9: covers weekends for Monday login)
 
 **Status Types & Colors:**
 ```
@@ -226,17 +229,25 @@ When row tapped:
 └─────────────────┴───────┴──────────────────────────┘
 ```
 
-**"NEW" Badge Logic:**
-- Shows if summons was updated in last 24 hours
-- Based on `updatedAt` timestamp
-- Removed automatically after 24 hours
+**Activity Badge Logic (TRD v1.9):**
+- **[NEW]** (Blue chip): Summons created in last **72 hours**
+  - Logic: `createdAt` equals `updatedAt` (within 1 second)
+- **[UPDATED]** (Orange chip): Status/amount/date changed in last **72 hours**
+  - Logic: `updatedAt` is newer than `createdAt` by at least 1 second
+  - **Hover tooltip**: Shows exact change summary and timestamp
+    - Example: "Change Detected: Status: 'SCHEDULED' → 'DEFAULT JUDGMENT' (11/22/2024 3:45 PM)"
+  - Data source: `last_change_summary` field from database
+- **Removed automatically after 72 hours**
+- **Weekend Coverage**: Friday afternoon updates visible on Monday morning
 
-**Interaction**: Static display (no click)
+**Interaction**:
+- Status chip: Static display (no click)
+- UPDATED badge: Hover to see tooltip with change details
 - **Width**: 180px
-- **Data Source**: `status` from NYC API + `updatedAt` for badge
+- **Data Source**: `status` from NYC API + `updatedAt`/`createdAt` for badges + `last_change_summary` for tooltip
 
 **Why this field matters:**
-> Users can instantly see priority (red = urgent, blue = scheduled, green = done) without reading any text. This saves cognitive load and speeds triage.
+> Users can instantly see priority (red = urgent, blue = scheduled, green = done) without reading any text. The 72-hour activity badges ensure Arthur sees Friday's critical changes on Monday morning. The UPDATED tooltip provides transparency ("why is this orange?") without cluttering the UI.
 
 ---
 
@@ -653,10 +664,11 @@ TIER 3: Advanced (Column Selector)
 
 ### 4. **Hooked Model** (Nir Eyal - Variable Rewards)
 
-**Application**: "NEW" badges
-- Appears on summonses updated in last 24 hours
+**Application**: Activity badges (NEW and UPDATED)
+- Appears on summonses created/updated in last **72 hours** (TRD v1.9)
 - Creates anticipation: "What changed?"
 - Variable reward: Sometimes badge appears, sometimes not
+- **Weekend coverage**: Friday updates visible on Monday morning
 
 **Application**: Auto-save feedback
 - Snackbar notification: "✓ Saved" appears after checkbox toggle
@@ -686,20 +698,25 @@ TIER 3: Advanced (Column Selector)
 
 ```
 1. Open Dashboard
-2. Look at CRITICAL summary card (red) → See "5 summonses < 7 days"
+2. Look at CRITICAL summary card (red) → See "5 hearings ≤ 7 business days"
+   - Notice UPDATED badges (orange chips) showing Friday's status changes
 3. Click CRITICAL card → Table filters to show only critical items
 4. Scan RED status chips in Status column
+   - Hover over UPDATED badges to see change details in tooltip
 5. Click ▶ on first critical summons
-6. Review hearing date and violation details
-7. Click "View PDF" to see actual summons
-8. Make decision: Contest or advise client to pay
-9. Add notes: "Called client - will contest based on lag days"
-10. Check "Reviewed" checkbox
-11. Update Internal Status to "Reviewing"
-12. Move to next critical summons
+6. Review hearing date and violation details (expanded row)
+7. Note Agency ID Number visible by default (TRD v1.9)
+8. Click "View PDF" to see actual summons
+9. Make decision: Contest or advise client to pay
+10. Add notes: "Called client - will contest based on lag days"
+11. Check "Reviewed" checkbox
+12. Update Internal Status to "Reviewing"
+13. Move to next critical summons
 ```
 
 **Time**: ~2 minutes per summons
+
+**Business Days Logic**: The Critical card uses business day calculation (excludes weekends), ensuring Arthur doesn't miss Friday deadlines over the weekend.
 
 ---
 
@@ -866,9 +883,10 @@ Bottom Sheet Slides Up (80% height)
 - **1** notes field (full-screen dialog)
 - **44px** mobile touch targets (Fitts's Law)
 - **7±2** items per row (Miller's Law)
-- **24 hours** "NEW" badge duration
+- **72 hours** activity badge duration (TRD v1.9 - weekend coverage)
 - **1 second** auto-save debounce delay
 - **< 500ms** table sort/filter response time
+- **Business days** for deadline calculations (excludes weekends)
 
 **User Efficiency Gains:**
 - **Before**: Manual spreadsheet → 5-10 minutes to find a summons
