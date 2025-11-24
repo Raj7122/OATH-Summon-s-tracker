@@ -2,18 +2,23 @@
  * NYC OATH Summons Tracker - Daily Sweep Lambda Function
  *
  * This function runs daily via Amazon EventBridge Scheduler.
- * It fetches IDLING summonses from NYC Open Data API, matches them
- * to registered clients, and creates/updates records in DynamoDB.
+ * It fetches ALL OATH summonses from NYC Open Data API (Sanitation, Noise, DOT, Environmental, etc.),
+ * matches them to registered clients, and creates/updates records in DynamoDB.
  *
  * FR-03: Automated Daily Data Sweep
+ *
+ * **CRITICAL: No IDLING Filter**
+ * This function fetches ALL violation types for Arthur's clients, not just IDLING violations.
  *
  * **STRICT DIFF ENGINE (TRD v1.9)**
  * Prevents false-positive [UPDATED] badges by only updating records when critical fields change:
  *
  * 1. **Critical Fields Monitored:**
- *    - hearing_status (NYC API field)
- *    - hearing_date (NYC API field)
- *    - balance_due/amount_due (NYC API field)
+ *    - hearing_status / hearing_result (NYC API fields)
+ *    - hearing_date + hearing_time (NYC API fields)
+ *    - balance_due / amount_due (NYC API field)
+ *    - code_description (violation type - charge_1_code_description)
+ *    - paid_amount (NYC API field)
  *
  * 2. **Normalization:**
  *    - Amounts: "600" vs 600 vs null → all normalized to number
@@ -151,15 +156,17 @@ function buildClientNameMap(clients) {
 }
 
 /**
- * Fetch IDLING summonses from NYC Open Data API
+ * Fetch ALL OATH summonses from NYC Open Data API
+ * Updated: No longer filters for IDLING only - Arthur needs ALL violation types
+ * (Sanitation, Noise, DOT, Environmental, etc.)
+ *
  * @returns {Promise<Array>} Array of summons records
  */
 async function fetchNYCData() {
   try {
     const url = new URL(NYC_API_URL);
     url.searchParams.append('$limit', API_LIMIT);
-    // Filter for IDLING violations using charge code description fields
-    url.searchParams.append('$where', "charge_1_code_description like '%IDLING%' OR charge_2_code_description like '%IDLING%' OR charge_3_code_description like '%IDLING%'");
+    // NO FILTER - Fetch all violations for matched clients
     url.searchParams.append('$order', 'hearing_date DESC');
 
     console.log('Fetching from NYC API:', url.toString());
@@ -179,7 +186,7 @@ async function fetchNYCData() {
     }
 
     const data = await response.json();
-    console.log(`Successfully fetched ${data.length} IDLING summonses from NYC API`);
+    console.log(`Successfully fetched ${data.length} OATH summonses from NYC API (all violation types)`);
 
     return data || [];
   } catch (error) {
@@ -217,7 +224,8 @@ function normalizeDate(value) {
 
 /**
  * Strict Diff Engine: Calculate changes between existing and incoming records
- * Only compares critical fields: status, amount_due, hearing_date
+ * Compares critical fields: status, amount_due, hearing_date, hearing_time, hearing_result,
+ * code_description, paid_amount
  * Uses normalized values to prevent false positives (e.g., "600" vs 600)
  *
  * @param {Object} existingRecord - Current record in DynamoDB
@@ -225,10 +233,23 @@ function normalizeDate(value) {
  * @param {string} incomingData.status - Normalized status value
  * @param {number} incomingData.amount_due - Normalized amount (number)
  * @param {string|null} incomingData.hearing_date - Normalized ISO date or null
+ * @param {string|null} incomingData.hearing_time - Hearing time (optional)
+ * @param {string|null} incomingData.hearing_result - Hearing result (HIGH PRIORITY)
+ * @param {string|null} incomingData.code_description - Violation type
+ * @param {number} incomingData.paid_amount - Amount paid by client
  * @returns {Object} { hasChanges: boolean, summary: string }
  */
 function calculateChanges(existingRecord, incomingData) {
   const changes = [];
+
+  // Compare Hearing Result (HIGH PRIORITY - major event if changes)
+  const oldResult = existingRecord.hearing_result || '';
+  const newResult = incomingData.hearing_result || '';
+  if (oldResult !== newResult) {
+    const oldDisplay = oldResult || 'Pending';
+    const newDisplay = newResult || 'Pending';
+    changes.push(`Result: '${oldDisplay}' → '${newDisplay}'`);
+  }
 
   // Compare Status (string comparison)
   const oldStatus = existingRecord.status || 'Unknown';
@@ -245,6 +266,13 @@ function calculateChanges(existingRecord, incomingData) {
     changes.push(`Amount Due: $${oldAmount.toFixed(2)} → $${newAmount.toFixed(2)}`);
   }
 
+  // Compare Paid Amount (critical if client paid)
+  const oldPaid = normalizeAmount(existingRecord.paid_amount);
+  const newPaid = normalizeAmount(incomingData.paid_amount);
+  if (oldPaid.toFixed(2) !== newPaid.toFixed(2)) {
+    changes.push(`Paid: $${oldPaid.toFixed(2)} → $${newPaid.toFixed(2)}`);
+  }
+
   // Compare Hearing Date (normalize both sides - handle null/undefined)
   const oldDate = normalizeDate(existingRecord.hearing_date);
   const newDate = normalizeDate(incomingData.hearing_date);
@@ -252,6 +280,24 @@ function calculateChanges(existingRecord, incomingData) {
     const oldDateDisplay = oldDate ? new Date(oldDate).toLocaleDateString('en-US') : 'None';
     const newDateDisplay = newDate ? new Date(newDate).toLocaleDateString('en-US') : 'None';
     changes.push(`Hearing Date: ${oldDateDisplay} → ${newDateDisplay}`);
+  }
+
+  // Compare Hearing Time (time shifts are important)
+  const oldTime = existingRecord.hearing_time || '';
+  const newTime = incomingData.hearing_time || '';
+  if (oldTime !== newTime) {
+    const oldTimeDisplay = oldTime || 'Not Set';
+    const newTimeDisplay = newTime || 'Not Set';
+    changes.push(`Hearing Time: ${oldTimeDisplay} → ${newTimeDisplay}`);
+  }
+
+  // Compare Code Description (violation type - if amended)
+  const oldCode = existingRecord.code_description || '';
+  const newCode = incomingData.code_description || '';
+  if (oldCode !== newCode) {
+    const oldCodeDisplay = oldCode || 'Unknown';
+    const newCodeDisplay = newCode || 'Unknown';
+    changes.push(`Violation: '${oldCodeDisplay}' → '${newCodeDisplay}'`);
   }
 
   return {
@@ -304,10 +350,16 @@ async function processSummonses(apiSummonses, clientNameMap) {
       // Check if summons already exists
       const existingSummons = await findExistingSummons(ticketNumber);
 
-      // Extract and normalize NYC API data
-      const incomingStatus = apiSummons.hearing_status || apiSummons.hearing_result || 'Unknown';
+      // Extract and normalize NYC API data (ALL OATH violation types)
+      const incomingHearingResult = apiSummons.hearing_result || '';
+      const incomingStatus = apiSummons.hearing_status || incomingHearingResult || 'Unknown';
       const incomingAmountDue = normalizeAmount(apiSummons.balance_due);
       const incomingHearingDate = normalizeDate(apiSummons.hearing_date);
+      const incomingHearingTime = apiSummons.hearing_time || '';
+      const incomingCodeDescription = apiSummons.charge_1_code_description || apiSummons.charge_2_code_description || '';
+      const incomingPaidAmount = normalizeAmount(apiSummons.paid_amount);
+      const incomingPenaltyImposed = normalizeAmount(apiSummons.penalty_imposed);
+      const incomingViolationTime = apiSummons.violation_time || '';
 
       if (existingSummons) {
         // **STRICT DIFF ENGINE** - Only update if critical fields changed
@@ -315,6 +367,10 @@ async function processSummonses(apiSummonses, clientNameMap) {
           status: incomingStatus,
           amount_due: incomingAmountDue,
           hearing_date: incomingHearingDate,
+          hearing_time: incomingHearingTime,
+          hearing_result: incomingHearingResult,
+          code_description: incomingCodeDescription,
+          paid_amount: incomingPaidAmount,
         });
 
         if (changeResult.hasChanges) {
@@ -323,6 +379,11 @@ async function processSummonses(apiSummonses, clientNameMap) {
             status: incomingStatus,
             amount_due: incomingAmountDue,
             hearing_date: incomingHearingDate,
+            hearing_time: incomingHearingTime,
+            hearing_result: incomingHearingResult,
+            code_description: incomingCodeDescription,
+            paid_amount: incomingPaidAmount,
+            penalty_imposed: incomingPenaltyImposed,
             last_change_summary: changeResult.summary,
             last_change_at: new Date().toISOString(),
           });
@@ -350,25 +411,43 @@ async function processSummonses(apiSummonses, clientNameMap) {
         // Parse base fine
         const totalViolationAmount = normalizeAmount(apiSummons.total_violation_amount);
 
-        // Create new summons record with proper timestamps
+        // Create new summons record with proper timestamps (ALL OATH violation types)
         const newSummons = {
           id: generateUUID(),
           clientID: matchedClient.id,
           summons_number: ticketNumber,
           respondent_name: respondentFullName,
+
+          // Hearing Information
           hearing_date: hearingDate,
+          hearing_time: incomingHearingTime,
+          hearing_result: incomingHearingResult,
           status: incomingStatus,
+
+          // Violation Information
+          code_description: incomingCodeDescription,
+          violation_date: violationDate,
+          violation_time: incomingViolationTime,
+          violation_location: violationLocation,
           license_plate: apiSummons.license_plate || '',
+
+          // Financial Information
           base_fine: totalViolationAmount,
           amount_due: incomingAmountDue,
-          violation_date: violationDate,
-          violation_location: violationLocation,
+          paid_amount: incomingPaidAmount,
+          penalty_imposed: incomingPenaltyImposed,
+
+          // Generated Links
           summons_pdf_link: pdfLink,
           video_link: videoLink,
+
+          // User-Input Fields (defaults)
           added_to_calendar: false,
           evidence_reviewed: false,
           evidence_requested: false,
           evidence_received: false,
+
+          // Amplify Required Fields
           createdAt: now,  // Required by Amplify @model directive
           updatedAt: now,  // Required by Amplify @model directive
           owner: matchedClient.owner,  // Required for @auth(rules: [{ allow: private }])
@@ -450,9 +529,34 @@ async function updateSummons(id, updates) {
       expressionAttributeValues[':status'] = updates.status;
     }
 
+    if (updates.hearing_result !== undefined) {
+      updateExpressions.push('hearing_result = :hearing_result');
+      expressionAttributeValues[':hearing_result'] = updates.hearing_result;
+    }
+
+    if (updates.hearing_time !== undefined) {
+      updateExpressions.push('hearing_time = :hearing_time');
+      expressionAttributeValues[':hearing_time'] = updates.hearing_time;
+    }
+
     if (updates.amount_due !== undefined) {
       updateExpressions.push('amount_due = :amount_due');
       expressionAttributeValues[':amount_due'] = updates.amount_due;
+    }
+
+    if (updates.paid_amount !== undefined) {
+      updateExpressions.push('paid_amount = :paid_amount');
+      expressionAttributeValues[':paid_amount'] = updates.paid_amount;
+    }
+
+    if (updates.penalty_imposed !== undefined) {
+      updateExpressions.push('penalty_imposed = :penalty_imposed');
+      expressionAttributeValues[':penalty_imposed'] = updates.penalty_imposed;
+    }
+
+    if (updates.code_description !== undefined) {
+      updateExpressions.push('code_description = :code_description');
+      expressionAttributeValues[':code_description'] = updates.code_description;
     }
 
     if (updates.hearing_date !== undefined) {

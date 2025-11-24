@@ -22,13 +22,25 @@ type Summons @model @auth(rules: [{ allow: private }]) {
   # Core API Fields (from NYC Open Data)
   summons_number: String! @index(name: "bySummonsNumber", queryField: "summonsBySummonsNumber")
   respondent_name: String
+
+  # Hearing Information
   hearing_date: AWSDateTime
+  hearing_time: String
+  hearing_result: String
   status: String
+
+  # Violation Information
+  code_description: String
+  violation_date: AWSDateTime
+  violation_time: String
+  violation_location: String
   license_plate: String
+
+  # Financial Information
   base_fine: Float
   amount_due: Float
-  violation_date: AWSDateTime
-  violation_location: String
+  paid_amount: Float
+  penalty_imposed: Float
 
   # Generated Links
   summons_pdf_link: AWSURL

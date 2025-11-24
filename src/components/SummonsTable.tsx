@@ -78,12 +78,18 @@ interface Summons {
   summons_number: string;
   respondent_name: string;
   hearing_date: string;
+  hearing_time?: string;
+  hearing_result?: string;
   status: string;
   license_plate: string;
   base_fine: number;
   amount_due: number;
+  paid_amount?: number;
+  penalty_imposed?: number;
   violation_date: string;
+  violation_time?: string;
   violation_location: string;
+  code_description?: string;
   summons_pdf_link: string;
   video_link: string;
   video_created_date?: string;
@@ -633,6 +639,26 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       renderCell: renderStatusCell,
     },
     {
+      field: 'code_description',
+      headerName: 'Violation Type',
+      width: 200,
+      renderCell: (params: GridRenderCellParams) => {
+        const codeDesc = params.value || 'Unknown';
+        // Truncate if too long for better UX
+        const displayText = codeDesc.length > 30 ? `${codeDesc.substring(0, 27)}...` : codeDesc;
+        return (
+          <Tooltip title={codeDesc} placement="top">
+            <Chip
+              label={displayText}
+              size="small"
+              color="default"
+              sx={{ maxWidth: '100%', fontSize: '0.75rem' }}
+            />
+          </Tooltip>
+        );
+      },
+    },
+    {
       field: 'amount_due',
       headerName: 'Amount Due',
       width: 120,
@@ -872,14 +898,39 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
           </Typography>
 
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 2 }}>
+            {/* Hearing Information */}
+            <Box>
+              <Typography variant="subtitle2" color="text.secondary">Hearing Info</Typography>
+              <Typography variant="body2">
+                Date: {summons.hearing_date ? format(new Date(summons.hearing_date), 'MMMM d, yyyy') : 'N/A'}
+              </Typography>
+              {summons.hearing_time && (
+                <Typography variant="body2">Time: {summons.hearing_time}</Typography>
+              )}
+              {summons.hearing_result && (
+                <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+                  Result: {summons.hearing_result}
+                </Typography>
+              )}
+              <Typography variant="body2">Status: {summons.status || 'Unknown'}</Typography>
+            </Box>
+
             {/* Violation Information */}
             <Box>
               <Typography variant="subtitle2" color="text.secondary">Violation Info</Typography>
               <Typography variant="body2">
+                Type: {summons.code_description || 'Unknown'}
+              </Typography>
+              <Typography variant="body2">
                 Date: {summons.violation_date ? format(new Date(summons.violation_date), 'MMMM d, yyyy') : 'N/A'}
               </Typography>
+              {summons.violation_time && (
+                <Typography variant="body2">Time: {summons.violation_time}</Typography>
+              )}
               <Typography variant="body2">Location: {summons.violation_location || 'N/A'}</Typography>
-              <Typography variant="body2">Duration: {summons.idling_duration_ocr || 'N/A'}</Typography>
+              {summons.idling_duration_ocr && (
+                <Typography variant="body2">Duration: {summons.idling_duration_ocr}</Typography>
+              )}
             </Box>
 
             {/* Vehicle/License Info */}
@@ -896,6 +947,14 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
               <Typography variant="subtitle2" color="text.secondary">Financial Info</Typography>
               <Typography variant="body2">Base Fine: ${summons.base_fine?.toFixed(2) || '0.00'}</Typography>
               <Typography variant="body2">Amount Due: ${summons.amount_due?.toFixed(2) || '0.00'}</Typography>
+              {summons.paid_amount && summons.paid_amount > 0 && (
+                <Typography variant="body2" sx={{ color: 'success.main', fontWeight: 'bold' }}>
+                  Paid: ${summons.paid_amount.toFixed(2)}
+                </Typography>
+              )}
+              {summons.penalty_imposed && summons.penalty_imposed > 0 && (
+                <Typography variant="body2">Penalty: ${summons.penalty_imposed.toFixed(2)}</Typography>
+              )}
             </Box>
 
             {/* Documents */}
