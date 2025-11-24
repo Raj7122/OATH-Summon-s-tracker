@@ -84,7 +84,7 @@ function getBusinessDays(startDate: Date, endDate: Date): number {
 const Dashboard = () => {
   const [summonses, setSummonses] = useState<Summons[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<'critical' | 'approaching' | 'hearing_complete' | null>(null);
+  const [activeFilter, setActiveFilter] = useState<'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending' | null>(null);
 
   useEffect(() => {
     loadSummonses();
@@ -118,9 +118,9 @@ const Dashboard = () => {
 
   /**
    * Handle deadline card click - toggle filter on/off
-   * @param filter - The filter type ('critical' | 'approaching' | 'hearing_complete')
+   * @param filter - The filter type ('critical' | 'approaching' | 'hearing_complete' | 'evidence_pending')
    */
-  const handleFilterClick = (filter: 'critical' | 'approaching' | 'hearing_complete') => {
+  const handleFilterClick = (filter: 'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending') => {
     // Toggle: if clicking the same filter, turn it off; otherwise, switch to new filter
     setActiveFilter(activeFilter === filter ? null : filter);
   };
@@ -166,6 +166,13 @@ const Dashboard = () => {
       });
     }
 
+    if (activeFilter === 'evidence_pending') {
+      // Evidence requested but not yet received (TRD v1.9: Evidence tracking)
+      return summonses.filter((summons) => {
+        return summons.evidence_requested === true && summons.evidence_received === false;
+      });
+    }
+
     return summonses;
   };
 
@@ -205,7 +212,11 @@ const Dashboard = () => {
             {activeFilter && (
               <Box sx={{ mt: 2, textAlign: 'center' }}>
                 <Typography variant="caption" color="text.secondary">
-                  Showing {filteredSummonses.length} {activeFilter === 'critical' ? 'critical' : 'approaching'} deadline
+                  Showing {filteredSummonses.length}{' '}
+                  {activeFilter === 'critical' ? 'critical deadline' :
+                   activeFilter === 'approaching' ? 'approaching deadline' :
+                   activeFilter === 'hearing_complete' ? 'hearing complete' :
+                   'evidence pending'}
                   {filteredSummonses.length !== 1 ? 's' : ''}. Click the card again to view all summonses.
                 </Typography>
               </Box>

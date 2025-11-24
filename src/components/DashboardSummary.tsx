@@ -23,6 +23,7 @@ import { BarChart } from '@mui/x-charts/BarChart';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import EventIcon from '@mui/icons-material/Event';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 
 /**
  * Summons data interface
@@ -75,13 +76,13 @@ interface Summons {
  *
  * @interface DashboardSummaryProps
  * @property {Summons[]} summonses - Array of summons records to analyze
- * @property {string | null} activeFilter - Currently active filter ('critical' | 'approaching' | 'hearing_complete' | null)
+ * @property {string | null} activeFilter - Currently active filter ('critical' | 'approaching' | 'hearing_complete' | 'evidence_pending' | null)
  * @property {Function} onFilterClick - Callback when a deadline card is clicked
  */
 interface DashboardSummaryProps {
   summonses: Summons[];
-  activeFilter: 'critical' | 'approaching' | 'hearing_complete' | null;
-  onFilterClick: (filter: 'critical' | 'approaching' | 'hearing_complete') => void;
+  activeFilter: 'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending' | null;
+  onFilterClick: (filter: 'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending') => void;
 }
 
 /**
@@ -198,6 +199,21 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
   }, [summonses]);
 
   /**
+   * Calculate Evidence Pending Count (evidence requested but not yet received)
+   *
+   * Filters summonses to find those where evidence_requested is true but evidence_received is false.
+   * Used to populate the "Evidence Pending" card (4th card).
+   * TRD v1.9: Arthur needs to track evidence fulfillment as a critical workflow metric.
+   *
+   * @returns {Summons[]} Array of summonses with pending evidence requests
+   */
+  const evidencePending = useMemo(() => {
+    return summonses.filter((summons) => {
+      return summons.evidence_requested === true && summons.evidence_received === false;
+    });
+  }, [summonses]);
+
+  /**
    * Calculate Top 5 Clients by Active Summons Count
    *
    * Aggregates summonses by client name (respondent_name), counts the total for each client,
@@ -230,7 +246,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
     <Box sx={{ mb: 3 }}>
       <Grid container spacing={3}>
         {/* Critical Deadlines Card (Red Accent) - Clickable Quick Filter */}
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} sm={6} md={3}>
               <Card
                 onClick={() => onFilterClick('critical')}
                 sx={{
@@ -282,7 +298,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
         </Grid>
 
         {/* Approaching Deadlines Card (Yellow Accent) - Clickable Quick Filter */}
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} sm={6} md={3}>
               <Card
                 onClick={() => onFilterClick('approaching')}
                 sx={{
@@ -333,8 +349,60 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
               </Card>
         </Grid>
 
+        {/* Evidence Pending Card (Blue/Info Accent) - Clickable Quick Filter */}
+        <Grid item xs={12} sm={6} md={3}>
+          <Card
+            onClick={() => onFilterClick('evidence_pending')}
+            sx={{
+              borderLeft: 6,
+              borderColor: 'info.main',
+              boxShadow: activeFilter === 'evidence_pending' ? 6 : 3,
+              backgroundColor: activeFilter === 'evidence_pending' ? theme.palette.action.selected : 'background.paper',
+              cursor: 'pointer',
+              '&:hover': {
+                boxShadow: 8,
+                transform: 'translateY(-2px)',
+              },
+              transition: 'all 0.3s ease',
+            }}
+          >
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <HourglassEmptyIcon sx={{ color: 'info.main', mr: 1, fontSize: 28 }} />
+                <Typography variant="h6" component="div" color="info.main">
+                  Evidence Pending
+                </Typography>
+              </Box>
+              <Typography variant="h3" component="div" sx={{ fontWeight: 'bold', color: 'info.main' }}>
+                {evidencePending.length}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Requested but not yet received
+              </Typography>
+              {evidencePending.length > 0 && (
+                <Box sx={{ mt: 2 }}>
+                  {evidencePending.slice(0, 3).map((summons) => (
+                    <Chip
+                      key={summons.id}
+                      label={`${summons.respondent_name} - ${summons.summons_number}`}
+                      size="small"
+                      color="info"
+                      sx={{ mt: 0.5, mr: 0.5 }}
+                    />
+                  ))}
+                  {evidencePending.length > 3 && (
+                    <Typography variant="caption" color="text.secondary">
+                      +{evidencePending.length - 3} more
+                    </Typography>
+                  )}
+                </Box>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
         {/* Hearing Complete Card (Green Accent) - Clickable Quick Filter */}
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} sm={6} md={3}>
           <Card
             onClick={() => onFilterClick('hearing_complete')}
             sx={{

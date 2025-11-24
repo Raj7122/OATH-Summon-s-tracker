@@ -349,27 +349,29 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   };
 
   /**
-   * Check if a summons is "fresh" (updated in last 24 hours)
+   * Check if a summons is "fresh" (updated in last 72 hours)
    *
    * Calculates time difference between now and updatedAt timestamp.
-   * Used for row highlighting per the "24-Hour Freshness Rule".
+   * Used for row highlighting per the "72-Hour Freshness Rule".
+   * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
    *
    * @param {Summons} summons - Summons record to check
-   * @returns {boolean} True if updated within last 24 hours, false otherwise
+   * @returns {boolean} True if updated within last 72 hours, false otherwise
    */
   const isFreshSummons = (summons: Summons): boolean => {
     if (!summons.updatedAt) return false;
     const updatedDate = new Date(summons.updatedAt);
     const now = new Date();
     const diffHours = (now.getTime() - updatedDate.getTime()) / (1000 * 60 * 60);
-    return diffHours < 24;
+    return diffHours < 72; // 72 hours = 3 days to cover weekends
   };
 
   /**
-   * Check if a summons is a brand new record (created within last 24 hours)
+   * Check if a summons is a brand new record (created within last 72 hours)
    *
-   * Logic: createdAt equals updatedAt (within 1 second tolerance) AND within 24 hours.
+   * Logic: createdAt equals updatedAt (within 1 second tolerance) AND within 72 hours.
    * Used to show [🆕 NEW] badge in Status column.
+   * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
    *
    * @param {Summons} summons - Summons record to check
    * @returns {boolean} True if brand new, false otherwise
@@ -381,9 +383,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     const updatedDate = new Date(summons.updatedAt);
     const now = new Date();
 
-    // Check if within 24 hours
+    // Check if within 72 hours (TRD v1.9: cover weekends)
     const diffHours = (now.getTime() - updatedDate.getTime()) / (1000 * 60 * 60);
-    if (diffHours >= 24) return false;
+    if (diffHours >= 72) return false;
 
     // Check if createdAt equals updatedAt (within 1 second tolerance)
     const timeDiff = Math.abs(updatedDate.getTime() - createdDate.getTime());
@@ -393,8 +395,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   /**
    * Check if a summons was recently updated (not new, but status/amount changed)
    *
-   * Logic: updatedAt is newer than createdAt AND within last 24 hours.
+   * Logic: updatedAt is newer than createdAt AND within last 72 hours.
    * Used to show [⚠️ UPDATED] badge in Status column.
+   * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
    *
    * @param {Summons} summons - Summons record to check
    * @returns {boolean} True if recently updated, false otherwise
@@ -406,9 +409,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     const updatedDate = new Date(summons.updatedAt);
     const now = new Date();
 
-    // Check if within 24 hours
+    // Check if within 72 hours (TRD v1.9: cover weekends)
     const diffHours = (now.getTime() - updatedDate.getTime()) / (1000 * 60 * 60);
-    if (diffHours >= 24) return false;
+    if (diffHours >= 72) return false;
 
     // Check if updatedAt is meaningfully newer than createdAt
     const timeDiff = updatedDate.getTime() - createdDate.getTime();
@@ -884,7 +887,8 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
               <Typography variant="subtitle2" color="text.secondary">Vehicle Info</Typography>
               <Typography variant="body2">License Plate: {summons.license_plate_ocr || 'N/A'}</Typography>
               <Typography variant="body2">Vehicle Type: {summons.vehicle_type_ocr || 'N/A'}</Typography>
-              <Typography variant="body2">ID Number: {summons.dep_id || 'N/A'}</Typography>
+              <Typography variant="body2">DEP ID: {summons.dep_id || 'N/A'}</Typography>
+              <Typography variant="body2">Agency ID: {summons.agency_id_number || 'N/A'}</Typography>
             </Box>
 
             {/* Financial Info */}
@@ -972,7 +976,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
             cursor: 'pointer',
           },
           '& .fresh-row': {
-            backgroundColor: '#FFFDE7', // Pale "Attention Yellow" for 24-hour freshness
+            backgroundColor: '#FFFDE7', // Pale "Attention Yellow" for 72-hour freshness (TRD v1.9)
           },
         }}
         getDetailPanelContent={renderDetailPanel}
