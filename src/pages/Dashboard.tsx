@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Box, Typography, Paper, Button, CircularProgress } from '@mui/material';
+import { Box, Typography, Paper, Button, CircularProgress, Chip } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import FilterListOffIcon from '@mui/icons-material/FilterListOff';
 import { generateClient } from 'aws-amplify/api';
 import { listSummons } from '../graphql/queries';
 import SummonsTable from '../components/SummonsTable';
@@ -122,7 +123,9 @@ const Dashboard = () => {
    */
   const handleFilterClick = (filter: 'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending') => {
     // Toggle: if clicking the same filter, turn it off; otherwise, switch to new filter
-    setActiveFilter(activeFilter === filter ? null : filter);
+    const newFilter = activeFilter === filter ? null : filter;
+    console.log('Filter clicked:', filter, 'Current:', activeFilter, 'New:', newFilter);
+    setActiveFilter(newFilter);
   };
 
   /**
@@ -131,13 +134,17 @@ const Dashboard = () => {
    * @returns Filtered array of summonses
    */
   const getFilteredSummonses = (): Summons[] => {
-    if (!activeFilter) return summonses;
+    if (!activeFilter) {
+      console.log('No active filter, showing all summonses:', summonses.length);
+      return summonses;
+    }
 
     const now = new Date();
+    console.log('Active filter:', activeFilter, 'Total summonses:', summonses.length);
 
     if (activeFilter === 'critical') {
       // Hearings within 7 business days (TRD v1.8: business day logic)
-      return summonses.filter((summons) => {
+      const filtered = summonses.filter((summons) => {
         if (!summons.hearing_date) return false;
         const hearingDate = new Date(summons.hearing_date);
         if (hearingDate < now) return false; // Skip past dates
@@ -145,11 +152,13 @@ const Dashboard = () => {
         const businessDays = getBusinessDays(now, hearingDate);
         return businessDays <= 7;
       });
+      console.log('Critical filter returned:', filtered.length, 'summonses');
+      return filtered;
     }
 
     if (activeFilter === 'approaching') {
       // Hearings in 8-21 business days (TRD v1.8: business day logic)
-      return summonses.filter((summons) => {
+      const filtered = summonses.filter((summons) => {
         if (!summons.hearing_date) return false;
         const hearingDate = new Date(summons.hearing_date);
         if (hearingDate < now) return false; // Skip past dates
@@ -157,22 +166,29 @@ const Dashboard = () => {
         const businessDays = getBusinessDays(now, hearingDate);
         return businessDays >= 8 && businessDays <= 21;
       });
+      console.log('Approaching filter returned:', filtered.length, 'summonses');
+      return filtered;
     }
 
     if (activeFilter === 'hearing_complete') {
       // Summonses marked as "Hearing Complete" (TRD v1.8: Client Feedback)
-      return summonses.filter((summons) => {
+      const filtered = summonses.filter((summons) => {
         return summons.internal_status === 'Hearing Complete';
       });
+      console.log('Hearing Complete filter returned:', filtered.length, 'summonses');
+      return filtered;
     }
 
     if (activeFilter === 'evidence_pending') {
       // Evidence requested but not yet received (TRD v1.9: Evidence tracking)
-      return summonses.filter((summons) => {
+      const filtered = summonses.filter((summons) => {
         return summons.evidence_requested === true && summons.evidence_received === false;
       });
+      console.log('Evidence Pending filter returned:', filtered.length, 'summonses');
+      return filtered;
     }
 
+    console.log('No matching filter, returning all summonses');
     return summonses;
   };
 
@@ -182,15 +198,42 @@ const Dashboard = () => {
     <Box>
       {/* Header Section */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">Dashboard</Typography>
-        <Button
-          variant="outlined"
-          startIcon={<RefreshIcon />}
-          onClick={handleRefresh}
-          disabled={loading}
-        >
-          Refresh
-        </Button>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography variant="h4">Dashboard</Typography>
+          {activeFilter && (
+            <Chip
+              label={`Filter: ${
+                activeFilter === 'critical' ? 'Critical Deadlines' :
+                activeFilter === 'approaching' ? 'Approaching Deadlines' :
+                activeFilter === 'hearing_complete' ? 'Hearing Complete' :
+                'Evidence Pending'
+              }`}
+              color="primary"
+              onDelete={() => setActiveFilter(null)}
+              sx={{ fontWeight: 'bold' }}
+            />
+          )}
+        </Box>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          {activeFilter && (
+            <Button
+              variant="outlined"
+              startIcon={<FilterListOffIcon />}
+              onClick={() => setActiveFilter(null)}
+              color="secondary"
+            >
+              Clear Filter
+            </Button>
+          )}
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={handleRefresh}
+            disabled={loading}
+          >
+            Refresh
+          </Button>
+        </Box>
       </Box>
 
       {loading ? (
