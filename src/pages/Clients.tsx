@@ -14,7 +14,7 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
-import { DataGrid, GridColDef, GridActionsCellItem } from '@mui/x-data-grid';
+import { DataGrid, GridColDef, GridActionsCellItem, GridToolbar } from '@mui/x-data-grid';
 import { generateClient } from 'aws-amplify/api';
 import { listClients } from '../graphql/queries';
 import { createClient, updateClient, deleteClient } from '../graphql/mutations';
@@ -181,6 +181,15 @@ const Clients = () => {
             initialState={{
               pagination: {
                 paginationModel: { pageSize: 25 },
+              },
+            }}
+            slots={{
+              toolbar: GridToolbar,
+            }}
+            slotProps={{
+              toolbar: {
+                showQuickFilter: true,
+                quickFilterProps: { debounceMs: 500 },
               },
             }}
             disableRowSelectionOnClick
