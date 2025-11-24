@@ -1037,6 +1037,29 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
           '& .fresh-row': {
             backgroundColor: '#FFFDE7', // Pale "Attention Yellow" for 72-hour freshness (TRD v1.9)
           },
+          // Enhanced horizontal scrollbar visibility (works in Chrome, Safari, Edge, Firefox)
+          '& .MuiDataGrid-virtualScroller': {
+            overflowX: 'auto',
+            // Firefox scrollbar styling
+            scrollbarWidth: 'auto',
+            scrollbarColor: '#888 #f1f1f1',
+            // Webkit (Chrome, Safari, Edge) scrollbar styling
+            '&::-webkit-scrollbar': {
+              height: '12px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: '#f1f1f1',
+              borderRadius: '6px',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: '#888',
+              borderRadius: '6px',
+              border: '2px solid #f1f1f1',
+              '&:hover': {
+                backgroundColor: '#555',
+              },
+            },
+          },
         }}
         getDetailPanelContent={renderDetailPanel}
         getDetailPanelHeight={() => 'auto'}

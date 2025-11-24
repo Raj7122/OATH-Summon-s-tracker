@@ -19,7 +19,6 @@ export const getClient = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      owner
       __typename
     }
   }
@@ -43,7 +42,6 @@ export const listClients = /* GraphQL */ `
         contact_email2
         createdAt
         updatedAt
-        owner
         __typename
       }
       nextToken
@@ -68,7 +66,6 @@ export const getSummons = /* GraphQL */ `
         contact_email2
         createdAt
         updatedAt
-        owner
         __typename
       }
       summons_number
@@ -90,6 +87,11 @@ export const getSummons = /* GraphQL */ `
       evidence_requested
       evidence_requested_date
       evidence_received
+      internal_status
+      offense_level
+      agency_id_number
+      last_change_summary
+      last_change_at
       dep_id
       license_plate_ocr
       vehicle_type_ocr
@@ -100,7 +102,6 @@ export const getSummons = /* GraphQL */ `
       name_on_summons_ocr
       createdAt
       updatedAt
-      owner
       __typename
     }
   }
@@ -134,6 +135,11 @@ export const listSummons = /* GraphQL */ `
         evidence_requested
         evidence_requested_date
         evidence_received
+        internal_status
+        offense_level
+        agency_id_number
+        last_change_summary
+        last_change_at
         dep_id
         license_plate_ocr
         vehicle_type_ocr
@@ -144,7 +150,6 @@ export const listSummons = /* GraphQL */ `
         name_on_summons_ocr
         createdAt
         updatedAt
-        owner
         __typename
       }
       nextToken
@@ -191,6 +196,11 @@ export const summonsByClientIDAndHearing_date = /* GraphQL */ `
         evidence_requested
         evidence_requested_date
         evidence_received
+        internal_status
+        offense_level
+        agency_id_number
+        last_change_summary
+        last_change_at
         dep_id
         license_plate_ocr
         vehicle_type_ocr
@@ -201,7 +211,6 @@ export const summonsByClientIDAndHearing_date = /* GraphQL */ `
         name_on_summons_ocr
         createdAt
         updatedAt
-        owner
         __typename
       }
       nextToken
@@ -246,6 +255,11 @@ export const summonsBySummonsNumber = /* GraphQL */ `
         evidence_requested
         evidence_requested_date
         evidence_received
+        internal_status
+        offense_level
+        agency_id_number
+        last_change_summary
+        last_change_at
         dep_id
         license_plate_ocr
         vehicle_type_ocr
@@ -256,7 +270,6 @@ export const summonsBySummonsNumber = /* GraphQL */ `
         name_on_summons_ocr
         createdAt
         updatedAt
-        owner
         __typename
       }
       nextToken

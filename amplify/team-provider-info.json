@@ -21,11 +21,11 @@
       "function": {
         "dailySweep": {
           "deploymentBucketName": "amplify-oathsummonstracker-dev-0fcf6-deployment",
-          "s3Key": "amplify-builds/dailySweep-735034676e37616f527a-build.zip"
+          "s3Key": "amplify-builds/dailySweep-4932476b6b5541456b33-build.zip"
         },
         "dataExtractor": {
           "deploymentBucketName": "amplify-oathsummonstracker-dev-0fcf6-deployment",
-          "s3Key": "amplify-builds/dataExtractor-2f6e54485375776e6d36-build.zip"
+          "s3Key": "amplify-builds/dataExtractor-337967536270612b3235-build.zip"
         }
       }
     }
