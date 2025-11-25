@@ -101,12 +101,18 @@ export const createSummons = /* GraphQL */ `
       summons_number
       respondent_name
       hearing_date
+      hearing_time
+      hearing_result
       status
+      code_description
+      violation_date
+      violation_time
+      violation_location
       license_plate
       base_fine
       amount_due
-      violation_date
-      violation_location
+      paid_amount
+      penalty_imposed
       summons_pdf_link
       video_link
       video_created_date
@@ -161,12 +167,18 @@ export const updateSummons = /* GraphQL */ `
       summons_number
       respondent_name
       hearing_date
+      hearing_time
+      hearing_result
       status
+      code_description
+      violation_date
+      violation_time
+      violation_location
       license_plate
       base_fine
       amount_due
-      violation_date
-      violation_location
+      paid_amount
+      penalty_imposed
       summons_pdf_link
       video_link
       video_created_date
@@ -221,12 +233,18 @@ export const deleteSummons = /* GraphQL */ `
       summons_number
       respondent_name
       hearing_date
+      hearing_time
+      hearing_result
       status
+      code_description
+      violation_date
+      violation_time
+      violation_location
       license_plate
       base_fine
       amount_due
-      violation_date
-      violation_location
+      paid_amount
+      penalty_imposed
       summons_pdf_link
       video_link
       video_created_date

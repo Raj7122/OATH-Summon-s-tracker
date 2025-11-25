@@ -635,7 +635,8 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     {
       field: 'status',
       headerName: 'Status',
-      width: 180,
+      width: 280,
+      minWidth: 280,
       renderCell: renderStatusCell,
     },
     {

@@ -71,12 +71,18 @@ export const getSummons = /* GraphQL */ `
       summons_number
       respondent_name
       hearing_date
+      hearing_time
+      hearing_result
       status
+      code_description
+      violation_date
+      violation_time
+      violation_location
       license_plate
       base_fine
       amount_due
-      violation_date
-      violation_location
+      paid_amount
+      penalty_imposed
       summons_pdf_link
       video_link
       video_created_date
@@ -119,12 +125,18 @@ export const listSummons = /* GraphQL */ `
         summons_number
         respondent_name
         hearing_date
+        hearing_time
+        hearing_result
         status
+        code_description
+        violation_date
+        violation_time
+        violation_location
         license_plate
         base_fine
         amount_due
-        violation_date
-        violation_location
+        paid_amount
+        penalty_imposed
         summons_pdf_link
         video_link
         video_created_date
@@ -180,12 +192,18 @@ export const summonsByClientIDAndHearing_date = /* GraphQL */ `
         summons_number
         respondent_name
         hearing_date
+        hearing_time
+        hearing_result
         status
+        code_description
+        violation_date
+        violation_time
+        violation_location
         license_plate
         base_fine
         amount_due
-        violation_date
-        violation_location
+        paid_amount
+        penalty_imposed
         summons_pdf_link
         video_link
         video_created_date
@@ -239,12 +257,18 @@ export const summonsBySummonsNumber = /* GraphQL */ `
         summons_number
         respondent_name
         hearing_date
+        hearing_time
+        hearing_result
         status
+        code_description
+        violation_date
+        violation_time
+        violation_location
         license_plate
         base_fine
         amount_due
-        violation_date
-        violation_location
+        paid_amount
+        penalty_imposed
         summons_pdf_link
         video_link
         video_created_date
