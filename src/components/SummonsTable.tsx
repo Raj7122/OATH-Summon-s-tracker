@@ -1047,9 +1047,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
               <Link href={summons.video_link} target="_blank" rel="noopener" sx={{ display: 'block' }}>
                 View Video Evidence
               </Link>
-              <Typography variant="body2" sx={{ mt: 1 }}>
-                Video Created: {summons.video_created_date ? format(new Date(summons.video_created_date), 'MMMM d, yyyy') : 'N/A'}
-              </Typography>
             </Box>
           </Box>
 
