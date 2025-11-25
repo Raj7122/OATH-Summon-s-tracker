@@ -25,6 +25,8 @@
 
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
+import { generateClient } from 'aws-amplify/api';
+import { updateSummons } from '../graphql/mutations';
 import {
   DataGrid,
   GridColDef,
@@ -65,6 +67,8 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import FiberNewIcon from '@mui/icons-material/FiberNew';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+
+const client = generateClient();
 
 /**
  * Summons data interface
@@ -189,71 +193,122 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
    * Handle checkbox state changes for evidence tracking fields
    *
    * Updates a boolean field (evidence_reviewed, added_to_calendar, evidence_requested, evidence_received)
-   * for a specific summons record. Will eventually use Amplify DataStore for persistence.
+   * for a specific summons record via GraphQL mutation.
    *
    * @param {string} id - Summons record ID
    * @param {keyof Summons} field - Field name to update
    * @param {boolean} value - New boolean value
    * @returns {Promise<void>}
    *
-   * @throws {Error} If DataStore update fails (logged to console)
+   * @throws {Error} If GraphQL mutation fails (logged to console)
    */
   const handleCheckboxChange = async (id: string, field: keyof Summons, value: boolean) => {
     try {
-      // TODO: Update via Amplify DataStore
-      // await DataStore.save(Summons.copyOf(summons, updated => {
-      //   updated[field] = value;
-      // }));
-      console.log('Updating summons:', id, field, value);
+      console.log(`Saving ${field} = ${value} for summons ${id}...`);
+
+      // Build the update input dynamically
+      const updateInput: any = {
+        id: id,
+        [field]: value,
+      };
+
+      // If checking "evidence_requested" and date isn't set, set it to now
+      if (field === 'evidence_requested' && value === true) {
+        const summons = summonses.find(s => s.id === id);
+        if (summons && !summons.evidence_requested_date) {
+          updateInput.evidence_requested_date = new Date().toISOString();
+        }
+      }
+
+      // Execute GraphQL mutation
+      await client.graphql({
+        query: updateSummons,
+        variables: {
+          input: updateInput,
+        },
+      });
+
+      console.log(`✓ Successfully saved ${field}`);
+
+      // Refresh data to show updated checkbox
       onUpdate();
     } catch (error) {
       console.error('Error updating summons:', error);
+      alert(`Failed to save checkbox. Please try again.`);
     }
   };
 
   /**
    * Handle date picker changes for evidence_requested_date field
    *
-   * Updates the evidence_requested_date field for a specific summons record.
-   * Will eventually use Amplify DataStore for persistence.
+   * Updates the evidence_requested_date field for a specific summons record via GraphQL mutation.
    *
    * @param {string} id - Summons record ID
    * @param {keyof Summons} field - Field name to update (typically 'evidence_requested_date')
    * @param {Date | null} date - New date value or null to clear
    * @returns {Promise<void>}
    *
-   * @throws {Error} If DataStore update fails (logged to console)
+   * @throws {Error} If GraphQL mutation fails (logged to console)
    */
   const handleDateChange = async (id: string, field: keyof Summons, date: Date | null) => {
     try {
-      // TODO: Update via Amplify DataStore
-      console.log('Updating summons date:', id, field, date);
+      console.log(`Saving ${field} = ${date} for summons ${id}...`);
+
+      // Execute GraphQL mutation
+      await client.graphql({
+        query: updateSummons,
+        variables: {
+          input: {
+            id: id,
+            [field]: date ? date.toISOString() : null,
+          },
+        },
+      });
+
+      console.log(`✓ Successfully saved ${field}`);
+
+      // Refresh data to show updated date
       onUpdate();
     } catch (error) {
       console.error('Error updating summons date:', error);
+      alert(`Failed to save date. Please try again.`);
     }
   };
 
   /**
    * Handle select/dropdown changes for Internal Status field
    *
-   * Updates the internal_status field for a specific summons record.
+   * Updates the internal_status field for a specific summons record via GraphQL mutation.
    * TRD v1.8: Client Feedback Updates
-   * Will eventually use Amplify DataStore for persistence.
    *
    * @param {string} id - Summons record ID
    * @param {string} value - New status value
    * @returns {Promise<void>}
    *
-   * @throws {Error} If DataStore update fails (logged to console)
+   * @throws {Error} If GraphQL mutation fails (logged to console)
    */
   const handleInternalStatusChange = async (id: string, value: string) => {
     try {
-      // TODO: Update via Amplify DataStore / GraphQL mutation
-      console.log('Updating internal status:', id, value);
+      console.log(`Saving internal_status = ${value} for summons ${id}...`);
+
+      // Execute GraphQL mutation
+      await client.graphql({
+        query: updateSummons,
+        variables: {
+          input: {
+            id: id,
+            internal_status: value,
+          },
+        },
+      });
+
+      console.log(`✓ Successfully saved internal_status`);
+
+      // Refresh data to show updated status
       onUpdate();
     } catch (error) {
       console.error('Error updating internal status:', error);
+      alert(`Failed to save internal status. Please try again.`);
     }
   };
 
@@ -277,22 +332,35 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
    *
    * Triggered by useEffect when notesValue changes and differs from original.
    * Shows visual feedback (checkmark icon) for 2 seconds after successful save.
-   * Will eventually use Amplify DataStore for persistence.
+   * Saves via GraphQL mutation.
    *
    * @returns {Promise<void>}
    *
-   * @throws {Error} If DataStore update fails (logged to console)
+   * @throws {Error} If GraphQL mutation fails (logged to console)
    */
   const handleNotesAutoSave = async () => {
     if (notesDialog.summons) {
       setNotesSaving(true);
       try {
-        // TODO: Update via Amplify DataStore
-        console.log('Auto-saving notes:', notesDialog.summons.id, notesValue);
+        console.log('Auto-saving notes:', notesDialog.summons.id);
+
+        // Execute GraphQL mutation
+        await client.graphql({
+          query: updateSummons,
+          variables: {
+            input: {
+              id: notesDialog.summons.id,
+              notes: notesValue,
+            },
+          },
+        });
+
+        console.log('✓ Notes auto-saved successfully');
         setNotesSaved(true);
         setTimeout(() => setNotesSaved(false), 2000);
       } catch (error) {
         console.error('Error auto-saving notes:', error);
+        alert('Failed to save notes. Please try again.');
       } finally {
         setNotesSaving(false);
       }
@@ -302,22 +370,34 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   /**
    * Manual save notes when "Save" button is clicked in dialog
    *
-   * Saves the current notes value and closes the dialog.
-   * Will eventually use Amplify DataStore for persistence.
+   * Saves the current notes value and closes the dialog via GraphQL mutation.
    *
    * @returns {Promise<void>}
    *
-   * @throws {Error} If DataStore update fails (logged to console)
+   * @throws {Error} If GraphQL mutation fails (logged to console)
    */
   const handleNotesSave = async () => {
     if (notesDialog.summons) {
       try {
-        // TODO: Update via Amplify DataStore
-        console.log('Saving notes:', notesDialog.summons.id, notesValue);
+        console.log('Saving notes:', notesDialog.summons.id);
+
+        // Execute GraphQL mutation
+        await client.graphql({
+          query: updateSummons,
+          variables: {
+            input: {
+              id: notesDialog.summons.id,
+              notes: notesValue,
+            },
+          },
+        });
+
+        console.log('✓ Notes saved successfully');
         setNotesDialog({ open: false, summons: null });
         onUpdate();
       } catch (error) {
         console.error('Error updating notes:', error);
+        alert('Failed to save notes. Please try again.');
       }
     }
   };
