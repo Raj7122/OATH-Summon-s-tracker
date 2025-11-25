@@ -34,18 +34,27 @@ const TEST_SUMMONS_NUMBER = 'AUTO-TEST-001';
 const TEST_CLIENT_ID = 'test-client-123';
 const REGION = process.env.AWS_REGION || 'us-east-1';
 
-// Read table name from environment or amplify config
+// Read table name from environment or auto-detect from AWS
 let SUMMONS_TABLE = process.env.STORAGE_SUMMONS_NAME;
 
 if (!SUMMONS_TABLE) {
+  // Auto-detect table name by listing DynamoDB tables and finding Summons table
   try {
-    const amplifyConfigPath = join(__dirname, '..', 'amplify_outputs.json');
-    const amplifyConfig = JSON.parse(readFileSync(amplifyConfigPath, 'utf-8'));
-    SUMMONS_TABLE = amplifyConfig.storage?.summons_table || 'Summons-dev';
-    console.log(`📋 Using table from amplify_outputs.json: ${SUMMONS_TABLE}`);
+    const { ListTablesCommand } = await import('@aws-sdk/client-dynamodb');
+    const tempClient = new DynamoDBClient({ region: REGION });
+    const listResult = await tempClient.send(new ListTablesCommand({}));
+    const summonsTable = listResult.TableNames?.find(name => name.startsWith('Summons-'));
+
+    if (summonsTable) {
+      SUMMONS_TABLE = summonsTable;
+      console.log(`📋 Auto-detected DynamoDB table: ${SUMMONS_TABLE}`);
+    } else {
+      SUMMONS_TABLE = 'Summons-dev';
+      console.log(`⚠️  No Summons table found, using default: ${SUMMONS_TABLE}`);
+    }
   } catch (error) {
     SUMMONS_TABLE = 'Summons-dev';
-    console.log(`⚠️  Could not read amplify config, using default: ${SUMMONS_TABLE}`);
+    console.log(`⚠️  Could not auto-detect table, using default: ${SUMMONS_TABLE}`);
   }
 }
 

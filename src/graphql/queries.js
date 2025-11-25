@@ -19,7 +19,6 @@ export const getClient = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      owner
       __typename
     }
   }
@@ -43,7 +42,6 @@ export const listClients = /* GraphQL */ `
         contact_email2
         createdAt
         updatedAt
-        owner
         __typename
       }
       nextToken
@@ -68,18 +66,23 @@ export const getSummons = /* GraphQL */ `
         contact_email2
         createdAt
         updatedAt
-        owner
         __typename
       }
       summons_number
       respondent_name
       hearing_date
+      hearing_time
+      hearing_result
       status
+      code_description
+      violation_date
+      violation_time
+      violation_location
       license_plate
       base_fine
       amount_due
-      violation_date
-      violation_location
+      paid_amount
+      penalty_imposed
       summons_pdf_link
       video_link
       video_created_date
@@ -90,6 +93,11 @@ export const getSummons = /* GraphQL */ `
       evidence_requested
       evidence_requested_date
       evidence_received
+      internal_status
+      offense_level
+      agency_id_number
+      last_change_summary
+      last_change_at
       dep_id
       license_plate_ocr
       vehicle_type_ocr
@@ -100,7 +108,6 @@ export const getSummons = /* GraphQL */ `
       name_on_summons_ocr
       createdAt
       updatedAt
-      owner
       __typename
     }
   }
@@ -118,12 +125,18 @@ export const listSummons = /* GraphQL */ `
         summons_number
         respondent_name
         hearing_date
+        hearing_time
+        hearing_result
         status
+        code_description
+        violation_date
+        violation_time
+        violation_location
         license_plate
         base_fine
         amount_due
-        violation_date
-        violation_location
+        paid_amount
+        penalty_imposed
         summons_pdf_link
         video_link
         video_created_date
@@ -134,6 +147,11 @@ export const listSummons = /* GraphQL */ `
         evidence_requested
         evidence_requested_date
         evidence_received
+        internal_status
+        offense_level
+        agency_id_number
+        last_change_summary
+        last_change_at
         dep_id
         license_plate_ocr
         vehicle_type_ocr
@@ -144,7 +162,6 @@ export const listSummons = /* GraphQL */ `
         name_on_summons_ocr
         createdAt
         updatedAt
-        owner
         __typename
       }
       nextToken
@@ -175,12 +192,18 @@ export const summonsByClientIDAndHearing_date = /* GraphQL */ `
         summons_number
         respondent_name
         hearing_date
+        hearing_time
+        hearing_result
         status
+        code_description
+        violation_date
+        violation_time
+        violation_location
         license_plate
         base_fine
         amount_due
-        violation_date
-        violation_location
+        paid_amount
+        penalty_imposed
         summons_pdf_link
         video_link
         video_created_date
@@ -191,6 +214,11 @@ export const summonsByClientIDAndHearing_date = /* GraphQL */ `
         evidence_requested
         evidence_requested_date
         evidence_received
+        internal_status
+        offense_level
+        agency_id_number
+        last_change_summary
+        last_change_at
         dep_id
         license_plate_ocr
         vehicle_type_ocr
@@ -201,7 +229,6 @@ export const summonsByClientIDAndHearing_date = /* GraphQL */ `
         name_on_summons_ocr
         createdAt
         updatedAt
-        owner
         __typename
       }
       nextToken
@@ -230,12 +257,18 @@ export const summonsBySummonsNumber = /* GraphQL */ `
         summons_number
         respondent_name
         hearing_date
+        hearing_time
+        hearing_result
         status
+        code_description
+        violation_date
+        violation_time
+        violation_location
         license_plate
         base_fine
         amount_due
-        violation_date
-        violation_location
+        paid_amount
+        penalty_imposed
         summons_pdf_link
         video_link
         video_created_date
@@ -246,6 +279,11 @@ export const summonsBySummonsNumber = /* GraphQL */ `
         evidence_requested
         evidence_requested_date
         evidence_received
+        internal_status
+        offense_level
+        agency_id_number
+        last_change_summary
+        last_change_at
         dep_id
         license_plate_ocr
         vehicle_type_ocr
@@ -256,7 +294,6 @@ export const summonsBySummonsNumber = /* GraphQL */ `
         name_on_summons_ocr
         createdAt
         updatedAt
-        owner
         __typename
       }
       nextToken

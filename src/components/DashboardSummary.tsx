@@ -453,23 +453,23 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
           </Card>
         </Grid>
 
-        {/* Bottom Row: Top Clients Bar Chart (Full width) */}
+        {/* Bottom Row: Top Clients Bar Chart (Full width, compact) */}
         <Grid item xs={12}>
-          <Card sx={{ boxShadow: 3, height: '100%' }}>
-            <CardContent>
-              <Typography variant="h6" component="div" gutterBottom>
+          <Card sx={{ boxShadow: 3 }}>
+            <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+              <Typography variant="subtitle1" component="div" gutterBottom sx={{ fontWeight: 600 }}>
                 Top 5 Clients by Active Summons
               </Typography>
               {topClients.data.length > 0 ? (
-                <Box sx={{ height: isMobile ? 300 : 380, mt: 2 }}>
+                <Box sx={{ height: isMobile ? 150 : 180 }}>
                   <BarChart
                     layout="horizontal"
                     yAxis={[
                       {
                         scaleType: 'band',
                         data: topClients.labels,
-                        categoryGapRatio: 0.3,
-                        barGapRatio: 0.1,
+                        categoryGapRatio: 0.4,
+                        barGapRatio: 0.2,
                       },
                     ]}
                     series={[
@@ -479,19 +479,22 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
                         color: theme.palette.primary.main,
                       },
                     ]}
-                    height={isMobile ? 300 : 380}
-                    margin={{ left: 150, right: 20, top: 20, bottom: 40 }}
+                    height={isMobile ? 150 : 180}
+                    margin={{ left: 140, right: 20, top: 10, bottom: 30 }}
                     slotProps={{
                       legend: {
                         position: { vertical: 'bottom', horizontal: 'middle' },
                         padding: 0,
+                        itemMarkHeight: 8,
+                        itemMarkWidth: 8,
+                        labelStyle: { fontSize: 11 },
                       },
                     }}
                   />
                 </Box>
               ) : (
-                <Box sx={{ py: 8, textAlign: 'center' }}>
-                  <Typography variant="body1" color="text.secondary">
+                <Box sx={{ py: 4, textAlign: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">
                     No active summons data available
                   </Typography>
                 </Box>

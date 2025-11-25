@@ -22,7 +22,6 @@ export const createClient = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      owner
       __typename
     }
   }
@@ -48,7 +47,6 @@ export const updateClient = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      owner
       __typename
     }
   }
@@ -74,7 +72,6 @@ export const deleteClient = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      owner
       __typename
     }
   }
@@ -99,18 +96,23 @@ export const createSummons = /* GraphQL */ `
         contact_email2
         createdAt
         updatedAt
-        owner
         __typename
       }
       summons_number
       respondent_name
       hearing_date
+      hearing_time
+      hearing_result
       status
+      code_description
+      violation_date
+      violation_time
+      violation_location
       license_plate
       base_fine
       amount_due
-      violation_date
-      violation_location
+      paid_amount
+      penalty_imposed
       summons_pdf_link
       video_link
       video_created_date
@@ -121,6 +123,11 @@ export const createSummons = /* GraphQL */ `
       evidence_requested
       evidence_requested_date
       evidence_received
+      internal_status
+      offense_level
+      agency_id_number
+      last_change_summary
+      last_change_at
       dep_id
       license_plate_ocr
       vehicle_type_ocr
@@ -131,7 +138,6 @@ export const createSummons = /* GraphQL */ `
       name_on_summons_ocr
       createdAt
       updatedAt
-      owner
       __typename
     }
   }
@@ -156,18 +162,23 @@ export const updateSummons = /* GraphQL */ `
         contact_email2
         createdAt
         updatedAt
-        owner
         __typename
       }
       summons_number
       respondent_name
       hearing_date
+      hearing_time
+      hearing_result
       status
+      code_description
+      violation_date
+      violation_time
+      violation_location
       license_plate
       base_fine
       amount_due
-      violation_date
-      violation_location
+      paid_amount
+      penalty_imposed
       summons_pdf_link
       video_link
       video_created_date
@@ -178,6 +189,11 @@ export const updateSummons = /* GraphQL */ `
       evidence_requested
       evidence_requested_date
       evidence_received
+      internal_status
+      offense_level
+      agency_id_number
+      last_change_summary
+      last_change_at
       dep_id
       license_plate_ocr
       vehicle_type_ocr
@@ -188,7 +204,6 @@ export const updateSummons = /* GraphQL */ `
       name_on_summons_ocr
       createdAt
       updatedAt
-      owner
       __typename
     }
   }
@@ -213,18 +228,23 @@ export const deleteSummons = /* GraphQL */ `
         contact_email2
         createdAt
         updatedAt
-        owner
         __typename
       }
       summons_number
       respondent_name
       hearing_date
+      hearing_time
+      hearing_result
       status
+      code_description
+      violation_date
+      violation_time
+      violation_location
       license_plate
       base_fine
       amount_due
-      violation_date
-      violation_location
+      paid_amount
+      penalty_imposed
       summons_pdf_link
       video_link
       video_created_date
@@ -235,6 +255,11 @@ export const deleteSummons = /* GraphQL */ `
       evidence_requested
       evidence_requested_date
       evidence_received
+      internal_status
+      offense_level
+      agency_id_number
+      last_change_summary
+      last_change_at
       dep_id
       license_plate_ocr
       vehicle_type_ocr
@@ -245,7 +270,6 @@ export const deleteSummons = /* GraphQL */ `
       name_on_summons_ocr
       createdAt
       updatedAt
-      owner
       __typename
     }
   }

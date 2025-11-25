@@ -2,11 +2,8 @@
 // this is an auto generated file. This will be overwritten
 
 export const onCreateClient = /* GraphQL */ `
-  subscription OnCreateClient(
-    $filter: ModelSubscriptionClientFilterInput
-    $owner: String
-  ) {
-    onCreateClient(filter: $filter, owner: $owner) {
+  subscription OnCreateClient($filter: ModelSubscriptionClientFilterInput) {
+    onCreateClient(filter: $filter) {
       id
       name
       akas
@@ -22,17 +19,13 @@ export const onCreateClient = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      owner
       __typename
     }
   }
 `;
 export const onUpdateClient = /* GraphQL */ `
-  subscription OnUpdateClient(
-    $filter: ModelSubscriptionClientFilterInput
-    $owner: String
-  ) {
-    onUpdateClient(filter: $filter, owner: $owner) {
+  subscription OnUpdateClient($filter: ModelSubscriptionClientFilterInput) {
+    onUpdateClient(filter: $filter) {
       id
       name
       akas
@@ -48,17 +41,13 @@ export const onUpdateClient = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      owner
       __typename
     }
   }
 `;
 export const onDeleteClient = /* GraphQL */ `
-  subscription OnDeleteClient(
-    $filter: ModelSubscriptionClientFilterInput
-    $owner: String
-  ) {
-    onDeleteClient(filter: $filter, owner: $owner) {
+  subscription OnDeleteClient($filter: ModelSubscriptionClientFilterInput) {
+    onDeleteClient(filter: $filter) {
       id
       name
       akas
@@ -74,17 +63,13 @@ export const onDeleteClient = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      owner
       __typename
     }
   }
 `;
 export const onCreateSummons = /* GraphQL */ `
-  subscription OnCreateSummons(
-    $filter: ModelSubscriptionSummonsFilterInput
-    $owner: String
-  ) {
-    onCreateSummons(filter: $filter, owner: $owner) {
+  subscription OnCreateSummons($filter: ModelSubscriptionSummonsFilterInput) {
+    onCreateSummons(filter: $filter) {
       id
       clientID
       client {
@@ -99,18 +84,23 @@ export const onCreateSummons = /* GraphQL */ `
         contact_email2
         createdAt
         updatedAt
-        owner
         __typename
       }
       summons_number
       respondent_name
       hearing_date
+      hearing_time
+      hearing_result
       status
+      code_description
+      violation_date
+      violation_time
+      violation_location
       license_plate
       base_fine
       amount_due
-      violation_date
-      violation_location
+      paid_amount
+      penalty_imposed
       summons_pdf_link
       video_link
       video_created_date
@@ -121,6 +111,11 @@ export const onCreateSummons = /* GraphQL */ `
       evidence_requested
       evidence_requested_date
       evidence_received
+      internal_status
+      offense_level
+      agency_id_number
+      last_change_summary
+      last_change_at
       dep_id
       license_plate_ocr
       vehicle_type_ocr
@@ -131,17 +126,13 @@ export const onCreateSummons = /* GraphQL */ `
       name_on_summons_ocr
       createdAt
       updatedAt
-      owner
       __typename
     }
   }
 `;
 export const onUpdateSummons = /* GraphQL */ `
-  subscription OnUpdateSummons(
-    $filter: ModelSubscriptionSummonsFilterInput
-    $owner: String
-  ) {
-    onUpdateSummons(filter: $filter, owner: $owner) {
+  subscription OnUpdateSummons($filter: ModelSubscriptionSummonsFilterInput) {
+    onUpdateSummons(filter: $filter) {
       id
       clientID
       client {
@@ -156,18 +147,23 @@ export const onUpdateSummons = /* GraphQL */ `
         contact_email2
         createdAt
         updatedAt
-        owner
         __typename
       }
       summons_number
       respondent_name
       hearing_date
+      hearing_time
+      hearing_result
       status
+      code_description
+      violation_date
+      violation_time
+      violation_location
       license_plate
       base_fine
       amount_due
-      violation_date
-      violation_location
+      paid_amount
+      penalty_imposed
       summons_pdf_link
       video_link
       video_created_date
@@ -178,6 +174,11 @@ export const onUpdateSummons = /* GraphQL */ `
       evidence_requested
       evidence_requested_date
       evidence_received
+      internal_status
+      offense_level
+      agency_id_number
+      last_change_summary
+      last_change_at
       dep_id
       license_plate_ocr
       vehicle_type_ocr
@@ -188,17 +189,13 @@ export const onUpdateSummons = /* GraphQL */ `
       name_on_summons_ocr
       createdAt
       updatedAt
-      owner
       __typename
     }
   }
 `;
 export const onDeleteSummons = /* GraphQL */ `
-  subscription OnDeleteSummons(
-    $filter: ModelSubscriptionSummonsFilterInput
-    $owner: String
-  ) {
-    onDeleteSummons(filter: $filter, owner: $owner) {
+  subscription OnDeleteSummons($filter: ModelSubscriptionSummonsFilterInput) {
+    onDeleteSummons(filter: $filter) {
       id
       clientID
       client {
@@ -213,18 +210,23 @@ export const onDeleteSummons = /* GraphQL */ `
         contact_email2
         createdAt
         updatedAt
-        owner
         __typename
       }
       summons_number
       respondent_name
       hearing_date
+      hearing_time
+      hearing_result
       status
+      code_description
+      violation_date
+      violation_time
+      violation_location
       license_plate
       base_fine
       amount_due
-      violation_date
-      violation_location
+      paid_amount
+      penalty_imposed
       summons_pdf_link
       video_link
       video_created_date
@@ -235,6 +237,11 @@ export const onDeleteSummons = /* GraphQL */ `
       evidence_requested
       evidence_requested_date
       evidence_received
+      internal_status
+      offense_level
+      agency_id_number
+      last_change_summary
+      last_change_at
       dep_id
       license_plate_ocr
       vehicle_type_ocr
@@ -245,7 +252,6 @@ export const onDeleteSummons = /* GraphQL */ `
       name_on_summons_ocr
       createdAt
       updatedAt
-      owner
       __typename
     }
   }
