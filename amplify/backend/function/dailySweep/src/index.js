@@ -77,10 +77,12 @@ exports.handler = async (event) => {
 
     // Step 2: Create a list of all client names and AKAs for matching
     const clientNameMap = buildClientNameMap(clients);
-    console.log(`Built name map with ${Object.keys(clientNameMap).size} unique names`);
+    console.log(`Built name map with ${clientNameMap.size} unique names`);
+    // Debug: Log all registered client names for matching
+    console.log('Registered client names:', Array.from(clientNameMap.keys()));
 
-    // Step 3: Fetch summonses from NYC Open Data API
-    const apiSummonses = await fetchNYCData();
+    // Step 3: Fetch summonses from NYC Open Data API using targeted client queries
+    const apiSummonses = await fetchNYCDataForClients(clients);
     console.log(`Fetched ${apiSummonses.length} summonses from NYC API`);
 
     // Step 4: Process and match summonses
@@ -129,25 +131,62 @@ async function fetchAllClients() {
 }
 
 /**
+ * Normalize a company name for fuzzy matching
+ * - Lowercase
+ * - Remove extra whitespace (collapse multiple spaces to single)
+ * - Remove common suffixes (LLC, INC, CORP, etc.)
+ * - Trim
+ *
+ * @param {string} name - Raw company name
+ * @returns {string} Normalized name for matching
+ */
+function normalizeCompanyName(name) {
+  if (!name) return '';
+
+  let normalized = name
+    .toLowerCase()
+    .trim()
+    // Collapse multiple spaces to single space
+    .replace(/\s+/g, ' ')
+    // Remove common suffixes for matching purposes
+    .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '')
+    .trim();
+
+  return normalized;
+}
+
+/**
  * Build a map of client names (including AKAs) to client IDs
- * Performs case-insensitive matching
+ * Performs case-insensitive, fuzzy matching with normalized names
  *
  * @param {Array} clients - Array of client records
- * @returns {Map} Map of lowercase names to client objects
+ * @returns {Map} Map of normalized names to client objects
  */
 function buildClientNameMap(clients) {
   const nameMap = new Map();
 
   clients.forEach((client) => {
-    // Add the primary client name (case-insensitive)
-    const primaryName = client.name.toLowerCase().trim();
+    // Add the primary client name (normalized for fuzzy matching)
+    const primaryName = normalizeCompanyName(client.name);
     nameMap.set(primaryName, client);
 
-    // Add all AKAs (case-insensitive)
+    // Also add without spaces (for cases like "G C" vs "GC")
+    const noSpaceName = primaryName.replace(/\s/g, '');
+    if (noSpaceName !== primaryName) {
+      nameMap.set(noSpaceName, client);
+    }
+
+    // Add all AKAs (normalized)
     if (client.akas && Array.isArray(client.akas)) {
       client.akas.forEach((aka) => {
-        const akaName = aka.toLowerCase().trim();
+        const akaName = normalizeCompanyName(aka);
         nameMap.set(akaName, client);
+
+        // Also add without spaces
+        const akaNoSpace = akaName.replace(/\s/g, '');
+        if (akaNoSpace !== akaName) {
+          nameMap.set(akaNoSpace, client);
+        }
       });
     }
   });
@@ -156,43 +195,82 @@ function buildClientNameMap(clients) {
 }
 
 /**
- * Fetch ALL OATH summonses from NYC Open Data API
- * Updated: No longer filters for IDLING only - Arthur needs ALL violation types
- * (Sanitation, Noise, DOT, Environmental, etc.)
+ * Fetch OATH summonses from NYC Open Data API for specific client names
+ * Uses targeted queries to search for each client rather than bulk fetching
  *
- * @returns {Promise<Array>} Array of summons records
+ * @param {Array} clients - Array of client objects with name and akas
+ * @returns {Promise<Array>} Array of summons records matching client names
  */
-async function fetchNYCData() {
-  try {
-    const url = new URL(NYC_API_URL);
-    url.searchParams.append('$limit', API_LIMIT);
-    // NO FILTER - Fetch all violations for matched clients
-    url.searchParams.append('$order', 'hearing_date DESC');
+async function fetchNYCDataForClients(clients) {
+  const allSummonses = [];
+  const seenTickets = new Set();
 
-    console.log('Fetching from NYC API:', url.toString());
-    console.log('NYC_API_TOKEN present:', !!NYC_API_TOKEN);
+  const headers = {
+    'X-App-Token': NYC_API_TOKEN,
+    'Content-Type': 'application/json',
+  };
 
-    const headers = {
-      'X-App-Token': NYC_API_TOKEN,
-      'Content-Type': 'application/json',
-    };
+  console.log('NYC_API_TOKEN present:', !!NYC_API_TOKEN);
 
-    const response = await fetch(url.toString(), { headers });
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error('NYC API error response:', errorBody);
-      throw new Error(`NYC API returned ${response.status}: ${response.statusText} - ${errorBody}`);
+  // Build unique search terms from client names and AKAs
+  const searchTerms = new Set();
+  clients.forEach(client => {
+    // Add primary name (extract main part for LIKE search)
+    const mainName = client.name.replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '').trim();
+    if (mainName.length > 3) {
+      searchTerms.add(mainName.toUpperCase());
     }
 
-    const data = await response.json();
-    console.log(`Successfully fetched ${data.length} OATH summonses from NYC API (all violation types)`);
+    // Add AKAs
+    if (client.akas && Array.isArray(client.akas)) {
+      client.akas.forEach(aka => {
+        const akaMain = aka.replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '').trim();
+        if (akaMain.length > 3) {
+          searchTerms.add(akaMain.toUpperCase());
+        }
+      });
+    }
+  });
 
-    return data || [];
-  } catch (error) {
-    console.error('Error fetching NYC Open Data:', error);
-    throw new Error(`Failed to fetch NYC data: ${error.message}`);
+  console.log(`Searching for ${searchTerms.size} unique client name patterns...`);
+
+  // Query NYC API for each search term
+  for (const searchTerm of searchTerms) {
+    try {
+      const url = new URL(NYC_API_URL);
+      url.searchParams.append('$limit', 500); // Limit per client
+      // Escape single quotes for SQL LIKE query
+      const escapedTerm = searchTerm.replace(/'/g, "''");
+      url.searchParams.append('$where', `upper(respondent_last_name) like '%${escapedTerm}%'`);
+
+      console.log(`Querying for: ${searchTerm}`);
+
+      const response = await fetch(url.toString(), { headers });
+
+      if (!response.ok) {
+        console.error(`NYC API error for "${searchTerm}": ${response.status}`);
+        continue;
+      }
+
+      const data = await response.json();
+
+      // Deduplicate by ticket_number
+      for (const summons of data) {
+        if (!seenTickets.has(summons.ticket_number)) {
+          seenTickets.add(summons.ticket_number);
+          allSummonses.push(summons);
+        }
+      }
+
+      console.log(`  Found ${data.length} summonses for "${searchTerm}"`);
+
+    } catch (error) {
+      console.error(`Error querying for "${searchTerm}":`, error.message);
+    }
   }
+
+  console.log(`Total unique summonses fetched: ${allSummonses.length}`);
+  return allSummonses;
 }
 
 /**
@@ -328,14 +406,19 @@ async function processSummonses(apiSummonses, clientNameMap) {
       const respondentLastName = apiSummons.respondent_last_name || '';
       const respondentFullName = `${respondentFirstName} ${respondentLastName}`.trim();
 
-      // Check if respondent name matches any client
-      const respondentName = respondentFullName.toLowerCase().trim();
-
-      if (!respondentName) {
+      if (!respondentFullName) {
         continue; // Skip summonses with no respondent name
       }
 
-      const matchedClient = clientNameMap.get(respondentName);
+      // Normalize respondent name for fuzzy matching
+      const normalizedName = normalizeCompanyName(respondentFullName);
+      const noSpaceName = normalizedName.replace(/\s/g, '');
+
+      // Try to match: first with spaces, then without spaces
+      let matchedClient = clientNameMap.get(normalizedName);
+      if (!matchedClient && noSpaceName !== normalizedName) {
+        matchedClient = clientNameMap.get(noSpaceName);
+      }
 
       if (!matchedClient) {
         continue; // Not a match, skip
