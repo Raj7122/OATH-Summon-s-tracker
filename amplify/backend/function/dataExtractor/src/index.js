@@ -187,17 +187,18 @@ async function extractPDFData(pdfUrl) {
     // Convert PDF buffer to base64 for Gemini API
     const pdfBase64 = pdfBuffer.toString('base64');
 
-    // Initialize Gemini model (using Gemini 2.0 stable version)
+    // Initialize Gemini model (using Gemini 2.0 Flash Lite for better OCR and lower cost)
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.0-flash' // Stable 2.0 version (not experimental)
+      model: 'gemini-2.0-flash-lite'
     });
 
     // Prompt for structured extraction (from TRD FR-09)
+    // DEP ID format clarified to avoid confusion with summons number
     const prompt = `You are an expert legal assistant analyzing a NYC OATH summons PDF for an idling violation. Extract the following fields and return ONLY a valid JSON object with no additional text or formatting:
 
 {
   "license_plate_ocr": "license plate number",
-  "dep_id": "DEP ID or case number",
+  "dep_id": "DEP ID number in format YYYY-NNNNNN (e.g., '2025-030846'). This is NOT the summons number. Look for 'DEP ID' or 'Complaint Number' on the document. It has a 4-digit year, a dash, then 6 digits.",
   "vehicle_type_ocr": "vehicle type (e.g., truck, van, car)",
   "prior_offense_status": "first offense, repeat offense, or unknown",
   "violation_narrative": "brief description of the violation",
@@ -205,6 +206,8 @@ async function extractPDFData(pdfUrl) {
   "critical_flags_ocr": ["array of important flags like 'refrigeration unit', 'no driver present', etc."],
   "name_on_summons_ocr": "respondent/company name on the summons"
 }
+
+IMPORTANT: The DEP ID is different from the summons number. The summons number is typically 9-10 characters ending in a letter (e.g., '000954041L'). The DEP ID follows the format YYYY-NNNNNN (year-6digits).
 
 Return ONLY the JSON object. If a field cannot be determined, use null or an empty string.`;
 

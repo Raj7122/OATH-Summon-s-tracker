@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Box, Typography, Paper, Button, CircularProgress, Chip } from '@mui/material';
+import { Box, Typography, Paper, Button, CircularProgress, Chip, ToggleButtonGroup, ToggleButton } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import FilterListOffIcon from '@mui/icons-material/FilterListOff';
+import FiberNewIcon from '@mui/icons-material/FiberNew';
+import UpdateIcon from '@mui/icons-material/Update';
 import { generateClient } from 'aws-amplify/api';
 import { listSummons } from '../graphql/queries';
 import SummonsTable from '../components/SummonsTable';
@@ -88,10 +90,50 @@ function getBusinessDays(startDate: Date, endDate: Date): number {
   return count;
 }
 
+// Activity badge filter type
+type ActivityFilter = 'updated' | 'new' | null;
+
+/**
+ * Check if a summons is a new record (created within last 72 hours)
+ * Logic mirrors SummonsTable.isNewRecord
+ */
+function isNewRecord(summons: Summons): boolean {
+  if (!summons.createdAt || !summons.updatedAt) return false;
+
+  const createdDate = new Date(summons.createdAt);
+  const updatedDate = new Date(summons.updatedAt);
+  const now = new Date();
+  const hoursSinceCreation = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
+
+  // Brand new: created within last 72 hours AND createdAt matches updatedAt (never updated)
+  const createdTimeStr = createdDate.toISOString().slice(0, 16);
+  const updatedTimeStr = updatedDate.toISOString().slice(0, 16);
+  return hoursSinceCreation <= 72 && createdTimeStr === updatedTimeStr;
+}
+
+/**
+ * Check if a summons was recently updated (not new, but changed within last 72 hours)
+ * Logic mirrors SummonsTable.isUpdatedRecord
+ */
+function isUpdatedRecord(summons: Summons): boolean {
+  if (!summons.createdAt || !summons.updatedAt) return false;
+
+  const createdDate = new Date(summons.createdAt);
+  const updatedDate = new Date(summons.updatedAt);
+  const now = new Date();
+  const hoursSinceUpdate = (now.getTime() - updatedDate.getTime()) / (1000 * 60 * 60);
+
+  // Updated: createdAt differs from updatedAt AND updated within last 72 hours
+  const createdTimeStr = createdDate.toISOString().slice(0, 16);
+  const updatedTimeStr = updatedDate.toISOString().slice(0, 16);
+  return createdTimeStr !== updatedTimeStr && hoursSinceUpdate <= 72;
+}
+
 const Dashboard = () => {
   const [summonses, setSummonses] = useState<Summons[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending' | null>(null);
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>(null);
 
   useEffect(() => {
     loadSummonses();
@@ -132,14 +174,47 @@ const Dashboard = () => {
     const newFilter = activeFilter === filter ? null : filter;
     console.log('Filter clicked:', filter, 'Current:', activeFilter, 'New:', newFilter);
     setActiveFilter(newFilter);
+    // Clear activity filter when using card filters
+    if (newFilter) setActivityFilter(null);
   };
 
   /**
-   * Filter summonses based on active deadline filter
+   * Handle activity badge filter (UPDATED/NEW) toggle
+   * @param _event - React mouse event (unused)
+   * @param newFilter - The new activity filter value
+   */
+  const handleActivityFilterChange = (
+    _event: React.MouseEvent<HTMLElement>,
+    newFilter: ActivityFilter
+  ) => {
+    setActivityFilter(newFilter);
+    // Clear card filters when using activity filter
+    if (newFilter) setActiveFilter(null);
+  };
+
+  /**
+   * Filter summonses based on active deadline filter or activity filter
    * TRD v1.8: Updated to use business day logic and added hearing_complete filter
    * @returns Filtered array of summonses
    */
   const getFilteredSummonses = (): Summons[] => {
+    // First check activity filter (UPDATED/NEW)
+    if (activityFilter) {
+      console.log('Activity filter:', activityFilter, 'Total summonses:', summonses.length);
+
+      if (activityFilter === 'new') {
+        const filtered = summonses.filter(isNewRecord);
+        console.log('NEW filter returned:', filtered.length, 'summonses');
+        return filtered;
+      }
+
+      if (activityFilter === 'updated') {
+        const filtered = summonses.filter(isUpdatedRecord);
+        console.log('UPDATED filter returned:', filtered.length, 'summonses');
+        return filtered;
+      }
+    }
+
     if (!activeFilter) {
       console.log('No active filter, showing all summonses:', summonses.length);
       return summonses;
@@ -203,8 +278,8 @@ const Dashboard = () => {
   return (
     <Box>
       {/* Header Section */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
           <Typography variant="h4">Dashboard</Typography>
           {activeFilter && (
             <Chip
@@ -219,14 +294,64 @@ const Dashboard = () => {
               sx={{ fontWeight: 'bold' }}
             />
           )}
+          {activityFilter && (
+            <Chip
+              label={`Filter: ${activityFilter === 'new' ? 'NEW Records' : 'UPDATED Records'}`}
+              color={activityFilter === 'new' ? 'info' : 'warning'}
+              onDelete={() => setActivityFilter(null)}
+              sx={{ fontWeight: 'bold' }}
+            />
+          )}
         </Box>
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          {activeFilter && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+          {/* Activity Badge Filters (UPDATED/NEW) */}
+          <ToggleButtonGroup
+            value={activityFilter}
+            exclusive
+            onChange={handleActivityFilterChange}
+            size="small"
+            aria-label="activity filter"
+          >
+            <ToggleButton
+              value="updated"
+              aria-label="show updated records"
+              sx={{
+                '&.Mui-selected': {
+                  backgroundColor: 'warning.main',
+                  color: 'warning.contrastText',
+                  '&:hover': { backgroundColor: 'warning.dark' },
+                },
+              }}
+            >
+              <UpdateIcon sx={{ mr: 0.5, fontSize: 18 }} />
+              UPDATED
+            </ToggleButton>
+            <ToggleButton
+              value="new"
+              aria-label="show new records"
+              sx={{
+                '&.Mui-selected': {
+                  backgroundColor: 'info.main',
+                  color: 'info.contrastText',
+                  '&:hover': { backgroundColor: 'info.dark' },
+                },
+              }}
+            >
+              <FiberNewIcon sx={{ mr: 0.5, fontSize: 18 }} />
+              NEW
+            </ToggleButton>
+          </ToggleButtonGroup>
+
+          {(activeFilter || activityFilter) && (
             <Button
               variant="outlined"
               startIcon={<FilterListOffIcon />}
-              onClick={() => setActiveFilter(null)}
+              onClick={() => {
+                setActiveFilter(null);
+                setActivityFilter(null);
+              }}
               color="secondary"
+              size="small"
             >
               Clear Filter
             </Button>
@@ -258,15 +383,18 @@ const Dashboard = () => {
           {/* DataGrid Section - Shows filtered results when a deadline card is clicked */}
           <Paper sx={{ p: 2 }}>
             <SummonsTable summonses={filteredSummonses} onUpdate={loadSummonses} />
-            {activeFilter && (
+            {(activeFilter || activityFilter) && (
               <Box sx={{ mt: 2, textAlign: 'center' }}>
                 <Typography variant="caption" color="text.secondary">
                   Showing {filteredSummonses.length}{' '}
                   {activeFilter === 'critical' ? 'critical deadline' :
                    activeFilter === 'approaching' ? 'approaching deadline' :
                    activeFilter === 'hearing_complete' ? 'hearing complete' :
-                   'evidence pending'}
-                  {filteredSummonses.length !== 1 ? 's' : ''}. Click the card again to view all summonses.
+                   activeFilter === 'evidence_pending' ? 'evidence pending' :
+                   activityFilter === 'new' ? 'new' :
+                   activityFilter === 'updated' ? 'recently updated' : ''}
+                  {' '}record{filteredSummonses.length !== 1 ? 's' : ''}.
+                  {activeFilter ? ' Click the card again to view all summonses.' : ' Click the button again to view all summonses.'}
                 </Typography>
               </Box>
             )}
