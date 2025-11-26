@@ -461,7 +461,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
                 Top 5 Clients by Active Summons
               </Typography>
               {topClients.data.length > 0 ? (
-                <Box sx={{ height: isMobile ? 150 : 180 }}>
+                <Box sx={{ height: isMobile ? 180 : 210 }}>
                   <BarChart
                     layout="horizontal"
                     yAxis={[
@@ -479,8 +479,8 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
                         color: theme.palette.primary.main,
                       },
                     ]}
-                    height={isMobile ? 150 : 180}
-                    margin={{ left: 140, right: 20, top: 10, bottom: 30 }}
+                    height={isMobile ? 180 : 210}
+                    margin={{ left: 140, right: 20, top: 10, bottom: 50 }}
                     slotProps={{
                       legend: {
                         position: { vertical: 'bottom', horizontal: 'middle' },
