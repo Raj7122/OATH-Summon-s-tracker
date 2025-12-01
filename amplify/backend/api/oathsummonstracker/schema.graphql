@@ -76,4 +76,63 @@ type Summons @model @auth(rules: [{ allow: private }]) {
   idling_duration_ocr: String
   critical_flags_ocr: [String]
   name_on_summons_ocr: String
+
+  # OCR Processing Status (for Priority Queue Strategy)
+  # ocr_status: 'pending' = needs OCR, 'complete' = successfully OCR'd, 'failed' = OCR attempted but failed
+  ocr_status: String @default(value: "pending") @index(name: "byOcrStatus", queryField: "summonsByOcrStatus")
+  last_scan_date: AWSDateTime
+  ocr_failure_count: Int @default(value: "0")
+  ocr_failure_reason: String
+
+  # Sync Tracking ("Proof of Life" for Arthur)
+  # last_metadata_sync: Updated every time Phase 1 sees this record from the API
+  # This proves the system is working even if no changes occurred
+  last_metadata_sync: AWSDateTime
+
+  # Ghost Detection (for records that disappear from API)
+  api_miss_count: Int @default(value: "0")
+  is_archived: Boolean @default(value: "false")
+  archived_at: AWSDateTime
+  archived_reason: String
+
+  # Activity Log (Summons Lifecycle Audit)
+  # Stores history of all changes detected during daily sweeps
+  # Structure: [{ date, type, description, old_value, new_value }]
+  # Types: CREATED, STATUS_CHANGE, RESCHEDULE, AMOUNT_CHANGE, RESULT_CHANGE, AMENDMENT, OCR_COMPLETE, ARCHIVED
+  activity_log: AWSJSON
+}
+
+# SyncStatus - Global sync health tracking (singleton record)
+# Provides "Proof of Life" data for the frontend header badge
+type SyncStatus @model @auth(rules: [{ allow: private }]) {
+  id: ID!  # Always "GLOBAL" for singleton pattern
+
+  # Overall Sync Status
+  last_successful_sync: AWSDateTime
+  last_sync_attempt: AWSDateTime
+  sync_in_progress: Boolean @default(value: "false")
+
+  # Phase 1 Results (Metadata Sweep)
+  phase1_status: String  # 'success' | 'partial' | 'failed'
+  phase1_completed_at: AWSDateTime
+  phase1_new_records: Int
+  phase1_updated_records: Int
+  phase1_unchanged_records: Int
+  phase1_errors: [String]
+
+  # Phase 2 Results (OCR Processing)
+  phase2_status: String  # 'success' | 'partial' | 'failed'
+  phase2_completed_at: AWSDateTime
+  phase2_ocr_processed: Int
+  phase2_ocr_remaining: Int
+  phase2_ocr_failed: Int
+
+  # Daily OCR Counter (resets each day)
+  ocr_processed_today: Int @default(value: "0")
+  ocr_processing_date: AWSDate  # Reset counter when this date changes
+
+  # API Health Check
+  oath_api_reachable: Boolean @default(value: "true")
+  oath_api_last_check: AWSDateTime
+  oath_api_error: String
 }

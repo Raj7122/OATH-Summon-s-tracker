@@ -1,11 +1,17 @@
 /**
  * NYC OATH Summons Tracker - Data Extractor Lambda Function
  *
- * This function is invoked asynchronously after a new summons is created.
+ * This function is invoked by the dailySweep Phase 2 Priority Queue.
  * It performs:
- *   1. Web scraping of the video page to extract "Video Created Date"
- *   2. PDF OCR using Google Gemini API to extract structured data
- *   3. Updates the summons record with all extracted data
+ *   1. Safety check: Skip if violation_narrative already exists (immutability)
+ *   2. Web scraping of the video page to extract "Video Created Date"
+ *   3. PDF OCR using Google Gemini API to extract structured data
+ *   4. Updates the summons record with all extracted data
+ *
+ * CONSTRAINTS (from Priority Queue Strategy):
+ * - Daily Quota: 500 OCR requests max (enforced by dailySweep)
+ * - Rate Limit: 2 seconds between requests (enforced by dailySweep)
+ * - Immutability: Never re-OCR a successfully processed PDF
  *
  * FR-09: Automated Data Extraction (OCR & Scraper)
  */
@@ -57,6 +63,21 @@ exports.handler = async (event) => {
       throw new Error('Missing required parameters: summons_id or summons_number');
     }
 
+    // SAFETY CHECK: Fetch current record to verify it hasn't been OCR'd already
+    // This prevents wasting OCR credits on already-processed records
+    const existingRecord = await fetchExistingRecord(summons_id);
+    if (existingRecord && existingRecord.violation_narrative && existingRecord.violation_narrative.length > 0) {
+      console.log(`SKIPPED: ${summons_number} already has OCR data (immutability check)`);
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          message: 'Skipped - already has OCR data',
+          summons_id,
+          skipped: true,
+        }),
+      };
+    }
+
     const extractedData = {};
 
     // Part A: Web Scraper - Extract Video Created Date
@@ -91,10 +112,19 @@ exports.handler = async (event) => {
       }
     }
 
-    // Part C: Update Database with extracted data
+    // Part C: Update Database with extracted data and add activity log entry
     if (Object.keys(extractedData).length > 0) {
-      await updateSummonsWithExtractedData(summons_id, extractedData);
-      console.log(`Updated summons ${summons_number} with extracted data`);
+      // Create activity log entry for OCR completion
+      const activityEntry = {
+        date: new Date().toISOString(),
+        type: 'OCR_COMPLETE',
+        description: `Document scan completed. Extracted: ${Object.keys(extractedData).filter(k => extractedData[k]).join(', ')}`,
+        old_value: null,
+        new_value: extractedData.violation_narrative ? extractedData.violation_narrative.substring(0, 100) + '...' : 'Data extracted',
+      };
+
+      await updateSummonsWithExtractedDataAndLog(summons_id, extractedData, activityEntry);
+      console.log(`Updated summons ${summons_number} with extracted data and activity log`);
     } else {
       console.log('No data extracted, skipping database update');
     }
@@ -251,13 +281,21 @@ Return ONLY the JSON object. If a field cannot be determined, use null or an emp
 }
 
 /**
- * Update summons record with extracted data
+ * Update summons record with extracted data and add activity log entry
  *
  * @param {string} summonsId - Summons ID
  * @param {Object} extractedData - Data to update
+ * @param {Object} activityEntry - Activity log entry to append
  */
-async function updateSummonsWithExtractedData(summonsId, extractedData) {
+async function updateSummonsWithExtractedDataAndLog(summonsId, extractedData, activityEntry) {
   try {
+    // First, fetch the existing record to get the current activity_log
+    const existingRecord = await fetchExistingRecord(summonsId);
+    const existingLog = existingRecord?.activity_log || [];
+
+    // Append the new activity entry
+    const updatedLog = [...existingLog, activityEntry];
+
     // Build update expression dynamically based on available data
     const updateExpressions = [];
     const expressionAttributeNames = {};
@@ -282,6 +320,14 @@ async function updateSummonsWithExtractedData(summonsId, extractedData) {
       return;
     }
 
+    // Add activity_log
+    const logAttr = `#attr${attrIndex}`;
+    const logValue = `:val${attrIndex}`;
+    updateExpressions.push(`${logAttr} = ${logValue}`);
+    expressionAttributeNames[logAttr] = 'activity_log';
+    expressionAttributeValues[logValue] = updatedLog;
+    attrIndex++;
+
     // CRITICAL: Always update updatedAt timestamp (required by Amplify @model)
     const updatedAtAttr = `#attr${attrIndex}`;
     const updatedAtValue = `:val${attrIndex}`;
@@ -298,10 +344,30 @@ async function updateSummonsWithExtractedData(summonsId, extractedData) {
     };
 
     await dynamodb.update(params).promise();
-    console.log('Summons updated successfully with extracted data');
+    console.log('Summons updated successfully with extracted data and activity log');
   } catch (error) {
     console.error('Error updating summons:', error);
     throw new Error(`Database update failed: ${error.message}`);
+  }
+}
+
+/**
+ * Fetch existing summons record from database
+ * Used for safety check before OCR processing
+ *
+ * @param {string} summonsId - Summons ID
+ * @returns {Promise<Object|null>} Summons record or null
+ */
+async function fetchExistingRecord(summonsId) {
+  try {
+    const result = await dynamodb.get({
+      TableName: SUMMONS_TABLE,
+      Key: { id: summonsId },
+    }).promise();
+    return result.Item || null;
+  } catch (error) {
+    console.error('Error fetching existing record:', error);
+    return null;
   }
 }
 

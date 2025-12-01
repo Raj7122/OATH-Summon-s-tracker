@@ -49,13 +49,8 @@ import {
   Drawer,
   Switch,
   FormControlLabel,
-  Collapse,
-  IconButton,
   useTheme,
   useMediaQuery,
-  Badge,
-  Snackbar,
-  Alert,
   Select,
   MenuItem,
   Tooltip,
@@ -63,8 +58,6 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import FiberNewIcon from '@mui/icons-material/FiberNew';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
@@ -175,9 +168,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     open: false,
     summons: null,
   });
-
-  // Expanded rows for master-detail
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   // Auto-save notes with debounce
   useEffect(() => {
@@ -416,25 +406,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   };
 
   /**
-   * Toggle Master-Detail row expansion
-   *
-   * Adds or removes a summons ID from the expandedRows Set to show/hide the detail panel.
-   * Implements progressive disclosure pattern per Miller's Law.
-   *
-   * @param {string} id - Summons record ID to expand/collapse
-   * @returns {void}
-   */
-  const toggleRowExpansion = (id: string) => {
-    const newExpanded = new Set(expandedRows);
-    if (newExpanded.has(id)) {
-      newExpanded.delete(id);
-    } else {
-      newExpanded.add(id);
-    }
-    setExpandedRows(newExpanded);
-  };
-
-  /**
    * Check if a summons is "fresh" (updated in last 72 hours)
    *
    * Calculates time difference between now and updatedAt timestamp.
@@ -659,38 +630,8 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     );
   };
 
-  /**
-   * Render expand/collapse button for Master-Detail rows
-   *
-   * UX Improvement #3: Implements progressive disclosure pattern.
-   * Shows down arrow when collapsed, up arrow when expanded.
-   *
-   * @param {GridRenderCellParams} params - MUI DataGrid cell parameters
-   * @returns {JSX.Element} IconButton with arrow icon
-   */
-  const renderExpandButton = (params: GridRenderCellParams) => {
-    const isExpanded = expandedRows.has(params.row.id);
-    return (
-      <IconButton
-        size="small"
-        onClick={() => toggleRowExpansion(params.row.id)}
-        aria-label="expand row"
-      >
-        {isExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-      </IconButton>
-    );
-  };
-
   // Define columns - "Actionable 7" visible by default (UX Improvement #3)
   const columns: GridColDef[] = [
-    {
-      field: 'expand',
-      headerName: '',
-      width: 50,
-      sortable: false,
-      filterable: false,
-      renderCell: renderExpandButton,
-    },
     {
       field: 'respondent_name',
       headerName: 'Client',
@@ -702,11 +643,10 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       field: 'hearing_date',
       headerName: 'Hearing Date',
       width: 150,
-      valueFormatter: (params: any) => {
-        const value = params.value || params;
-        if (!value || typeof value !== 'string') return '';
+      valueFormatter: (params: { value: string | null }) => {
+        if (!params.value) return '';
         try {
-          return format(new Date(value), 'MMMM d, yyyy');
+          return format(new Date(params.value), 'MMMM d, yyyy');
         } catch {
           return '';
         }
@@ -743,9 +683,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       field: 'amount_due',
       headerName: 'Amount Due',
       width: 120,
-      valueFormatter: (value: number | string | null) => {
-        const num = typeof value === 'string' ? parseFloat(value) : value;
-        return num != null && !isNaN(num) ? `$${num.toFixed(2)}` : '';
+      valueFormatter: (params: { value: number | null }) => {
+        if (params.value == null) return '';
+        return `$${params.value.toFixed(2)}`;
       },
     },
     {
@@ -783,12 +723,11 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       headerName: 'Offense Level',
       width: 130,
     },
-    // Evidence checkboxes - Hidden on mobile (UX Improvement #4)
+    // Evidence checkboxes
     {
       field: 'evidence_reviewed',
       headerName: 'Reviewed',
       width: 90,
-      hide: isMobile,
       renderCell: (params: GridRenderCellParams) => (
         <Checkbox
           checked={params.value}
@@ -802,7 +741,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       field: 'added_to_calendar',
       headerName: 'Calendar',
       width: 90,
-      hide: isMobile,
       renderCell: (params: GridRenderCellParams) => (
         <Checkbox
           checked={params.value}
@@ -813,17 +751,15 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       ),
     },
     // Secondary columns - Hidden by default (Progressive Disclosure)
-    { field: 'license_plate_ocr', headerName: 'License Plate', width: 120, hide: true },
+    { field: 'license_plate_ocr', headerName: 'License Plate', width: 120 },
     {
       field: 'violation_date',
       headerName: 'Violation Date',
       width: 140,
-      hide: true,
-      valueFormatter: (params: any) => {
-        const value = params.value || params;
-        if (!value || typeof value !== 'string') return '';
+      valueFormatter: (params: { value: string | null }) => {
+        if (!params.value) return '';
         try {
-          return format(new Date(value), 'MMMM d, yyyy');
+          return format(new Date(params.value), 'MMMM d, yyyy');
         } catch {
           return '';
         }
@@ -833,12 +769,10 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       field: 'video_created_date',
       headerName: 'Video Created',
       width: 140,
-      hide: true,
-      valueFormatter: (params: any) => {
-        const value = params.value || params;
-        if (!value || typeof value !== 'string') return '';
+      valueFormatter: (params: { value: string | null }) => {
+        if (!params.value) return '';
         try {
-          return format(new Date(value), 'MMMM d, yyyy');
+          return format(new Date(params.value), 'MMMM d, yyyy');
         } catch {
           return '';
         }
@@ -848,17 +782,15 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       field: 'base_fine',
       headerName: 'Base Fine',
       width: 100,
-      hide: true,
-      valueFormatter: (value: number | string | null) => {
-        const num = typeof value === 'string' ? parseFloat(value) : value;
-        return num != null && !isNaN(num) ? `$${num.toFixed(2)}` : '';
+      valueFormatter: (params: { value: number | null }) => {
+        if (params.value == null) return '';
+        return `$${params.value.toFixed(2)}`;
       },
     },
     {
       field: 'summons_pdf_link',
       headerName: 'PDF',
       width: 80,
-      hide: true,
       renderCell: (params: GridRenderCellParams) => (
         <Link href={params.value} target="_blank" rel="noopener">
           View
@@ -869,7 +801,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       field: 'video_link',
       headerName: 'Video',
       width: 80,
-      hide: true,
       renderCell: (params: GridRenderCellParams) => (
         <Link href={params.value} target="_blank" rel="noopener">
           View
@@ -880,7 +811,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       field: 'evidence_requested',
       headerName: 'Requested',
       width: 100,
-      hide: true,
       renderCell: (params: GridRenderCellParams) => (
         <Checkbox
           checked={params.value}
@@ -894,7 +824,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       field: 'evidence_requested_date',
       headerName: 'Request Date',
       width: 140,
-      hide: true,
       renderCell: (params: GridRenderCellParams) => (
         <LocalizationProvider dateAdapter={AdapterDateFns}>
           <DatePicker
@@ -911,7 +840,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       field: 'evidence_received',
       headerName: 'Received',
       width: 90,
-      hide: true,
       renderCell: (params: GridRenderCellParams) => (
         <Checkbox
           checked={params.value}
@@ -925,7 +853,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       field: 'critical_flags_ocr',
       headerName: 'Flags',
       width: 150,
-      hide: true,
       renderCell: (params: GridRenderCellParams) => (
         <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
           {params.value?.map((flag: string, index: number) => (
@@ -934,147 +861,24 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
         </Box>
       ),
     },
-    { field: 'dep_id', headerName: 'ID Number', width: 120, hide: true },
-    { field: 'vehicle_type_ocr', headerName: 'Vehicle Type', width: 120, hide: true },
-    { field: 'prior_offense_status', headerName: 'Prior Offense', width: 120, hide: true },
-    { field: 'idling_duration_ocr', headerName: 'Idling Duration', width: 130, hide: true },
+    { field: 'dep_id', headerName: 'ID Number', width: 120 },
+    { field: 'vehicle_type_ocr', headerName: 'Vehicle Type', width: 120 },
+    { field: 'prior_offense_status', headerName: 'Prior Offense', width: 120 },
+    { field: 'idling_duration_ocr', headerName: 'Idling Duration', width: 130 },
     // Timestamp columns for sorting and activity detection
     {
       field: 'updatedAt',
       headerName: 'Last Updated',
       width: 150,
-      hide: true,
-      valueFormatter: (value: string) => (value ? new Date(value).toLocaleString() : ''),
+      valueFormatter: (params: { value: string | null }) => (params.value ? new Date(params.value).toLocaleString() : ''),
     },
     {
       field: 'createdAt',
       headerName: 'Created At',
       width: 150,
-      hide: true,
-      valueFormatter: (value: string) => (value ? new Date(value).toLocaleString() : ''),
+      valueFormatter: (params: { value: string | null }) => (params.value ? new Date(params.value).toLocaleString() : ''),
     },
   ];
-
-  /**
-   * Render Master-Detail expandable panel for secondary summons data
-   *
-   * UX Improvement #3: Implements progressive disclosure (Miller's Law).
-   * Shows 30+ secondary fields only when user expands a row to avoid cognitive overload.
-   * Displays violation info, vehicle info, financial info, and document links in a grid layout.
-   *
-   * @param {GridRowParams} params - MUI DataGrid row parameters
-   * @returns {JSX.Element | null} Collapse component with detail cards, or null if collapsed
-   */
-  const renderDetailPanel = (params: GridRowParams) => {
-    const summons = params.row as Summons;
-    const isExpanded = expandedRows.has(summons.id);
-
-    if (!isExpanded) return null;
-
-    return (
-      <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-        <Box sx={{ p: 3, bgcolor: 'grey.50', borderTop: 1, borderColor: 'divider' }}>
-          <Typography variant="h6" gutterBottom>
-            Additional Details
-          </Typography>
-
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 2 }}>
-            {/* Hearing Information */}
-            <Box>
-              <Typography variant="subtitle2" color="text.secondary">Hearing Info</Typography>
-              <Typography variant="body2">
-                Date: {summons.hearing_date ? format(new Date(summons.hearing_date), 'MMMM d, yyyy') : 'N/A'}
-              </Typography>
-              {summons.hearing_time && (
-                <Typography variant="body2">Time: {summons.hearing_time}</Typography>
-              )}
-              {summons.hearing_result && (
-                <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
-                  Result: {summons.hearing_result}
-                </Typography>
-              )}
-              <Typography variant="body2">Status: {summons.status || 'Unknown'}</Typography>
-            </Box>
-
-            {/* Violation Information */}
-            <Box>
-              <Typography variant="subtitle2" color="text.secondary">Violation Info</Typography>
-              <Typography variant="body2">
-                Type: {summons.code_description || 'Unknown'}
-              </Typography>
-              <Typography variant="body2">
-                Date: {summons.violation_date ? format(new Date(summons.violation_date), 'MMMM d, yyyy') : 'N/A'}
-              </Typography>
-              {summons.violation_time && (
-                <Typography variant="body2">Time: {summons.violation_time}</Typography>
-              )}
-              <Typography variant="body2">Location: {summons.violation_location || 'N/A'}</Typography>
-              {summons.idling_duration_ocr && (
-                <Typography variant="body2">Duration: {summons.idling_duration_ocr}</Typography>
-              )}
-            </Box>
-
-            {/* Vehicle/License Info */}
-            <Box>
-              <Typography variant="subtitle2" color="text.secondary">Vehicle Info</Typography>
-              <Typography variant="body2">License Plate: {summons.license_plate_ocr || 'N/A'}</Typography>
-              <Typography variant="body2">Vehicle Type: {summons.vehicle_type_ocr || 'N/A'}</Typography>
-              <Typography variant="body2">DEP ID: {summons.dep_id || 'N/A'}</Typography>
-              <Typography variant="body2">Agency ID: {summons.agency_id_number || 'N/A'}</Typography>
-            </Box>
-
-            {/* Financial Info */}
-            <Box>
-              <Typography variant="subtitle2" color="text.secondary">Financial Info</Typography>
-              <Typography variant="body2">Base Fine: ${summons.base_fine?.toFixed(2) || '0.00'}</Typography>
-              <Typography variant="body2">Amount Due: ${summons.amount_due?.toFixed(2) || '0.00'}</Typography>
-              {summons.paid_amount && summons.paid_amount > 0 && (
-                <Typography variant="body2" sx={{ color: 'success.main', fontWeight: 'bold' }}>
-                  Paid: ${summons.paid_amount.toFixed(2)}
-                </Typography>
-              )}
-              {summons.penalty_imposed && summons.penalty_imposed > 0 && (
-                <Typography variant="body2">Penalty: ${summons.penalty_imposed.toFixed(2)}</Typography>
-              )}
-            </Box>
-
-            {/* Documents */}
-            <Box>
-              <Typography variant="subtitle2" color="text.secondary">Documents</Typography>
-              <Link href={summons.summons_pdf_link} target="_blank" rel="noopener" sx={{ display: 'block', mb: 1 }}>
-                View Summons PDF
-              </Link>
-              <Link href={summons.video_link} target="_blank" rel="noopener" sx={{ display: 'block' }}>
-                View Video Evidence
-              </Link>
-            </Box>
-          </Box>
-
-          {/* OCR Narrative */}
-          {summons.violation_narrative && (
-            <Box sx={{ mt: 2 }}>
-              <Typography variant="subtitle2" color="text.secondary">Violation Narrative (OCR)</Typography>
-              <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
-                {summons.violation_narrative}
-              </Typography>
-            </Box>
-          )}
-
-          {/* Critical Flags */}
-          {summons.critical_flags_ocr && summons.critical_flags_ocr.length > 0 && (
-            <Box sx={{ mt: 2 }}>
-              <Typography variant="subtitle2" color="text.secondary" gutterBottom>Critical Flags</Typography>
-              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                {summons.critical_flags_ocr.map((flag, index) => (
-                  <Chip key={index} label={flag} color="warning" size="small" />
-                ))}
-              </Box>
-            </Box>
-          )}
-        </Box>
-      </Collapse>
-    );
-  };
 
   return (
     <>
@@ -1088,6 +892,29 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
           },
           sorting: {
             sortModel: [{ field: 'updatedAt', sort: 'desc' }],
+          },
+          columns: {
+            columnVisibilityModel: {
+              // Hide secondary columns by default (Progressive Disclosure)
+              license_plate_ocr: false,
+              violation_date: false,
+              video_created_date: false,
+              base_fine: false,
+              summons_pdf_link: false,
+              video_link: false,
+              evidence_requested: false,
+              evidence_requested_date: false,
+              evidence_received: false,
+              critical_flags_ocr: false,
+              dep_id: false,
+              vehicle_type_ocr: false,
+              prior_offense_status: false,
+              idling_duration_ocr: false,
+              updatedAt: false,
+              createdAt: false,
+              // Hide evidence checkboxes on mobile
+              ...(isMobile ? { evidence_reviewed: false, added_to_calendar: false } : {}),
+            },
           },
         }}
         slots={{ toolbar: GridToolbar }}
@@ -1139,8 +966,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
             },
           },
         }}
-        getDetailPanelContent={renderDetailPanel}
-        getDetailPanelHeight={() => 'auto'}
       />
 
       {/* Notes Dialog with Auto-Save (UX Improvement #7) */}
@@ -1210,7 +1035,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
                   mobileDrawer.summons &&
                   handleCheckboxChange(mobileDrawer.summons.id, 'evidence_reviewed', e.target.checked)
                 }
-                size="large"
+                size="medium"
               />
             }
             label="Evidence Reviewed"
@@ -1223,7 +1048,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
                   mobileDrawer.summons &&
                   handleCheckboxChange(mobileDrawer.summons.id, 'added_to_calendar', e.target.checked)
                 }
-                size="large"
+                size="medium"
               />
             }
             label="Added to Calendar"
@@ -1236,7 +1061,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
                   mobileDrawer.summons &&
                   handleCheckboxChange(mobileDrawer.summons.id, 'evidence_requested', e.target.checked)
                 }
-                size="large"
+                size="medium"
               />
             }
             label="Evidence Requested"
@@ -1249,7 +1074,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
                   mobileDrawer.summons &&
                   handleCheckboxChange(mobileDrawer.summons.id, 'evidence_received', e.target.checked)
                 }
-                size="large"
+                size="medium"
               />
             }
             label="Evidence Received"

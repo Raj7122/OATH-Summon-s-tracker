@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import CalendarDashboard from './pages/CalendarDashboard'
 import Clients from './pages/Clients'
 import Account from './pages/Account'
 import Layout from './components/Layout'
@@ -21,7 +22,10 @@ function App() {
           }
         >
           <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<Dashboard />} />
+          {/* New Calendar-Centric Dashboard (Strategic Pivot) */}
+          <Route path="dashboard" element={<CalendarDashboard />} />
+          {/* Legacy Dashboard (kept for reference) */}
+          <Route path="dashboard-legacy" element={<Dashboard />} />
           <Route path="clients" element={<Clients />} />
           <Route path="account" element={<Account />} />
         </Route>
