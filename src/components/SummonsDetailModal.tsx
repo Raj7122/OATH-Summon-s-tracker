@@ -253,13 +253,26 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   const [notes, setNotes] = useState('');
   const [notesSaved, setNotesSaved] = useState(false);
   const [internalStatus, setInternalStatus] = useState('New');
-  
+
+  // Local state for checkboxes (for immediate UI feedback)
+  const [evidenceReviewed, setEvidenceReviewed] = useState(false);
+  const [addedToCalendar, setAddedToCalendar] = useState(false);
+  const [evidenceRequested, setEvidenceRequested] = useState(false);
+  const [evidenceReceived, setEvidenceReceived] = useState(false);
+  const [evidenceRequestedDate, setEvidenceRequestedDate] = useState<string | null>(null);
+
   // Initialize local state when summons changes
   useEffect(() => {
     if (summons) {
       setNotes(summons.notes || '');
       setInternalStatus(summons.internal_status || 'New');
       setNotesSaved(false);
+      // Sync checkbox states
+      setEvidenceReviewed(summons.evidence_reviewed || false);
+      setAddedToCalendar(summons.added_to_calendar || false);
+      setEvidenceRequested(summons.evidence_requested || false);
+      setEvidenceReceived(summons.evidence_received || false);
+      setEvidenceRequestedDate(summons.evidence_requested_date || null);
     }
   }, [summons]);
   
@@ -280,14 +293,33 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   
   /**
    * Handle checkbox changes for evidence tracking
+   * Updates local state immediately for responsive UI, then persists to backend
    */
   const handleCheckboxChange = (field: string, checked: boolean) => {
-    onUpdate(summons.id, field, checked);
-    
-    // Auto-set evidence_requested_date when checking evidence_requested
-    if (field === 'evidence_requested' && checked && !summons.evidence_requested_date) {
-      onUpdate(summons.id, 'evidence_requested_date', dayjs().toISOString());
+    // Update local state immediately for responsive UI
+    switch (field) {
+      case 'evidence_reviewed':
+        setEvidenceReviewed(checked);
+        break;
+      case 'added_to_calendar':
+        setAddedToCalendar(checked);
+        break;
+      case 'evidence_requested':
+        setEvidenceRequested(checked);
+        // Auto-set evidence_requested_date when checking
+        if (checked && !evidenceRequestedDate) {
+          const now = dayjs().toISOString();
+          setEvidenceRequestedDate(now);
+          onUpdate(summons.id, 'evidence_requested_date', now);
+        }
+        break;
+      case 'evidence_received':
+        setEvidenceReceived(checked);
+        break;
     }
+
+    // Persist to backend
+    onUpdate(summons.id, field, checked);
   };
   
   /**
@@ -302,7 +334,9 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
    * Handle evidence requested date change
    */
   const handleDateChange = (date: dayjs.Dayjs | null) => {
-    onUpdate(summons.id, 'evidence_requested_date', date?.toISOString() || null);
+    const dateValue = date?.toISOString() || null;
+    setEvidenceRequestedDate(dateValue);
+    onUpdate(summons.id, 'evidence_requested_date', dateValue);
   };
   
   return (
@@ -533,7 +567,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   <FormControlLabel
                     control={
                       <Checkbox
-                        checked={summons.evidence_reviewed || false}
+                        checked={evidenceReviewed}
                         onChange={(e) => handleCheckboxChange('evidence_reviewed', e.target.checked)}
                       />
                     }
@@ -542,7 +576,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   <FormControlLabel
                     control={
                       <Checkbox
-                        checked={summons.added_to_calendar || false}
+                        checked={addedToCalendar}
                         onChange={(e) => handleCheckboxChange('added_to_calendar', e.target.checked)}
                       />
                     }
@@ -551,19 +585,19 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   <FormControlLabel
                     control={
                       <Checkbox
-                        checked={summons.evidence_requested || false}
+                        checked={evidenceRequested}
                         onChange={(e) => handleCheckboxChange('evidence_requested', e.target.checked)}
                       />
                     }
                     label="Evidence Requested"
                   />
-                  
+
                   {/* Evidence Requested Date Picker */}
-                  {summons.evidence_requested && (
+                  {evidenceRequested && (
                     <LocalizationProvider dateAdapter={AdapterDayjs}>
                       <DatePicker
                         label="Request Date"
-                        value={summons.evidence_requested_date ? dayjs(summons.evidence_requested_date) : null}
+                        value={evidenceRequestedDate ? dayjs(evidenceRequestedDate) : null}
                         onChange={handleDateChange}
                         slotProps={{
                           textField: { size: 'small', fullWidth: true },
@@ -571,11 +605,11 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                       />
                     </LocalizationProvider>
                   )}
-                  
+
                   <FormControlLabel
                     control={
                       <Checkbox
-                        checked={summons.evidence_received || false}
+                        checked={evidenceReceived}
                         onChange={(e) => handleCheckboxChange('evidence_received', e.target.checked)}
                       />
                     }

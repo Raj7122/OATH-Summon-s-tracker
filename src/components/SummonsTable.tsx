@@ -891,7 +891,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
             paginationModel: { pageSize: 50 },
           },
           sorting: {
-            sortModel: [{ field: 'updatedAt', sort: 'desc' }],
+            sortModel: [{ field: 'hearing_date', sort: 'desc' }],
           },
           columns: {
             columnVisibilityModel: {
