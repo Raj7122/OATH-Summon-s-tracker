@@ -179,23 +179,27 @@ export function isNewRecord(summons: Summons): boolean {
 }
 
 /**
- * Check if a summons was recently updated (not new, but changed within last 72 hours)
- * Updated: createdAt differs from updatedAt AND updated within last 72 hours
- * 
+ * Check if a summons was recently updated BY THE DAILY SWEEP (not manual user edits)
+ *
+ * Uses last_change_at (set by daily sweep when NYC API changes detected) instead of
+ * updatedAt (which updates on any change including user notes/checkboxes).
+ *
  * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
  */
 export function isUpdatedRecord(summons: Summons): boolean {
-  if (!summons.createdAt || !summons.updatedAt) return false;
+  // Use last_change_at which is only set by the daily sweep when API changes are detected
+  // This excludes manual user edits (notes, checkboxes) from triggering the UPDATED badge
+  if (!summons.last_change_at) return false;
 
-  const createdDate = new Date(summons.createdAt);
-  const updatedDate = new Date(summons.updatedAt);
+  // Must not be a new record (new records get NEW badge, not UPDATED)
+  if (isNewRecord(summons)) return false;
+
+  const lastChangeDate = new Date(summons.last_change_at);
   const now = new Date();
-  const hoursSinceUpdate = (now.getTime() - updatedDate.getTime()) / (1000 * 60 * 60);
+  const hoursSinceChange = (now.getTime() - lastChangeDate.getTime()) / (1000 * 60 * 60);
 
-  // Updated: createdAt differs from updatedAt AND updated within last 72 hours
-  const createdTimeStr = createdDate.toISOString().slice(0, 16);
-  const updatedTimeStr = updatedDate.toISOString().slice(0, 16);
-  return createdTimeStr !== updatedTimeStr && hoursSinceUpdate <= 72;
+  // Show UPDATED badge if daily sweep detected changes within last 72 hours
+  return hoursSinceChange <= 72;
 }
 
 /**
