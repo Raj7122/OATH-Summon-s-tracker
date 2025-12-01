@@ -32,10 +32,28 @@ import {
   useMediaQuery,
   Alert,
   Snackbar,
+  Drawer,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon,
+  Divider,
+  IconButton,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import TableChartIcon from '@mui/icons-material/TableChart';
+import HistoryIcon from '@mui/icons-material/History';
+import CloseIcon from '@mui/icons-material/Close';
+import AddCircleIcon from '@mui/icons-material/AddCircle';
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
+import EventIcon from '@mui/icons-material/Event';
+import GavelIcon from '@mui/icons-material/Gavel';
+import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import PaymentIcon from '@mui/icons-material/Payment';
+import EditIcon from '@mui/icons-material/Edit';
+import DocumentScannerIcon from '@mui/icons-material/DocumentScanner';
+import ArchiveIcon from '@mui/icons-material/Archive';
 import { generateClient } from 'aws-amplify/api';
 
 // Components
@@ -88,6 +106,9 @@ const CalendarDashboard: React.FC = () => {
 
   // Mobile: Toggle between calendar and grid view
   const [mobileView, setMobileView] = useState<'calendar' | 'grid'>('grid');
+
+  // Audit Trail drawer state
+  const [auditTrailOpen, setAuditTrailOpen] = useState(false);
 
   /**
    * Load summonses from GraphQL API
@@ -288,7 +309,68 @@ const CalendarDashboard: React.FC = () => {
   const handleSnackbarClose = () => {
     setSnackbar((prev) => ({ ...prev, open: false }));
   };
-  
+
+  /**
+   * Get icon for activity log entry type
+   */
+  const getActivityIcon = (type: string) => {
+    switch (type) {
+      case 'CREATED':
+        return <AddCircleIcon sx={{ color: '#4CAF50' }} />;
+      case 'STATUS_CHANGE':
+        return <SwapHorizIcon sx={{ color: '#FF9800' }} />;
+      case 'RESCHEDULE':
+        return <EventIcon sx={{ color: '#2196F3' }} />;
+      case 'RESULT_CHANGE':
+        return <GavelIcon sx={{ color: '#9C27B0' }} />;
+      case 'AMOUNT_CHANGE':
+        return <AttachMoneyIcon sx={{ color: '#F44336' }} />;
+      case 'PAYMENT':
+        return <PaymentIcon sx={{ color: '#4CAF50' }} />;
+      case 'AMENDMENT':
+        return <EditIcon sx={{ color: '#607D8B' }} />;
+      case 'OCR_COMPLETE':
+        return <DocumentScannerIcon sx={{ color: '#00BCD4' }} />;
+      case 'ARCHIVED':
+        return <ArchiveIcon sx={{ color: '#757575' }} />;
+      default:
+        return <HistoryIcon />;
+    }
+  };
+
+  /**
+   * Get all activity log entries across all summonses, sorted by date (most recent first)
+   * This provides a comprehensive audit trail of all NYC API changes detected by daily sweep
+   */
+  const getAllActivityLogs = useMemo(() => {
+    const allLogs: Array<{
+      date: string;
+      type: string;
+      description: string;
+      old_value: string | null;
+      new_value: string | null;
+      summons_number: string;
+      respondent_name: string;
+    }> = [];
+
+    summonses.forEach((summons) => {
+      if (summons.activity_log && Array.isArray(summons.activity_log)) {
+        summons.activity_log.forEach((entry) => {
+          allLogs.push({
+            ...entry,
+            summons_number: summons.summons_number,
+            respondent_name: summons.respondent_name,
+          });
+        });
+      }
+    });
+
+    // Sort by date, most recent first
+    allLogs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    return allLogs;
+  }, [summonses]);
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Header Section */}
@@ -399,6 +481,24 @@ const CalendarDashboard: React.FC = () => {
             </Box>
           )}
           
+          {/* Audit Trail Button - Shows all historical changes from daily sweep */}
+          <Button
+            variant="outlined"
+            startIcon={<HistoryIcon />}
+            onClick={() => setAuditTrailOpen(true)}
+            size={isMobile ? 'small' : 'medium'}
+            sx={{
+              borderColor: 'grey.400',
+              color: 'text.secondary',
+              '&:hover': {
+                borderColor: 'grey.600',
+                backgroundColor: 'grey.100',
+              },
+            }}
+          >
+            {isMobile ? '' : 'Audit Trail'}
+          </Button>
+
           <Button
             variant="outlined"
             startIcon={<RefreshIcon />}
@@ -506,6 +606,85 @@ const CalendarDashboard: React.FC = () => {
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+      {/* Audit Trail Drawer - Comprehensive ledger of all NYC API changes */}
+      <Drawer
+        anchor="right"
+        open={auditTrailOpen}
+        onClose={() => setAuditTrailOpen(false)}
+        PaperProps={{
+          sx: { width: { xs: '100%', sm: 450 } },
+        }}
+      >
+        <Box sx={{ p: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <HistoryIcon color="action" />
+              Audit Trail
+            </Typography>
+            <IconButton onClick={() => setAuditTrailOpen(false)} size="small">
+              <CloseIcon />
+            </IconButton>
+          </Box>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Complete history of all changes detected by the daily sweep from NYC Open Data.
+            This ledger persists beyond the 72-hour UPDATED badge window.
+          </Typography>
+          <Divider sx={{ mb: 2 }} />
+
+          {getAllActivityLogs.length === 0 ? (
+            <Box sx={{ py: 4, textAlign: 'center' }}>
+              <HistoryIcon sx={{ fontSize: 48, color: 'grey.400', mb: 1 }} />
+              <Typography color="text.secondary">
+                No activity recorded yet.
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Changes will appear here after the daily sweep runs.
+              </Typography>
+            </Box>
+          ) : (
+            <List dense>
+              {getAllActivityLogs.map((entry, index) => (
+                <Box key={`${entry.summons_number}-${entry.date}-${index}`}>
+                  <ListItem alignItems="flex-start" sx={{ px: 0 }}>
+                    <ListItemIcon sx={{ minWidth: 40 }}>
+                      {getActivityIcon(entry.type)}
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <Typography variant="subtitle2" component="span">
+                            {entry.respondent_name}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {new Date(entry.date).toLocaleDateString()}
+                          </Typography>
+                        </Box>
+                      }
+                      secondary={
+                        <>
+                          <Typography variant="body2" color="text.secondary" component="span">
+                            #{entry.summons_number}
+                          </Typography>
+                          <Typography variant="body2" component="div" sx={{ mt: 0.5 }}>
+                            {entry.description}
+                          </Typography>
+                          {entry.old_value && entry.new_value && (
+                            <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
+                              {entry.old_value} → {entry.new_value}
+                            </Typography>
+                          )}
+                        </>
+                      }
+                    />
+                  </ListItem>
+                  {index < getAllActivityLogs.length - 1 && <Divider variant="inset" component="li" />}
+                </Box>
+              ))}
+            </List>
+          )}
+        </Box>
+      </Drawer>
     </Box>
   );
 };
