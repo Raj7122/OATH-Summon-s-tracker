@@ -468,8 +468,6 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
                       {
                         scaleType: 'band',
                         data: topClients.labels,
-                        categoryGapRatio: 0.4,
-                        barGapRatio: 0.2,
                       },
                     ]}
                     series={[

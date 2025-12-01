@@ -144,9 +144,9 @@ const Dashboard = () => {
     try {
       const result = await client.graphql({
         query: listSummons,
-      });
+      }) as { data: { listSummons: { items: Summons[] } } };
       console.log('Loaded summonses:', result.data.listSummons.items);
-      setSummonses(result.data.listSummons.items as Summons[]);
+      setSummonses(result.data.listSummons.items);
     } catch (error) {
       console.error('Error loading summonses:', error);
       // Log detailed error information for debugging

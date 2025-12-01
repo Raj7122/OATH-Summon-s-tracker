@@ -17,6 +17,15 @@ const amplifyConfig = {
   },
 };
 
-Amplify.configure(amplifyConfig);
+Amplify.configure({
+  ...amplifyConfig,
+  API: {
+    GraphQL: {
+      ...amplifyConfig.API.GraphQL,
+      // Per Amplify types, defaultAuthMode must be GraphQLAuthMode (not a string literal):
+      defaultAuthMode: 'userPool' as const,
+    },
+  },
+});
 
 export default Amplify;

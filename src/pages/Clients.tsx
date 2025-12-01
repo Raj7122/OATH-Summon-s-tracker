@@ -8,8 +8,6 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions,
-  IconButton,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -49,8 +47,8 @@ const Clients = () => {
     try {
       const result = await client.graphql({
         query: listClients,
-      });
-      setClients(result.data.listClients.items as Client[]);
+      }) as { data: { listClients: { items: Client[] } } };
+      setClients(result.data.listClients.items);
     } catch (error) {
       console.error('Error loading clients:', error);
     } finally {
