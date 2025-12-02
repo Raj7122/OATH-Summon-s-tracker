@@ -68,7 +68,9 @@ type Summons @model @auth(rules: [{ allow: private }]) {
   last_change_at: AWSDateTime
 
   # OCR Fields (from Google Gemini)
-  dep_id: String
+  # id_number: The DEP complaint ID number in format YYYY-NNNNNN (e.g., 2025-030846)
+  # This is NOT the summons number - renamed from dep_id for clarity
+  id_number: String
   license_plate_ocr: String
   vehicle_type_ocr: String
   prior_offense_status: String

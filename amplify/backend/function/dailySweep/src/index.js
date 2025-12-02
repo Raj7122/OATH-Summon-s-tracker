@@ -889,7 +889,14 @@ async function invokeOCRExtractor(record) {
     const response = JSON.parse(result.Payload);
 
     if (response.statusCode === 200) {
-      return { success: true };
+      // Parse the body to check if OCR data was actually extracted
+      const body = JSON.parse(response.body || '{}');
+      if (body.hasOCRData) {
+        return { success: true };
+      } else {
+        // statusCode 200 but no OCR data (e.g., quota exceeded, extraction failed)
+        return { success: false, error: body.message || 'No OCR data extracted' };
+      }
     } else {
       return { success: false, error: response.body || 'Unknown error' };
     }
