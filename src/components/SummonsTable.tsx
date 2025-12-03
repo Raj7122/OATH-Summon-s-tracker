@@ -98,7 +98,7 @@ interface Summons {
   evidence_requested_date?: string;
   evidence_received: boolean;
   license_plate_ocr?: string;
-  dep_id?: string;
+  id_number?: string;
   vehicle_type_ocr?: string;
   prior_offense_status?: string;
   violation_narrative?: string;
@@ -861,7 +861,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
         </Box>
       ),
     },
-    { field: 'dep_id', headerName: 'ID Number', width: 120 },
+    { field: 'id_number', headerName: 'ID Number', width: 120 },
     { field: 'vehicle_type_ocr', headerName: 'Vehicle Type', width: 120 },
     { field: 'prior_offense_status', headerName: 'Prior Offense', width: 120 },
     { field: 'idling_duration_ocr', headerName: 'Idling Duration', width: 130 },
@@ -906,7 +906,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
               evidence_requested_date: false,
               evidence_received: false,
               critical_flags_ocr: false,
-              dep_id: false,
+              id_number: false,
               vehicle_type_ocr: false,
               prior_offense_status: false,
               idling_duration_ocr: false,

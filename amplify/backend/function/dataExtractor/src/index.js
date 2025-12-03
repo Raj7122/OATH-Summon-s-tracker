@@ -129,12 +129,21 @@ exports.handler = async (event) => {
       console.log('No data extracted, skipping database update');
     }
 
+    // Check if we extracted meaningful OCR data (beyond just video scraping)
+    const hasOCRData = !!(
+      extractedData.violation_narrative ||
+      extractedData.license_plate_ocr ||
+      extractedData.id_number ||
+      extractedData.vehicle_type_ocr
+    );
+
     return {
       statusCode: 200,
       body: JSON.stringify({
-        message: 'Data extraction completed',
+        message: hasOCRData ? 'Data extraction completed' : 'No OCR data extracted',
         summons_id,
         extractedFields: Object.keys(extractedData),
+        hasOCRData, // Flag for dailySweep to know if OCR succeeded
       }),
     };
   } catch (error) {
@@ -223,12 +232,12 @@ async function extractPDFData(pdfUrl) {
     });
 
     // Prompt for structured extraction (from TRD FR-09)
-    // DEP ID format clarified to avoid confusion with summons number
+    // ID Number (formerly DEP ID) format strictly defined with pattern YYYY-NNNNNN
     const prompt = `You are an expert legal assistant analyzing a NYC OATH summons PDF for an idling violation. Extract the following fields and return ONLY a valid JSON object with no additional text or formatting:
 
 {
   "license_plate_ocr": "license plate number",
-  "dep_id": "DEP ID number in format YYYY-NNNNNN (e.g., '2025-030846'). This is NOT the summons number. Look for 'DEP ID' or 'Complaint Number' on the document. It has a 4-digit year, a dash, then 6 digits.",
+  "id_number": "The ID Number / DEP Complaint Number in STRICT format YYYY-NNNNNN (4-digit year, hyphen, 6 digits). Example: '2025-030846'. Look for labels 'ID Number', 'DEP ID', 'Complaint Number', or 'Complaint ID' on the document. CRITICAL: This must match the regex pattern ^\\d{4}-\\d{6}$. If you cannot find a value matching this exact pattern, return null.",
   "vehicle_type_ocr": "vehicle type (e.g., truck, van, car)",
   "prior_offense_status": "first offense, repeat offense, or unknown",
   "violation_narrative": "brief description of the violation",
@@ -237,7 +246,12 @@ async function extractPDFData(pdfUrl) {
   "name_on_summons_ocr": "respondent/company name on the summons"
 }
 
-IMPORTANT: The DEP ID is different from the summons number. The summons number is typically 9-10 characters ending in a letter (e.g., '000954041L'). The DEP ID follows the format YYYY-NNNNNN (year-6digits).
+CRITICAL DISTINCTION - ID Number vs Summons Number:
+- ID Number (what we want): Format YYYY-NNNNNN (e.g., '2025-030846') - 4-digit year, hyphen, 6 digits
+- Summons Number (DO NOT USE): Format 9 digits + 1 letter (e.g., '000954041L', '000969803K')
+
+If you see a 9-digit number followed by a letter, that is the Summons Number - DO NOT return it as id_number.
+Only return id_number if it matches the exact pattern: 4 digits, hyphen, 6 digits.
 
 Return ONLY the JSON object. If a field cannot be determined, use null or an empty string.`;
 
@@ -263,10 +277,37 @@ Return ONLY the JSON object. If a field cannot be determined, use null or an emp
 
     const ocrData = JSON.parse(jsonMatch[0]);
 
+    // Validate and sanitize id_number field
+    // MUST match pattern YYYY-NNNNNN (e.g., 2025-030846)
+    // MUST NOT match summons number pattern (9 digits + 1 letter)
+    let validatedIdNumber = null;
+    const rawIdNumber = ocrData.id_number || ocrData.dep_id || null; // Support legacy field name
+
+    if (rawIdNumber) {
+      // Pattern for valid ID Number: exactly 4 digits, hyphen, 6 digits
+      const validIdPattern = /^\d{4}-\d{6}$/;
+      // Pattern for invalid Summons Number: 9+ digits followed by optional letter
+      const invalidSummonsPattern = /^\d{9,}\d*[A-Za-z]?$/;
+
+      if (validIdPattern.test(rawIdNumber)) {
+        // Valid ID Number format
+        validatedIdNumber = rawIdNumber;
+        console.log(`ID Number validated: ${rawIdNumber}`);
+      } else if (invalidSummonsPattern.test(rawIdNumber)) {
+        // This is a summons number, not an ID number - reject it
+        console.warn(`REJECTED: "${rawIdNumber}" matches Summons Number format, not ID Number`);
+        validatedIdNumber = null;
+      } else {
+        // Unknown format - reject to be safe
+        console.warn(`REJECTED: "${rawIdNumber}" does not match expected ID Number format YYYY-NNNNNN`);
+        validatedIdNumber = null;
+      }
+    }
+
     // Return with consistent field names
     return {
       license_plate_ocr: ocrData.license_plate_ocr || null,
-      dep_id: ocrData.dep_id || null,
+      id_number: validatedIdNumber,
       vehicle_type_ocr: ocrData.vehicle_type_ocr || null,
       prior_offense_status: ocrData.prior_offense_status || null,
       violation_narrative: ocrData.violation_narrative || null,

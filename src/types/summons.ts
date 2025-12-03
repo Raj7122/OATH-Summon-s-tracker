@@ -40,7 +40,10 @@ export interface Summons {
   evidence_requested_date?: string;
   evidence_received: boolean;
   license_plate_ocr?: string;
+  /** @deprecated Use id_number instead */
   dep_id?: string;
+  /** ID Number / DEP Complaint Number in format YYYY-NNNNNN (e.g., 2025-030846) */
+  id_number?: string;
   vehicle_type_ocr?: string;
   prior_offense_status?: string;
   violation_narrative?: string;

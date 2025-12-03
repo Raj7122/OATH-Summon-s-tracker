@@ -77,7 +77,7 @@ interface Summons {
   evidence_requested_date?: string;
   evidence_received: boolean;
   license_plate_ocr?: string;
-  dep_id?: string;
+  id_number?: string;
   vehicle_type_ocr?: string;
   prior_offense_status?: string;
   violation_narrative?: string;
