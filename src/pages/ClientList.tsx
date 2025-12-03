@@ -308,7 +308,7 @@ const ClientList: React.FC = () => {
           <Button
             variant="outlined"
             startIcon={<SettingsIcon />}
-            onClick={() => navigate('/clients/manage')}
+            onClick={() => navigate('/manage-clients')}
           >
             Manage Clients
           </Button>

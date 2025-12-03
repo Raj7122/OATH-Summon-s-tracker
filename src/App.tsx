@@ -28,10 +28,11 @@ function App() {
           <Route path="dashboard" element={<CalendarDashboard />} />
           {/* Legacy Dashboard (kept for reference) */}
           <Route path="dashboard-legacy" element={<Dashboard />} />
-          <Route path="clients" element={<Clients />} />
-          {/* Client Center - Practice Management View */}
-          <Route path="client-center" element={<ClientList />} />
-          <Route path="client-center/:id" element={<ClientDetail />} />
+          {/* Client Center - Practice Management View (replaces old Clients page) */}
+          <Route path="clients" element={<ClientList />} />
+          <Route path="clients/:id" element={<ClientDetail />} />
+          {/* Legacy Clients page for managing client records */}
+          <Route path="manage-clients" element={<Clients />} />
           <Route path="account" element={<Account />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

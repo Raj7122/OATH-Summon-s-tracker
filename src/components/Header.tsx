@@ -70,21 +70,11 @@ const Header = () => {
             color="inherit"
             onClick={() => handleNavigate('/clients')}
             sx={{
-              fontWeight: isActive('/clients') ? 'bold' : 'normal',
-              textDecoration: isActive('/clients') ? 'underline' : 'none',
+              fontWeight: location.pathname.startsWith('/clients') ? 'bold' : 'normal',
+              textDecoration: location.pathname.startsWith('/clients') ? 'underline' : 'none',
             }}
           >
             Clients
-          </Button>
-          <Button
-            color="inherit"
-            onClick={() => handleNavigate('/client-center')}
-            sx={{
-              fontWeight: location.pathname.startsWith('/client-center') ? 'bold' : 'normal',
-              textDecoration: location.pathname.startsWith('/client-center') ? 'underline' : 'none',
-            }}
-          >
-            Client Center
           </Button>
         </Box>
 
@@ -104,7 +94,6 @@ const Header = () => {
           >
             <MenuItem onClick={() => handleNavigate('/dashboard')}>Dashboard</MenuItem>
             <MenuItem onClick={() => handleNavigate('/clients')}>Clients</MenuItem>
-            <MenuItem onClick={() => handleNavigate('/client-center')}>Client Center</MenuItem>
           </Menu>
         </Box>
 
