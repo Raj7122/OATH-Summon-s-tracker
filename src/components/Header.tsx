@@ -70,8 +70,8 @@ const Header = () => {
             color="inherit"
             onClick={() => handleNavigate('/clients')}
             sx={{
-              fontWeight: isActive('/clients') ? 'bold' : 'normal',
-              textDecoration: isActive('/clients') ? 'underline' : 'none',
+              fontWeight: location.pathname.startsWith('/clients') ? 'bold' : 'normal',
+              textDecoration: location.pathname.startsWith('/clients') ? 'underline' : 'none',
             }}
           >
             Clients

@@ -11,7 +11,7 @@
 ## Table of Contents
 
 1. [Executive Summary](#executive-summary)
-2. [Pillar 1: Database Schema Strategy](#pillar-1-database-schema-strategy)
+2. [Pillar 1: Database Schema Strategy](#pillar-1-database-schema-strategy)cr
 3. [Pillar 2: Two-Phase Sweep Logic](#pillar-2-two-phase-sweep-logic)
 4. [Pillar 3: Proof of Life Data Flow](#pillar-3-proof-of-life-data-flow)
 5. [Pillar 4: Edge Case & Failure Analysis](#pillar-4-edge-case--failure-analysis)

@@ -221,7 +221,8 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
     summonses.forEach((summons) => {
       if (!summons.hearing_date) return;
 
-      const hearingDate = dayjs(summons.hearing_date).tz(NYC_TIMEZONE);
+      // Use UTC parsing to get correct date, then format for display
+      const hearingDate = dayjs.utc(summons.hearing_date);
       const dateKey = hearingDate.format('YYYY-MM-DD');
       const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
 
@@ -270,7 +271,8 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
     const dateKey = selectedDate.format('YYYY-MM-DD');
     return summonses.filter((s) => {
       if (!s.hearing_date) return false;
-      const hearingDateKey = dayjs(s.hearing_date).format('YYYY-MM-DD');
+      // Use UTC parsing to avoid timezone shift (hearing_date is stored as date-only in UTC)
+      const hearingDateKey = dayjs.utc(s.hearing_date).format('YYYY-MM-DD');
       return hearingDateKey === dateKey;
     });
   }, [summonses, selectedDate]);
@@ -293,7 +295,8 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
    */
   const totalUpcomingHearings = useMemo(() => {
     return summonses.filter(s => {
-      const hearingDate = dayjs(s.hearing_date);
+      // Use UTC parsing to avoid timezone shift (hearing_date is stored as date-only in UTC)
+      const hearingDate = dayjs.utc(s.hearing_date);
       return hearingDate.isAfter(now.subtract(1, 'day'));
     }).length;
   }, [summonses, now]);

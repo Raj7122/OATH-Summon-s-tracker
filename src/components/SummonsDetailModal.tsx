@@ -16,6 +16,15 @@
 
 import { useState, useEffect } from 'react';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+
+// Extend dayjs with UTC and timezone plugins
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+// NYC timezone for consistent date display
+const NYC_TIMEZONE = 'America/New_York';
 import {
   Dialog,
   DialogTitle,
@@ -429,7 +438,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                 />
                 <InfoRow
                   label="Hearing Date"
-                  value={dayjs(summons.hearing_date).format('MMMM D, YYYY')}
+                  value={dayjs.utc(summons.hearing_date).format('MMMM D, YYYY')}
                   highlight
                 />
                 <InfoRow label="Hearing Time" value={summons.hearing_time} />
@@ -462,7 +471,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                 <InfoRow label="Violation Type" value={summons.code_description} highlight />
                 <InfoRow
                   label="Violation Date"
-                  value={dayjs(summons.violation_date).format('MMMM D, YYYY')}
+                  value={dayjs.utc(summons.violation_date).format('MMMM D, YYYY')}
                 />
                 <InfoRow label="Violation Time" value={summons.violation_time} />
                 <InfoRow label="Offense Level" value={summons.offense_level} />
@@ -716,32 +725,78 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   title="Case History"
                 />
 
-                {/* Activity Log Timeline */}
-                {summons.activity_log && summons.activity_log.length > 0 ? (
-                  <Box sx={{ position: 'relative', pl: 3 }}>
-                    {/* Vertical line */}
-                    <Box
-                      sx={{
-                        position: 'absolute',
-                        left: 10,
-                        top: 8,
-                        bottom: 8,
-                        width: 2,
-                        bgcolor: 'divider',
-                        borderRadius: 1,
-                      }}
-                    />
+                {/* Activity Log Timeline - Only show entries older than 72 hours */}
+                {(() => {
+                  // Filter activity log to only show entries older than 72 hours
+                  // This ensures the UPDATED chip expires before showing in history
+                  const now = new Date();
+                  const seventyTwoHoursAgo = new Date(now.getTime() - 72 * 60 * 60 * 1000);
 
-                    {/* Timeline entries - newest first */}
-                    {[...summons.activity_log]
-                      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                      .map((entry: ActivityLogEntry, idx: number) => (
+                  // Parse activity_log if it's a JSON string, otherwise use as array
+                  let activityLog: ActivityLogEntry[] = [];
+                  if (summons.activity_log) {
+                    if (typeof summons.activity_log === 'string') {
+                      try {
+                        activityLog = JSON.parse(summons.activity_log);
+                      } catch {
+                        activityLog = [];
+                      }
+                    } else if (Array.isArray(summons.activity_log)) {
+                      activityLog = summons.activity_log;
+                    }
+                  }
+
+                  const filteredLog = activityLog
+                    // Only show entries older than 72 hours
+                    .filter((entry) => new Date(entry.date) < seventyTwoHoursAgo)
+                    // Filter out duplicate entries (same date, type, and description)
+                    .filter((entry, index, self) =>
+                      index === self.findIndex((e) =>
+                        e.date === entry.date &&
+                        e.type === entry.type &&
+                        e.description === entry.description
+                      )
+                    )
+                    // Only show meaningful change types (not CREATED unless it's the only entry)
+                    .filter((entry) =>
+                      entry.type !== 'CREATED' ||
+                      entry.old_value ||
+                      entry.new_value
+                    )
+                    // Sort newest first
+                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+                  if (filteredLog.length === 0) {
+                    return (
+                      <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                        No historical changes to display. Recent changes (within 72 hours) are shown via the UPDATED badge.
+                      </Typography>
+                    );
+                  }
+
+                  return (
+                    <Box sx={{ position: 'relative', pl: 3 }}>
+                      {/* Vertical line */}
+                      <Box
+                        sx={{
+                          position: 'absolute',
+                          left: 10,
+                          top: 8,
+                          bottom: 8,
+                          width: 2,
+                          bgcolor: 'divider',
+                          borderRadius: 1,
+                        }}
+                      />
+
+                      {/* Timeline entries - newest first */}
+                      {filteredLog.map((entry: ActivityLogEntry, idx: number) => (
                         <Box
                           key={idx}
                           sx={{
                             position: 'relative',
-                            pb: idx === summons.activity_log!.length - 1 ? 0 : 2,
-                            mb: idx === summons.activity_log!.length - 1 ? 0 : 1,
+                            pb: idx === filteredLog.length - 1 ? 0 : 2,
+                            mb: idx === filteredLog.length - 1 ? 0 : 1,
                           }}
                         >
                           {/* Timeline dot with icon */}
@@ -768,7 +823,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                           <Box sx={{ ml: 1 }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.25 }}>
                               <Typography variant="caption" color="text.secondary">
-                                {dayjs(entry.date).format('MMM D, YYYY h:mm A')}
+                                {dayjs.utc(entry.date).tz(NYC_TIMEZONE).format('MMM D, YYYY h:mm A')}
                               </Typography>
                               <Chip
                                 label={formatActivityType(entry.type)}
@@ -819,24 +874,9 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                           </Box>
                         </Box>
                       ))}
-                  </Box>
-                ) : (
-                  <Box
-                    sx={{
-                      textAlign: 'center',
-                      py: 3,
-                      color: 'text.secondary',
-                    }}
-                  >
-                    <HistoryIcon sx={{ fontSize: 40, opacity: 0.3, mb: 1 }} />
-                    <Typography variant="body2">
-                      No activity history available yet.
-                    </Typography>
-                    <Typography variant="caption" color="text.disabled">
-                      Changes will appear here after the next daily sweep.
-                    </Typography>
-                  </Box>
-                )}
+                    </Box>
+                  );
+                })()}
               </CardContent>
             </Card>
           </Grid>
@@ -845,7 +885,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       
       <DialogActions sx={{ px: 3, py: 2, borderTop: 1, borderColor: 'divider' }}>
         <Typography variant="caption" color="text.secondary" sx={{ mr: 'auto' }}>
-          Last Updated: {summons.updatedAt ? dayjs(summons.updatedAt).format('MMM D, YYYY h:mm A') : 'Unknown'}
+          Last Updated: {summons.updatedAt ? dayjs.utc(summons.updatedAt).tz(NYC_TIMEZONE).format('MMM D, YYYY h:mm A') : 'Unknown'}
         </Typography>
         <Button onClick={onClose} variant="contained">
           Close
