@@ -116,7 +116,7 @@ export const onCreateSummons = /* GraphQL */ `
       agency_id_number
       last_change_summary
       last_change_at
-      dep_id
+      id_number
       license_plate_ocr
       vehicle_type_ocr
       prior_offense_status
@@ -124,6 +124,16 @@ export const onCreateSummons = /* GraphQL */ `
       idling_duration_ocr
       critical_flags_ocr
       name_on_summons_ocr
+      ocr_status
+      last_scan_date
+      ocr_failure_count
+      ocr_failure_reason
+      last_metadata_sync
+      api_miss_count
+      is_archived
+      archived_at
+      archived_reason
+      activity_log
       createdAt
       updatedAt
       __typename
@@ -179,7 +189,7 @@ export const onUpdateSummons = /* GraphQL */ `
       agency_id_number
       last_change_summary
       last_change_at
-      dep_id
+      id_number
       license_plate_ocr
       vehicle_type_ocr
       prior_offense_status
@@ -187,6 +197,16 @@ export const onUpdateSummons = /* GraphQL */ `
       idling_duration_ocr
       critical_flags_ocr
       name_on_summons_ocr
+      ocr_status
+      last_scan_date
+      ocr_failure_count
+      ocr_failure_reason
+      last_metadata_sync
+      api_miss_count
+      is_archived
+      archived_at
+      archived_reason
+      activity_log
       createdAt
       updatedAt
       __typename
@@ -242,7 +262,7 @@ export const onDeleteSummons = /* GraphQL */ `
       agency_id_number
       last_change_summary
       last_change_at
-      dep_id
+      id_number
       license_plate_ocr
       vehicle_type_ocr
       prior_offense_status
@@ -250,6 +270,109 @@ export const onDeleteSummons = /* GraphQL */ `
       idling_duration_ocr
       critical_flags_ocr
       name_on_summons_ocr
+      ocr_status
+      last_scan_date
+      ocr_failure_count
+      ocr_failure_reason
+      last_metadata_sync
+      api_miss_count
+      is_archived
+      archived_at
+      archived_reason
+      activity_log
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const onCreateSyncStatus = /* GraphQL */ `
+  subscription OnCreateSyncStatus(
+    $filter: ModelSubscriptionSyncStatusFilterInput
+  ) {
+    onCreateSyncStatus(filter: $filter) {
+      id
+      last_successful_sync
+      last_sync_attempt
+      sync_in_progress
+      phase1_status
+      phase1_completed_at
+      phase1_new_records
+      phase1_updated_records
+      phase1_unchanged_records
+      phase1_errors
+      phase2_status
+      phase2_completed_at
+      phase2_ocr_processed
+      phase2_ocr_remaining
+      phase2_ocr_failed
+      ocr_processed_today
+      ocr_processing_date
+      oath_api_reachable
+      oath_api_last_check
+      oath_api_error
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const onUpdateSyncStatus = /* GraphQL */ `
+  subscription OnUpdateSyncStatus(
+    $filter: ModelSubscriptionSyncStatusFilterInput
+  ) {
+    onUpdateSyncStatus(filter: $filter) {
+      id
+      last_successful_sync
+      last_sync_attempt
+      sync_in_progress
+      phase1_status
+      phase1_completed_at
+      phase1_new_records
+      phase1_updated_records
+      phase1_unchanged_records
+      phase1_errors
+      phase2_status
+      phase2_completed_at
+      phase2_ocr_processed
+      phase2_ocr_remaining
+      phase2_ocr_failed
+      ocr_processed_today
+      ocr_processing_date
+      oath_api_reachable
+      oath_api_last_check
+      oath_api_error
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const onDeleteSyncStatus = /* GraphQL */ `
+  subscription OnDeleteSyncStatus(
+    $filter: ModelSubscriptionSyncStatusFilterInput
+  ) {
+    onDeleteSyncStatus(filter: $filter) {
+      id
+      last_successful_sync
+      last_sync_attempt
+      sync_in_progress
+      phase1_status
+      phase1_completed_at
+      phase1_new_records
+      phase1_updated_records
+      phase1_unchanged_records
+      phase1_errors
+      phase2_status
+      phase2_completed_at
+      phase2_ocr_processed
+      phase2_ocr_remaining
+      phase2_ocr_failed
+      ocr_processed_today
+      ocr_processing_date
+      oath_api_reachable
+      oath_api_last_check
+      oath_api_error
       createdAt
       updatedAt
       __typename

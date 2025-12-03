@@ -76,6 +76,16 @@ const Header = () => {
           >
             Clients
           </Button>
+          <Button
+            color="inherit"
+            onClick={() => handleNavigate('/client-center')}
+            sx={{
+              fontWeight: location.pathname.startsWith('/client-center') ? 'bold' : 'normal',
+              textDecoration: location.pathname.startsWith('/client-center') ? 'underline' : 'none',
+            }}
+          >
+            Client Center
+          </Button>
         </Box>
 
         {/* Mobile Navigation */}
@@ -94,6 +104,7 @@ const Header = () => {
           >
             <MenuItem onClick={() => handleNavigate('/dashboard')}>Dashboard</MenuItem>
             <MenuItem onClick={() => handleNavigate('/clients')}>Clients</MenuItem>
+            <MenuItem onClick={() => handleNavigate('/client-center')}>Client Center</MenuItem>
           </Menu>
         </Box>
 

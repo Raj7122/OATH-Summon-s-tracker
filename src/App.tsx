@@ -4,6 +4,8 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import CalendarDashboard from './pages/CalendarDashboard'
 import Clients from './pages/Clients'
+import ClientList from './pages/ClientList'
+import ClientDetail from './pages/ClientDetail'
 import Account from './pages/Account'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -27,6 +29,9 @@ function App() {
           {/* Legacy Dashboard (kept for reference) */}
           <Route path="dashboard-legacy" element={<Dashboard />} />
           <Route path="clients" element={<Clients />} />
+          {/* Client Center - Practice Management View */}
+          <Route path="client-center" element={<ClientList />} />
+          <Route path="client-center/:id" element={<ClientDetail />} />
           <Route path="account" element={<Account />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
