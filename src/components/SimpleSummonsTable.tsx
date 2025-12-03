@@ -1,19 +1,22 @@
 /**
  * Simple Summons Table Component
- * 
+ *
  * Implements the "No-Scroll Rule" - a streamlined DataGrid with only 5 columns:
- * 1. Status (Chip with NEW/UPDATED badge)
- * 2. Client Name
- * 3. Hearing Date
- * 4. Violation Type
+ * 1. Status (Chip with NEW/UPDATED badge) - Fixed Width
+ * 2. Client Name - Flex Width
+ * 3. Violation Date (NEW) - Sortable (for Lag Time calculation)
+ * 4. Hearing Date - Sortable (Default Sort)
  * 5. Action Icon (to open detail modal)
- * 
- * This eliminates horizontal scrolling by showing only essential identification
- * columns. Full details are accessed via the SummonsDetailModal.
- * 
+ *
+ * NOTE: "Violation Type" column REMOVED - redundant since app strictly filters
+ * for "Idling" cases only. Seeing "Idling" repeated 50 times helps no one.
+ *
  * UX Philosophy: Fitts's Law - filter tabs attached directly to grid top,
  * reducing distance to high-frequency actions.
- * 
+ *
+ * Lag Time Strategy: Arthur compares Violation Date vs Hearing Date to calculate
+ * "Lag Time" - a key defense strategy metric.
+ *
  * @module components/SimpleSummonsTable
  */
 
@@ -209,22 +212,21 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
   };
   
   /**
-   * Render Violation Type column with truncation and tooltip
+   * Render Violation Date column
+   * Shows the date when the violation occurred (for Lag Time calculation)
    */
-  const renderViolationCell = (params: GridRenderCellParams) => {
-    const codeDesc = params.value || 'Unknown';
-    const maxLength = isMobile ? 15 : 25;
-    const displayText = codeDesc.length > maxLength ? `${codeDesc.substring(0, maxLength - 3)}...` : codeDesc;
-    
+  const renderViolationDateCell = (params: GridRenderCellParams) => {
+    const row = params.row as Summons;
+    const value = row.violation_date;
+    if (!value) return <Typography color="text.secondary">—</Typography>;
+
+    const parsed = dayjs(value);
+    if (!parsed.isValid()) return <Typography color="text.secondary">—</Typography>;
+
     return (
-      <Tooltip title={codeDesc} placement="top">
-        <Chip
-          label={displayText}
-          size="small"
-          variant="outlined"
-          sx={{ fontSize: '0.75rem', maxWidth: '100%' }}
-        />
-      </Tooltip>
+      <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
+        {parsed.format(isMobile ? 'MM/DD' : 'MMM D, YYYY')}
+      </Typography>
     );
   };
   
@@ -248,7 +250,8 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
     );
   };
   
-  // Define the 5 essential columns
+  // Define the 5 essential columns (Violation Type REMOVED - redundant for Idling-only app)
+  // New column order: Status | Client Name | Violation Date | Hearing Date | Action
   const columns: GridColDef[] = [
     {
       field: 'status',
@@ -266,6 +269,13 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
       sortable: true,
     },
     {
+      field: 'violation_date',
+      headerName: 'Violation Date',
+      width: isMobile ? 100 : 130,
+      sortable: true,
+      renderCell: renderViolationDateCell,
+    },
+    {
       field: 'hearing_date',
       headerName: 'Hearing Date',
       width: isMobile ? 100 : 130,
@@ -279,14 +289,6 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
         if (!parsed.isValid()) return '—';
         return parsed.format(isMobile ? 'MM/DD' : 'MMM D, YYYY');
       },
-    },
-    {
-      field: 'code_description',
-      headerName: 'Violation Type',
-      width: isMobile ? 120 : 180,
-      minWidth: 120,
-      renderCell: renderViolationCell,
-      sortable: true,
     },
     {
       field: 'actions',

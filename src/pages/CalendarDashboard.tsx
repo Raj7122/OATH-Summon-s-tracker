@@ -73,8 +73,31 @@ dayjs.extend(timezone);
 
 const NYC_TIMEZONE = 'America/New_York';
 
+// Active Era cutoff (2022-01-01) - Pre-2022 records are considered "historical"
+const ACTIVE_ERA_CUTOFF = dayjs('2022-01-01');
+
+// Idling violation guardrail - only show IDLING violations
+const IDLING_FILTER_KEYWORDS = ['IDLING', 'IDLE'];
+
 // Amplify GraphQL client
 const client = generateClient();
+
+/**
+ * Check if a summons is in the "Active Era" (2022+)
+ */
+function isActiveEra(summons: Summons): boolean {
+  if (!summons.hearing_date) return true; // No date = assume active
+  return dayjs(summons.hearing_date) >= ACTIVE_ERA_CUTOFF;
+}
+
+/**
+ * Check if a summons is an "Idling" violation
+ * Safety guardrail to ensure no non-idling violations leak through
+ */
+function isIdlingViolation(summons: Summons): boolean {
+  const codeDesc = (summons.code_description || '').toUpperCase();
+  return IDLING_FILTER_KEYWORDS.some((keyword) => codeDesc.includes(keyword));
+}
 
 /**
  * Calendar Dashboard Page Component
@@ -96,8 +119,15 @@ const CalendarDashboard: React.FC = () => {
   const [summonses, setSummonses] = useState<Summons[]>([]);
   const [selectedDate, setSelectedDate] = useState<Dayjs | null>(null);
   const [activityFilter, setActivityFilter] = useState<'all' | 'updated' | 'new'>('all');
-  // Special filter for header chip clicks (critical, new, updated)
-  const [specialFilter, setSpecialFilter] = useState<'critical' | 'new' | 'updated' | null>(null);
+  // Horizon System filter for header chip clicks (Critical/Approaching/Future)
+  // Also supports 'new' for NEW badge filter
+  const [horizonFilter, setHorizonFilter] = useState<'critical' | 'approaching' | 'future' | 'new' | null>(null);
+
+  // OVERRIDE C: Archive toggle removed from main dashboard.
+  // The main dashboard is for active triage ONLY - always show 2022+ records.
+  // Historical data belongs in the Client View, not here.
+  // Hardcoded to false (never show pre-2022 on main dashboard).
+  const showArchive = false;
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false,
     message: '',
@@ -142,27 +172,81 @@ const CalendarDashboard: React.FC = () => {
   }, [loadSummonses]);
   
   /**
-   * Filter summonses by selected date and special filter
+   * Apply global filters: Active Era + Idling Guardrail
+   *
+   * These filters ensure:
+   * 1. Only IDLING violations are shown (safety guardrail)
+   * 2. Only Active Era (2022+) records are shown by default
+   * 3. Archive toggle can show Pre-2022 records if needed
+   */
+  const globallyFilteredSummonses = useMemo(() => {
+    return summonses
+      // Safety guardrail: Only show IDLING violations
+      // Even though backend filters, double-check to prevent Fire Code violations leaking through
+      .filter(isIdlingViolation)
+      // Active Era filter: Default to 2022+ unless archive toggle is on
+      .filter((s) => showArchive || isActiveEra(s));
+  }, [summonses, showArchive]);
+
+  /**
+   * Filter summonses by selected date and Horizon System filter
+   *
+   * Horizon System Logic:
+   * - Critical (🔴): Hearings within 7 days OR Status is "Default/Failure to Appear"
+   * - Approaching (🟠): Hearings between 8 and 30 days from today
+   * - Future (🟢): Hearings > 30 days away
    *
    * Note: hearing_date is stored as ISO format (e.g., "2025-01-15T00:00:00.000Z")
    * We compare by extracting the date portion only.
    */
   const filteredByDate = useMemo(() => {
     const now = dayjs().tz(NYC_TIMEZONE);
-    let filtered = summonses;
+    let filtered = globallyFilteredSummonses;
 
-    // Apply special filter first (from header chip clicks)
-    if (specialFilter === 'critical') {
+    // Apply Horizon System filter first (from header chip clicks)
+    if (horizonFilter === 'critical') {
+      // Critical: Future hearings that are either:
+      // 1. Within 7 days (imminent deadline)
+      // 2. Have dangerous status (Default, Judgment, etc.) - needs immediate attention
+      // NOTE: Past hearings are excluded - Arthur doesn't need to panic about what already happened
       filtered = filtered.filter((s) => {
         if (!s.hearing_date) return false;
         const hearingDate = dayjs(s.hearing_date);
         const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
-        return daysUntil >= 0 && daysUntil <= 7;
+
+        // Only include future/today hearings (not past)
+        if (daysUntil < 0) return false;
+
+        const isImminentDeadline = daysUntil <= 7;
+
+        // Dangerous status check - still requires future hearing
+        const status = (s.status || '').toUpperCase();
+        const isDangerStatus =
+          status.includes('DEFAULT') ||
+          status.includes('JUDGMENT') ||
+          status.includes('VIOLATION') ||
+          status.includes('FAILURE TO APPEAR');
+
+        return isImminentDeadline || isDangerStatus;
       });
-    } else if (specialFilter === 'new') {
+    } else if (horizonFilter === 'approaching') {
+      // Approaching: 8-30 days away
+      filtered = filtered.filter((s) => {
+        if (!s.hearing_date) return false;
+        const hearingDate = dayjs(s.hearing_date);
+        const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
+        return daysUntil >= 8 && daysUntil <= 30;
+      });
+    } else if (horizonFilter === 'future') {
+      // Future: > 30 days away
+      filtered = filtered.filter((s) => {
+        if (!s.hearing_date) return false;
+        const hearingDate = dayjs(s.hearing_date);
+        const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
+        return daysUntil > 30;
+      });
+    } else if (horizonFilter === 'new') {
       filtered = filtered.filter(isNewRecord);
-    } else if (specialFilter === 'updated') {
-      filtered = filtered.filter(isUpdatedRecord);
     }
 
     // Then apply date filter
@@ -177,28 +261,29 @@ const CalendarDashboard: React.FC = () => {
     }
 
     return filtered;
-  }, [summonses, selectedDate, specialFilter]);
+  }, [globallyFilteredSummonses, selectedDate, horizonFilter]);
 
   /**
-   * Handle special filter chip click (toggle behavior)
+   * Handle Horizon System chip click (toggle behavior)
+   * Filters: critical (🔴), approaching (🟠), future (🟢), new
    */
-  const handleSpecialFilterClick = useCallback((filter: 'critical' | 'new' | 'updated') => {
+  const handleHorizonFilterClick = useCallback((filter: 'critical' | 'approaching' | 'future' | 'new') => {
     // Toggle: if clicking the same filter, clear it; otherwise set it
-    setSpecialFilter((prev) => (prev === filter ? null : filter));
-    // Clear date selection when using special filter for better UX
-    if (specialFilter !== filter) {
+    setHorizonFilter((prev) => (prev === filter ? null : filter));
+    // Clear date selection when using horizon filter for better UX
+    if (horizonFilter !== filter) {
       setSelectedDate(null);
     }
-  }, [specialFilter]);
+  }, [horizonFilter]);
   
   /**
    * Handle date selection from calendar
    */
   const handleDateSelect = useCallback((date: Dayjs | null) => {
     setSelectedDate(date);
-    // Clear special filter when selecting a date for cleaner UX
+    // Clear horizon filter when selecting a date for cleaner UX
     if (date) {
-      setSpecialFilter(null);
+      setHorizonFilter(null);
     }
     // On mobile, switch to grid view when a date is selected
     if (isMobile && date) {
@@ -285,23 +370,73 @@ const CalendarDashboard: React.FC = () => {
   }, [summonses]);
   
   /**
-   * Get summary statistics for the header
+   * Get summary statistics for the header using Horizon System
+   * Uses globally filtered summonses (Active Era + Idling only)
+   *
+   * Horizon System:
+   * - Critical (🔴): Hearings within 7 days OR Status is "Default/Failure to Appear"
+   * - Approaching (🟠): Hearings between 8 and 30 days from today
+   * - Future (🟢): Hearings > 30 days away
    */
   const stats = useMemo(() => {
     const now = dayjs().tz(NYC_TIMEZONE);
-    
-    const critical = summonses.filter((s) => {
+
+    // Critical: Future hearings (daysUntil >= 0) that are either:
+    // 1. Within 7 days (imminent deadline)
+    // 2. Have dangerous status (Default, Judgment, etc.)
+    // Past hearings are excluded - no point panicking about what already happened
+    const criticalCount = globallyFilteredSummonses.filter((s) => {
       if (!s.hearing_date) return false;
       const hearingDate = dayjs(s.hearing_date);
       const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
-      return daysUntil >= 0 && daysUntil <= 7;
+
+      // Exclude past hearings
+      if (daysUntil < 0) return false;
+
+      const isImminentDeadline = daysUntil <= 7;
+
+      const status = (s.status || '').toUpperCase();
+      const isDangerStatus =
+        status.includes('DEFAULT') ||
+        status.includes('JUDGMENT') ||
+        status.includes('VIOLATION') ||
+        status.includes('FAILURE TO APPEAR');
+
+      return isImminentDeadline || isDangerStatus;
     }).length;
-    
-    const newCount = summonses.filter(isNewRecord).length;
-    const updatedCount = summonses.filter(isUpdatedRecord).length;
-    
-    return { critical, newCount, updatedCount, total: summonses.length };
-  }, [summonses]);
+
+    // Approaching: 8-30 days away
+    const approachingCount = globallyFilteredSummonses.filter((s) => {
+      if (!s.hearing_date) return false;
+      const hearingDate = dayjs(s.hearing_date);
+      const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
+      return daysUntil >= 8 && daysUntil <= 30;
+    }).length;
+
+    // Future: > 30 days away
+    const futureCount = globallyFilteredSummonses.filter((s) => {
+      if (!s.hearing_date) return false;
+      const hearingDate = dayjs(s.hearing_date);
+      const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
+      return daysUntil > 30;
+    }).length;
+
+    const newCount = globallyFilteredSummonses.filter(isNewRecord).length;
+    const updatedCount = globallyFilteredSummonses.filter(isUpdatedRecord).length;
+
+    // Count of Pre-2022 records (for archive indicator)
+    const archivedCount = summonses.filter((s) => !isActiveEra(s) && isIdlingViolation(s)).length;
+
+    return {
+      criticalCount,
+      approachingCount,
+      futureCount,
+      newCount,
+      updatedCount,
+      total: globallyFilteredSummonses.length,
+      archivedCount,
+    };
+  }, [globallyFilteredSummonses, summonses]);
   
   /**
    * Close snackbar
@@ -388,76 +523,33 @@ const CalendarDashboard: React.FC = () => {
           <Typography variant="h4" sx={{ fontWeight: 600 }}>
             Dashboard
           </Typography>
-          
-          {/* Quick Stats Chips - Clickable to filter */}
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-            {stats.critical > 0 && (
-              <Chip
-                label={`${stats.critical} Critical`}
-                color="error"
-                size="small"
-                onClick={() => handleSpecialFilterClick('critical')}
-                onDelete={specialFilter === 'critical' ? () => setSpecialFilter(null) : undefined}
-                variant={specialFilter === 'critical' ? 'filled' : 'outlined'}
-                sx={{
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  '&:hover': { opacity: 0.85 },
-                  ...(specialFilter === 'critical' && {
-                    boxShadow: 2,
-                  }),
-                }}
-              />
-            )}
-            {stats.newCount > 0 && (
-              <Chip
-                label={`${stats.newCount} New`}
-                color="info"
-                size="small"
-                onClick={() => handleSpecialFilterClick('new')}
-                onDelete={specialFilter === 'new' ? () => setSpecialFilter(null) : undefined}
-                variant={specialFilter === 'new' ? 'filled' : 'outlined'}
-                sx={{
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  '&:hover': { opacity: 0.85 },
-                  ...(specialFilter === 'new' && {
-                    boxShadow: 2,
-                  }),
-                }}
-              />
-            )}
-            {stats.updatedCount > 0 && (
-              <Chip
-                label={`${stats.updatedCount} Updated`}
-                color="warning"
-                size="small"
-                onClick={() => handleSpecialFilterClick('updated')}
-                onDelete={specialFilter === 'updated' ? () => setSpecialFilter(null) : undefined}
-                variant={specialFilter === 'updated' ? 'filled' : 'outlined'}
-                sx={{
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  '&:hover': { opacity: 0.85 },
-                  ...(specialFilter === 'updated' && {
-                    boxShadow: 2,
-                  }),
-                }}
-              />
-            )}
-          </Box>
-          
+
+          {/* Horizon filter chips moved to Command Center for better UX */}
+
+          {/* Active filter indicator */}
+          {horizonFilter && (
+            <Chip
+              label={`Filtered: ${horizonFilter.charAt(0).toUpperCase() + horizonFilter.slice(1)}`}
+              color="primary"
+              onDelete={() => setHorizonFilter(null)}
+              sx={{ fontWeight: 500 }}
+            />
+          )}
+
           {/* Date filter indicator */}
           {selectedDate && (
             <Chip
-              label={`Filtered: ${selectedDate.format('MMM D, YYYY')}`}
+              label={`Date: ${selectedDate.format('MMM D, YYYY')}`}
               color="primary"
               onDelete={() => setSelectedDate(null)}
               sx={{ fontWeight: 500 }}
             />
           )}
         </Box>
-        
+
+        {/* OVERRIDE C: Archive toggle removed - main dashboard is active triage only */}
+        {/* Historical data (pre-2022) is accessible via Client View, not here */}
+
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {/* Mobile view toggle */}
           {isMobile && (
@@ -481,22 +573,14 @@ const CalendarDashboard: React.FC = () => {
             </Box>
           )}
           
-          {/* Audit Trail Button - Shows all historical changes from daily sweep */}
+          {/* Audit Trail button - clear action, not a filter */}
           <Button
             variant="outlined"
             startIcon={<HistoryIcon />}
             onClick={() => setAuditTrailOpen(true)}
             size={isMobile ? 'small' : 'medium'}
-            sx={{
-              borderColor: 'grey.400',
-              color: 'text.secondary',
-              '&:hover': {
-                borderColor: 'grey.600',
-                backgroundColor: 'grey.100',
-              },
-            }}
           >
-            {isMobile ? '' : 'Audit Trail'}
+            Audit Trail
           </Button>
 
           <Button
@@ -532,9 +616,17 @@ const CalendarDashboard: React.FC = () => {
           {(!isMobile || mobileView === 'calendar') && (
             <Grid item xs={12} md={4} lg={3.5}>
               <CalendarCommandCenter
-                summonses={summonses}
+                summonses={globallyFilteredSummonses}
                 selectedDate={selectedDate}
                 onDateSelect={handleDateSelect}
+                horizonFilter={horizonFilter}
+                horizonStats={{
+                  criticalCount: stats.criticalCount,
+                  approachingCount: stats.approachingCount,
+                  futureCount: stats.futureCount,
+                  newCount: stats.newCount,
+                }}
+                onHorizonFilterClick={handleHorizonFilterClick}
               />
             </Grid>
           )}
