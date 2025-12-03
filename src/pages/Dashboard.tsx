@@ -232,14 +232,43 @@ const Dashboard = () => {
     return allLogs;
   };
 
+  /**
+   * Load summonses from GraphQL API with pagination
+   * CRITICAL: Must paginate to get ALL records, not just the default limit
+   */
   const loadSummonses = async () => {
     setLoading(true);
     try {
-      const result = await client.graphql({
-        query: listSummons,
-      }) as { data: { listSummons: { items: Summons[] } } };
-      console.log('Loaded summonses:', result.data.listSummons.items);
-      setSummonses(result.data.listSummons.items);
+      let allSummonses: Summons[] = [];
+      let currentToken: string | null = null;
+      let fetchCount = 0;
+      const MAX_FETCHES = 50; // Safety limit: 50 * 1000 = 50,000 records max
+
+      // Paginate through ALL summonses
+      while (fetchCount < MAX_FETCHES) {
+        const result = await client.graphql({
+          query: listSummons,
+          variables: {
+            limit: 1000, // Fetch in large batches for efficiency
+            nextToken: currentToken,
+          },
+        }) as { data: { listSummons: { items: Summons[]; nextToken: string | null } } };
+
+        const items = result.data.listSummons.items;
+        currentToken = result.data.listSummons.nextToken;
+
+        allSummonses = [...allSummonses, ...items];
+        fetchCount++;
+
+        console.log(`Fetch ${fetchCount}: Got ${items.length} items, total: ${allSummonses.length}`);
+
+        if (!currentToken) {
+          break; // No more pages
+        }
+      }
+
+      console.log('Loaded all summonses:', allSummonses.length);
+      setSummonses(allSummonses);
     } catch (error) {
       console.error('Error loading summonses:', error);
       // Log detailed error information for debugging

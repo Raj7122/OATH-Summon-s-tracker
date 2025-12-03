@@ -21,6 +21,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+
+// Extend dayjs with UTC plugin for correct date parsing
+dayjs.extend(utc);
 import {
   Box,
   Typography,
@@ -53,11 +57,12 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ReceiptIcon from '@mui/icons-material/Receipt';
 import DownloadIcon from '@mui/icons-material/Download';
+import FiberNewIcon from '@mui/icons-material/FiberNew';
 import { generateClient } from 'aws-amplify/api';
 
 import { getClient, listSummons } from '../graphql/queries';
 import { updateSummons } from '../graphql/mutations';
-import { Client, Summons, getStatusColor } from '../types/summons';
+import { Client, Summons, getStatusColor, isNewRecord, isUpdatedRecord, getBusinessDays } from '../types/summons';
 import SummonsDetailModal from '../components/SummonsDetailModal';
 import ExportConfigurationModal from '../components/ExportConfigurationModal';
 import { useCSVExport } from '../hooks/useCSVExport';
@@ -71,6 +76,18 @@ const PRE_2022_CUTOFF = '2022-01-01T00:00:00.000Z';
 // Page size options for the DataGrid
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250];
 
+// IDLING filter keywords - only show idling violations
+const IDLING_FILTER_KEYWORDS = ['IDLING', 'IDLE'];
+
+/**
+ * Check if a summons is an "Idling" violation
+ * Safety guardrail to ensure no non-idling violations leak through
+ */
+function isIdlingViolation(summons: Summons): boolean {
+  const codeDesc = (summons.code_description || '').toUpperCase();
+  return IDLING_FILTER_KEYWORDS.some((keyword) => codeDesc.includes(keyword));
+}
+
 /**
  * Calculate lag/wait time between violation date and hearing date
  */
@@ -79,6 +96,26 @@ function calculateLagDays(violationDate: string | undefined, hearingDate: string
   const violation = dayjs(violationDate);
   const hearing = dayjs(hearingDate);
   return hearing.diff(violation, 'day');
+}
+
+/**
+ * Format change timestamp for tooltip display
+ */
+function formatChangeDate(dateString: string | undefined): string {
+  if (!dateString) return 'Unknown date';
+  try {
+    const date = new Date(dateString);
+    return date.toLocaleString('en-US', {
+      month: 'numeric',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  } catch {
+    return 'Invalid date';
+  }
 }
 
 const ClientDetail: React.FC = () => {
@@ -185,7 +222,12 @@ const ClientDetail: React.FC = () => {
         currentToken = result.data.listSummons.nextToken;
 
         // Filter for this client (clientID match OR respondent_name AKA match)
+        // AND must be an IDLING violation
         const clientSummonses = items.filter((s) => {
+          // First check: must be an IDLING violation
+          if (!isIdlingViolation(s)) return false;
+
+          // Then check: must match this client
           if (s.clientID === id) return true;
           if (s.respondent_name) {
             const respondentNormalized = s.respondent_name.toLowerCase().trim();
@@ -257,10 +299,15 @@ const ClientDetail: React.FC = () => {
     });
 
     const openCases = activeEraSummonses.filter((s) => (s.amount_due || 0) > 0);
+    const now = new Date();
     const criticalCases = activeEraSummonses.filter((s) => {
       if (!s.hearing_date) return false;
-      const daysUntil = dayjs(s.hearing_date).diff(dayjs(), 'day');
-      return daysUntil >= 0 && daysUntil <= 7;
+      const hearingDate = new Date(s.hearing_date);
+      // Skip past dates
+      if (hearingDate < now) return false;
+      // TRD v1.8: Use business days to match Dashboard logic
+      const businessDays = getBusinessDays(now, hearingDate);
+      return businessDays <= 7;
     });
 
     return {
@@ -304,15 +351,52 @@ const ClientDetail: React.FC = () => {
     {
       field: 'status',
       headerName: 'Status',
-      width: 140,
-      renderCell: (params) => (
-        <Chip
-          label={params.value || 'Unknown'}
-          color={getStatusColor(params.value)}
-          size="small"
-          sx={{ fontWeight: 500 }}
-        />
-      ),
+      width: 220,
+      renderCell: (params) => {
+        const summons = params.row as Summons;
+        const isNew = isNewRecord(summons);
+        const isUpdated = isUpdatedRecord(summons);
+
+        // Build tooltip content for UPDATED badge - only show if we have actual change data
+        const changeTooltip = summons.last_change_summary
+          ? `Change: ${summons.last_change_summary} (${formatChangeDate(summons.last_change_at)})`
+          : `Updated: ${formatChangeDate(summons.last_change_at)}`;
+
+        return (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            {/* NEW badge */}
+            {isNew && (
+              <Chip
+                label="NEW"
+                icon={<FiberNewIcon />}
+                color="info"
+                size="small"
+                sx={{ fontWeight: 'bold', fontSize: '0.65rem' }}
+              />
+            )}
+
+            {/* UPDATED badge with tooltip */}
+            {isUpdated && !isNew && (
+              <Tooltip title={changeTooltip} arrow placement="top">
+                <Chip
+                  label="UPDATED"
+                  color="warning"
+                  size="small"
+                  sx={{ fontWeight: 'bold', fontSize: '0.65rem', cursor: 'help' }}
+                />
+              </Tooltip>
+            )}
+
+            {/* Status Chip */}
+            <Chip
+              label={params.value || 'Unknown'}
+              color={getStatusColor(params.value)}
+              size="small"
+              sx={{ fontWeight: 500 }}
+            />
+          </Box>
+        );
+      },
     },
     {
       field: 'summons_number',
@@ -328,7 +412,8 @@ const ClientDetail: React.FC = () => {
       field: 'violation_date',
       headerName: 'Violation Date',
       width: 130,
-      valueFormatter: (params) => params.value ? dayjs(params.value).format('MM/DD/YYYY') : '—',
+      // Use dayjs.utc() to parse date-only fields correctly without timezone shift
+      valueFormatter: (params) => params.value ? dayjs.utc(params.value).format('MM/DD/YYYY') : '—',
     },
     {
       field: 'hearing_date',
@@ -336,12 +421,18 @@ const ClientDetail: React.FC = () => {
       width: 130,
       renderCell: (params) => {
         if (!params.value) return '—';
-        const date = dayjs(params.value);
-        const daysUntil = date.diff(dayjs(), 'day');
+        // Use UTC parsing to get the correct date without timezone shift
+        const hearingDateUtc = dayjs.utc(params.value);
+        const hearingDate = hearingDateUtc.toDate();
+        const now = new Date();
+        // Skip past dates for critical indicator
+        const isPast = hearingDate < now;
+        // TRD v1.8: Use business days to match Dashboard logic
+        const businessDays = isPast ? -1 : getBusinessDays(now, hearingDate);
         return (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <Typography variant="body2">{date.format('MM/DD/YYYY')}</Typography>
-            {daysUntil >= 0 && daysUntil <= 7 && (
+            <Typography variant="body2">{hearingDateUtc.format('MM/DD/YYYY')}</Typography>
+            {!isPast && businessDays <= 7 && (
               <WarningIcon sx={{ fontSize: 16, color: 'error.main' }} />
             )}
           </Box>
@@ -424,6 +515,25 @@ const ClientDetail: React.FC = () => {
   const handleRowClick = useCallback((params: GridRowParams) => {
     setSelectedSummons(params.row as Summons);
     setModalOpen(true);
+  }, []);
+
+  /**
+   * Determine row class based on critical status (hearing within 7 business days)
+   * TRD v1.8: Uses business days to match Dashboard logic
+   */
+  const getRowClassName = useCallback((params: GridRowParams) => {
+    const summons = params.row as Summons;
+    if (!summons.hearing_date) return '';
+    const hearingDate = new Date(summons.hearing_date);
+    const now = new Date();
+    // Skip past dates
+    if (hearingDate < now) return '';
+    // Critical: hearing date is within 7 business days
+    const businessDays = getBusinessDays(now, hearingDate);
+    if (businessDays <= 7) {
+      return 'critical-row';
+    }
+    return '';
   }, []);
 
   /**
@@ -632,6 +742,7 @@ const ClientDetail: React.FC = () => {
           sortModel={sortModel}
           onSortModelChange={setSortModel}
           onRowClick={handleRowClick}
+          getRowClassName={getRowClassName}
           loading={loading}
           rowCount={filteredSummonses.length}
           disableRowSelectionOnClick
@@ -642,6 +753,15 @@ const ClientDetail: React.FC = () => {
               cursor: 'pointer',
               '&:hover': {
                 backgroundColor: 'action.hover',
+              },
+            },
+            '& .MuiDataGrid-row.critical-row': {
+              backgroundColor: 'error.light',
+              '&:hover': {
+                backgroundColor: 'error.main',
+              },
+              '& .MuiDataGrid-cell': {
+                color: 'error.contrastText',
               },
             },
             '& .MuiDataGrid-columnHeaders': {

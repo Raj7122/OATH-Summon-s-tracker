@@ -22,6 +22,10 @@
 
 import { useState, useMemo } from 'react';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+
+// Extend dayjs with UTC plugin for correct date parsing
+dayjs.extend(utc);
 import {
   DataGrid,
   GridColDef,
@@ -220,7 +224,8 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
     const value = row.violation_date;
     if (!value) return <Typography color="text.secondary">—</Typography>;
 
-    const parsed = dayjs(value);
+    // Use dayjs.utc() to parse date-only fields correctly without timezone shift
+    const parsed = dayjs.utc(value);
     if (!parsed.isValid()) return <Typography color="text.secondary">—</Typography>;
 
     return (
@@ -284,8 +289,8 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
         const row = params.row as Summons;
         const value = row.hearing_date;
         if (!value) return '—';
-        // Validate that dayjs can parse the date
-        const parsed = dayjs(value);
+        // Use dayjs.utc() to parse date-only fields correctly without timezone shift
+        const parsed = dayjs.utc(value);
         if (!parsed.isValid()) return '—';
         return parsed.format(isMobile ? 'MM/DD' : 'MMM D, YYYY');
       },

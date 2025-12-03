@@ -87,7 +87,8 @@ const client = generateClient();
  */
 function isActiveEra(summons: Summons): boolean {
   if (!summons.hearing_date) return true; // No date = assume active
-  return dayjs(summons.hearing_date) >= ACTIVE_ERA_CUTOFF;
+  // Use UTC parsing to avoid timezone shift (hearing_date is stored as date-only in UTC)
+  return dayjs.utc(summons.hearing_date) >= ACTIVE_ERA_CUTOFF;
 }
 
 /**
@@ -141,19 +142,42 @@ const CalendarDashboard: React.FC = () => {
   const [auditTrailOpen, setAuditTrailOpen] = useState(false);
 
   /**
-   * Load summonses from GraphQL API
+   * Load summonses from GraphQL API with pagination
+   * CRITICAL: Must paginate to get ALL records, not just the default limit
    */
   const loadSummonses = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await client.graphql({
-        query: listSummons,
-      });
-      
-      // Type assertion for GraphQL result
-      const data = result as { data: { listSummons: { items: Summons[] } } };
-      console.log('Loaded summonses:', data.data.listSummons.items.length);
-      setSummonses(data.data.listSummons.items);
+      let allSummonses: Summons[] = [];
+      let currentToken: string | null = null;
+      let fetchCount = 0;
+      const MAX_FETCHES = 50; // Safety limit: 50 * 1000 = 50,000 records max
+
+      // Paginate through ALL summonses
+      while (fetchCount < MAX_FETCHES) {
+        const result = await client.graphql({
+          query: listSummons,
+          variables: {
+            limit: 1000, // Fetch in large batches for efficiency
+            nextToken: currentToken,
+          },
+        }) as { data: { listSummons: { items: Summons[]; nextToken: string | null } } };
+
+        const items = result.data.listSummons.items;
+        currentToken = result.data.listSummons.nextToken;
+
+        allSummonses = [...allSummonses, ...items];
+        fetchCount++;
+
+        console.log(`Fetch ${fetchCount}: Got ${items.length} items, total: ${allSummonses.length}`);
+
+        if (!currentToken) {
+          break; // No more pages
+        }
+      }
+
+      console.log('Loaded all summonses:', allSummonses.length);
+      setSummonses(allSummonses);
     } catch (error) {
       console.error('Error loading summonses:', error);
       setSnackbar({
@@ -211,7 +235,8 @@ const CalendarDashboard: React.FC = () => {
       // NOTE: Past hearings are excluded - Arthur doesn't need to panic about what already happened
       filtered = filtered.filter((s) => {
         if (!s.hearing_date) return false;
-        const hearingDate = dayjs(s.hearing_date);
+        // Use UTC parsing to avoid timezone shift (hearing_date is stored as date-only in UTC)
+        const hearingDate = dayjs.utc(s.hearing_date);
         const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
 
         // Only include future/today hearings (not past)
@@ -233,7 +258,8 @@ const CalendarDashboard: React.FC = () => {
       // Approaching: 8-30 days away
       filtered = filtered.filter((s) => {
         if (!s.hearing_date) return false;
-        const hearingDate = dayjs(s.hearing_date);
+        // Use UTC parsing to avoid timezone shift (hearing_date is stored as date-only in UTC)
+        const hearingDate = dayjs.utc(s.hearing_date);
         const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
         return daysUntil >= 8 && daysUntil <= 30;
       });
@@ -241,7 +267,8 @@ const CalendarDashboard: React.FC = () => {
       // Future: > 30 days away
       filtered = filtered.filter((s) => {
         if (!s.hearing_date) return false;
-        const hearingDate = dayjs(s.hearing_date);
+        // Use UTC parsing to avoid timezone shift (hearing_date is stored as date-only in UTC)
+        const hearingDate = dayjs.utc(s.hearing_date);
         const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
         return daysUntil > 30;
       });
@@ -254,8 +281,8 @@ const CalendarDashboard: React.FC = () => {
       const dateKey = selectedDate.format('YYYY-MM-DD');
       filtered = filtered.filter((s) => {
         if (!s.hearing_date) return false;
-        // Extract just the date portion from the ISO timestamp
-        const hearingDateKey = dayjs(s.hearing_date).format('YYYY-MM-DD');
+        // Use UTC parsing to avoid timezone shift (hearing_date is stored as date-only in UTC)
+        const hearingDateKey = dayjs.utc(s.hearing_date).format('YYYY-MM-DD');
         return hearingDateKey === dateKey;
       });
     }
@@ -387,7 +414,8 @@ const CalendarDashboard: React.FC = () => {
     // Past hearings are excluded - no point panicking about what already happened
     const criticalCount = globallyFilteredSummonses.filter((s) => {
       if (!s.hearing_date) return false;
-      const hearingDate = dayjs(s.hearing_date);
+      // Use UTC parsing to avoid timezone shift (hearing_date is stored as date-only in UTC)
+      const hearingDate = dayjs.utc(s.hearing_date);
       const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
 
       // Exclude past hearings
@@ -408,7 +436,8 @@ const CalendarDashboard: React.FC = () => {
     // Approaching: 8-30 days away
     const approachingCount = globallyFilteredSummonses.filter((s) => {
       if (!s.hearing_date) return false;
-      const hearingDate = dayjs(s.hearing_date);
+      // Use UTC parsing to avoid timezone shift (hearing_date is stored as date-only in UTC)
+      const hearingDate = dayjs.utc(s.hearing_date);
       const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
       return daysUntil >= 8 && daysUntil <= 30;
     }).length;
@@ -416,7 +445,8 @@ const CalendarDashboard: React.FC = () => {
     // Future: > 30 days away
     const futureCount = globallyFilteredSummonses.filter((s) => {
       if (!s.hearing_date) return false;
-      const hearingDate = dayjs(s.hearing_date);
+      // Use UTC parsing to avoid timezone shift (hearing_date is stored as date-only in UTC)
+      const hearingDate = dayjs.utc(s.hearing_date);
       const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
       return daysUntil > 30;
     }).length;

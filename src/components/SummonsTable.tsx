@@ -24,8 +24,12 @@
  */
 
 import { useState, useEffect } from 'react';
-import { format } from 'date-fns';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
 import { generateClient } from 'aws-amplify/api';
+
+// Extend dayjs with UTC plugin for correct date parsing
+dayjs.extend(utc);
 import { updateSummons } from '../graphql/mutations';
 import {
   DataGrid,
@@ -645,11 +649,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       width: 150,
       valueFormatter: (params: { value: string | null }) => {
         if (!params.value) return '';
-        try {
-          return format(new Date(params.value), 'MMMM d, yyyy');
-        } catch {
-          return '';
-        }
+        // Use dayjs.utc() to parse date-only fields correctly without timezone shift
+        const parsed = dayjs.utc(params.value);
+        return parsed.isValid() ? parsed.format('MMMM D, YYYY') : '';
       },
     },
     {
@@ -758,11 +760,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       width: 140,
       valueFormatter: (params: { value: string | null }) => {
         if (!params.value) return '';
-        try {
-          return format(new Date(params.value), 'MMMM d, yyyy');
-        } catch {
-          return '';
-        }
+        // Use dayjs.utc() to parse date-only fields correctly without timezone shift
+        const parsed = dayjs.utc(params.value);
+        return parsed.isValid() ? parsed.format('MMMM D, YYYY') : '';
       },
     },
     {
@@ -771,11 +771,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       width: 140,
       valueFormatter: (params: { value: string | null }) => {
         if (!params.value) return '';
-        try {
-          return format(new Date(params.value), 'MMMM d, yyyy');
-        } catch {
-          return '';
-        }
+        // Use dayjs.utc() to parse date-only fields correctly without timezone shift
+        const parsed = dayjs.utc(params.value);
+        return parsed.isValid() ? parsed.format('MMMM D, YYYY') : '';
       },
     },
     {

@@ -28,7 +28,15 @@ import {
   Paper,
   Divider,
   Alert,
+  ToggleButtonGroup,
+  ToggleButton,
+  Tooltip,
 } from '@mui/material';
+import {
+  DataGrid,
+  GridColDef,
+  GridRowParams,
+} from '@mui/x-data-grid';
 import SearchIcon from '@mui/icons-material/Search';
 import BusinessIcon from '@mui/icons-material/Business';
 import HistoryIcon from '@mui/icons-material/History';
@@ -37,10 +45,13 @@ import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import GavelIcon from '@mui/icons-material/Gavel';
 import SettingsIcon from '@mui/icons-material/Settings';
 import DownloadIcon from '@mui/icons-material/Download';
+import ViewModuleIcon from '@mui/icons-material/ViewModule';
+import ViewListIcon from '@mui/icons-material/ViewList';
+import UpdateIcon from '@mui/icons-material/Update';
 import { generateClient } from 'aws-amplify/api';
 
 import { listClients, listSummons } from '../graphql/queries';
-import { Client, Summons } from '../types/summons';
+import { Client, Summons, isUpdatedRecord, getBusinessDays } from '../types/summons';
 import ExportConfigurationModal from '../components/ExportConfigurationModal';
 import { useCSVExport } from '../hooks/useCSVExport';
 import { ExportConfig } from '../lib/csvExport';
@@ -50,22 +61,38 @@ const apiClient = generateClient();
 // Pre-2022 cutoff for "Active Era" filtering
 const PRE_2022_CUTOFF = new Date('2022-01-01T00:00:00.000Z');
 
+// IDLING filter keywords - only show idling violations
+const IDLING_FILTER_KEYWORDS = ['IDLING', 'IDLE'];
+
+/**
+ * Check if a summons is an "Idling" violation
+ * Safety guardrail to ensure no non-idling violations leak through
+ */
+function isIdlingViolation(summons: Summons): boolean {
+  const codeDesc = (summons.code_description || '').toUpperCase();
+  return IDLING_FILTER_KEYWORDS.some((keyword) => codeDesc.includes(keyword));
+}
+
 interface ClientWithStats extends Client {
   activeCaseCount: number;
   criticalCount: number;
   totalOpenBalance: number;
   totalCases: number;
+  recentlyUpdatedCount: number;
 }
 
 /**
- * Check if a summons is "critical" (hearing within 7 days)
+ * Check if a summons is "critical" (hearing within 7 business days)
+ * TRD v1.8: Uses business days (excludes weekends) to match Dashboard logic
  */
 function isCriticalCase(summons: Summons): boolean {
   if (!summons.hearing_date) return false;
   const hearingDate = new Date(summons.hearing_date);
   const now = new Date();
-  const daysUntilHearing = Math.floor((hearingDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-  return daysUntilHearing >= 0 && daysUntilHearing <= 7;
+  // Skip past dates
+  if (hearingDate < now) return false;
+  const businessDays = getBusinessDays(now, hearingDate);
+  return businessDays <= 7;
 }
 
 /**
@@ -93,6 +120,7 @@ const ClientList: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
 
   // Export state
   const [exportModalOpen, setExportModalOpen] = useState(false);
@@ -176,7 +204,11 @@ const ClientList: React.FC = () => {
       }
 
       // Find all summonses for this client (by clientID OR respondent_name match)
+      // AND must be an IDLING violation
       const clientSummonses = summonses.filter((s) => {
+        // First check: must be an IDLING violation
+        if (!isIdlingViolation(s)) return false;
+
         // Direct clientID match
         if (s.clientID === client.id) return true;
 
@@ -197,6 +229,7 @@ const ClientList: React.FC = () => {
       const activeEraSummonses = clientSummonses.filter(isActiveEra);
       const activeCases = activeEraSummonses.filter(isOpenCase);
       const criticalCases = activeEraSummonses.filter(isCriticalCase);
+      const recentlyUpdatedCases = clientSummonses.filter(isUpdatedRecord);
       const totalOpenBalance = activeCases.reduce((sum, s) => sum + (s.amount_due || 0), 0);
 
       return {
@@ -204,6 +237,7 @@ const ClientList: React.FC = () => {
         totalCases: clientSummonses.length,
         activeCaseCount: activeCases.length,
         criticalCount: criticalCases.length,
+        recentlyUpdatedCount: recentlyUpdatedCases.length,
         totalOpenBalance,
       };
     });
@@ -259,6 +293,154 @@ const ClientList: React.FC = () => {
       totalOpenBalance: clientsWithStats.reduce((sum, c) => sum + c.totalOpenBalance, 0),
     };
   }, [clients.length, clientsWithStats]);
+
+  /**
+   * DataGrid columns for list view
+   */
+  const listViewColumns: GridColDef[] = useMemo(() => [
+    {
+      field: 'name',
+      headerName: 'Client Name',
+      flex: 1,
+      minWidth: 200,
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <BusinessIcon sx={{ color: 'text.secondary', fontSize: 20 }} />
+          <Box>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              {params.value}
+            </Typography>
+            {params.row.akas && params.row.akas.length > 0 && (
+              <Typography variant="caption" color="text.secondary">
+                AKA: {params.row.akas.slice(0, 2).join(', ')}
+                {params.row.akas.length > 2 && ` +${params.row.akas.length - 2}`}
+              </Typography>
+            )}
+          </Box>
+        </Box>
+      ),
+    },
+    {
+      field: 'activeCaseCount',
+      headerName: 'Active Cases',
+      width: 140,
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <Chip
+            label={params.value}
+            size="small"
+            color={params.row.criticalCount > 0 ? 'error' : params.value > 0 ? 'primary' : 'default'}
+            sx={{ fontWeight: 600 }}
+          />
+          {params.row.criticalCount > 0 && (
+            <Tooltip title={`${params.row.criticalCount} critical case(s) within 7 days`}>
+              <WarningIcon sx={{ fontSize: 18, color: 'error.main' }} />
+            </Tooltip>
+          )}
+        </Box>
+      ),
+    },
+    {
+      field: 'criticalCount',
+      headerName: 'Critical',
+      width: 100,
+      renderCell: (params) => (
+        params.value > 0 ? (
+          <Chip
+            icon={<WarningIcon sx={{ fontSize: 14 }} />}
+            label={params.value}
+            size="small"
+            color="error"
+            sx={{ fontWeight: 600 }}
+          />
+        ) : (
+          <Typography variant="body2" color="text.secondary">—</Typography>
+        )
+      ),
+    },
+    {
+      field: 'totalOpenBalance',
+      headerName: 'Open Balance',
+      width: 130,
+      renderCell: (params) => (
+        <Typography
+          variant="body2"
+          sx={{
+            fontWeight: 600,
+            color: params.value > 0 ? 'error.main' : 'success.main',
+          }}
+        >
+          ${(params.value || 0).toLocaleString()}
+        </Typography>
+      ),
+    },
+    {
+      field: 'recentlyUpdatedCount',
+      headerName: 'Updated',
+      width: 100,
+      renderCell: (params) => (
+        params.value > 0 ? (
+          <Tooltip title={`${params.value} summons updated in last 72 hours`}>
+            <Chip
+              icon={<UpdateIcon sx={{ fontSize: 14 }} />}
+              label={params.value}
+              size="small"
+              color="warning"
+              sx={{ fontWeight: 600 }}
+            />
+          </Tooltip>
+        ) : (
+          <Typography variant="body2" color="text.secondary">—</Typography>
+        )
+      ),
+    },
+    {
+      field: 'totalCases',
+      headerName: 'Total History',
+      width: 120,
+      renderCell: (params) => (
+        <Typography variant="body2" color="text.secondary">
+          {params.value} cases
+        </Typography>
+      ),
+    },
+    {
+      field: 'actions',
+      headerName: 'Actions',
+      width: 140,
+      sortable: false,
+      renderCell: (params) => (
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<HistoryIcon />}
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/clients/${params.row.id}`);
+          }}
+        >
+          View
+        </Button>
+      ),
+    },
+  ], [navigate]);
+
+  /**
+   * Handle row click in list view
+   */
+  const handleRowClick = useCallback((params: GridRowParams) => {
+    navigate(`/clients/${params.row.id}`);
+  }, [navigate]);
+
+  /**
+   * Get row class for critical highlighting in list view
+   */
+  const getRowClassName = useCallback((params: GridRowParams) => {
+    if (params.row.criticalCount > 0) {
+      return 'critical-row';
+    }
+    return '';
+  }, []);
 
   /**
    * Handle Global Export - exports ALL summonses across ALL clients
@@ -367,121 +549,194 @@ const ClientList: React.FC = () => {
         </Grid>
       </Paper>
 
-      {/* Search Bar */}
-      <TextField
-        fullWidth
-        placeholder="Search clients by name, AKA, or contact..."
-        value={searchTerm}
-        onChange={(e) => setSearchTerm(e.target.value)}
-        sx={{ mb: 3 }}
-        InputProps={{
-          startAdornment: (
-            <InputAdornment position="start">
-              <SearchIcon color="action" />
-            </InputAdornment>
-          ),
-        }}
-      />
+      {/* Search Bar and View Toggle */}
+      <Box sx={{ display: 'flex', gap: 2, mb: 3, alignItems: 'center' }}>
+        <TextField
+          fullWidth
+          placeholder="Search clients by name, AKA, or contact..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon color="action" />
+              </InputAdornment>
+            ),
+          }}
+        />
+        <ToggleButtonGroup
+          value={viewMode}
+          exclusive
+          onChange={(_, newValue) => newValue && setViewMode(newValue)}
+          size="small"
+        >
+          <ToggleButton value="card">
+            <Tooltip title="Card View">
+              <ViewModuleIcon />
+            </Tooltip>
+          </ToggleButton>
+          <ToggleButton value="list">
+            <Tooltip title="List View">
+              <ViewListIcon />
+            </Tooltip>
+          </ToggleButton>
+        </ToggleButtonGroup>
+      </Box>
 
-      {/* Client Cards Grid */}
-      <Grid container spacing={2}>
-        {sortedClients.map((client) => (
-          <Grid item xs={12} sm={6} md={4} lg={3} key={client.id}>
-            <Card
-              sx={{
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                borderLeft: client.criticalCount > 0 ? 4 : 0,
-                borderColor: 'error.main',
-                transition: 'box-shadow 0.2s',
-                '&:hover': {
-                  boxShadow: 4,
-                },
-              }}
-            >
-              <CardContent sx={{ flexGrow: 1 }}>
-                {/* Client Name */}
-                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 1 }}>
-                  <BusinessIcon sx={{ color: 'text.secondary', mt: 0.5 }} />
-                  <Box sx={{ flexGrow: 1 }}>
-                    <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
-                      {client.name}
-                    </Typography>
-                    {client.akas && client.akas.length > 0 && (
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                        AKA: {client.akas.slice(0, 2).join(', ')}
-                        {client.akas.length > 2 && ` +${client.akas.length - 2} more`}
+      {/* Card View */}
+      {viewMode === 'card' && (
+        <Grid container spacing={2}>
+          {sortedClients.map((client) => (
+            <Grid item xs={12} sm={6} md={4} lg={3} key={client.id}>
+              <Card
+                sx={{
+                  height: '100%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  borderLeft: client.criticalCount > 0 ? 4 : 0,
+                  borderColor: 'error.main',
+                  transition: 'box-shadow 0.2s',
+                  '&:hover': {
+                    boxShadow: 4,
+                  },
+                }}
+              >
+                <CardContent sx={{ flexGrow: 1 }}>
+                  {/* Client Name */}
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 1 }}>
+                    <BusinessIcon sx={{ color: 'text.secondary', mt: 0.5 }} />
+                    <Box sx={{ flexGrow: 1 }}>
+                      <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+                        {client.name}
                       </Typography>
-                    )}
+                      {client.akas && client.akas.length > 0 && (
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                          AKA: {client.akas.slice(0, 2).join(', ')}
+                          {client.akas.length > 2 && ` +${client.akas.length - 2} more`}
+                        </Typography>
+                      )}
+                    </Box>
                   </Box>
-                </Box>
 
-                <Divider sx={{ my: 1.5 }} />
+                  <Divider sx={{ my: 1.5 }} />
 
-                {/* Stats */}
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                  {/* Active Cases Badge */}
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <GavelIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                    <Typography variant="body2">Active Cases:</Typography>
-                    <Chip
-                      label={client.activeCaseCount}
-                      size="small"
-                      color={client.criticalCount > 0 ? 'error' : client.activeCaseCount > 0 ? 'primary' : 'default'}
-                      sx={{ fontWeight: 600 }}
-                    />
-                    {client.criticalCount > 0 && (
+                  {/* Stats */}
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    {/* Active Cases Badge */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <GavelIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                      <Typography variant="body2">Active Cases:</Typography>
                       <Chip
-                        icon={<WarningIcon sx={{ fontSize: 14 }} />}
-                        label={`${client.criticalCount} CRITICAL`}
+                        label={client.activeCaseCount}
                         size="small"
-                        color="error"
-                        variant="outlined"
-                        sx={{ fontWeight: 600, fontSize: '0.7rem' }}
+                        color={client.criticalCount > 0 ? 'error' : client.activeCaseCount > 0 ? 'primary' : 'default'}
+                        sx={{ fontWeight: 600 }}
                       />
+                      {client.criticalCount > 0 && (
+                        <Chip
+                          icon={<WarningIcon sx={{ fontSize: 14 }} />}
+                          label={`${client.criticalCount} CRITICAL`}
+                          size="small"
+                          color="error"
+                          variant="outlined"
+                          sx={{ fontWeight: 600, fontSize: '0.7rem' }}
+                        />
+                      )}
+                    </Box>
+
+                    {/* Total Open Balance */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <AttachMoneyIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                      <Typography variant="body2">Open Balance:</Typography>
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          fontWeight: 600,
+                          color: client.totalOpenBalance > 0 ? 'error.main' : 'success.main',
+                        }}
+                      >
+                        ${client.totalOpenBalance.toLocaleString()}
+                      </Typography>
+                    </Box>
+
+                    {/* Recently Updated */}
+                    {client.recentlyUpdatedCount > 0 && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <UpdateIcon sx={{ fontSize: 18, color: 'warning.main' }} />
+                        <Typography variant="body2">Recently Updated:</Typography>
+                        <Chip
+                          label={`${client.recentlyUpdatedCount} summons`}
+                          size="small"
+                          color="warning"
+                          sx={{ fontWeight: 600, fontSize: '0.7rem' }}
+                        />
+                      </Box>
                     )}
-                  </Box>
 
-                  {/* Total Open Balance */}
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <AttachMoneyIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                    <Typography variant="body2">Open Balance:</Typography>
-                    <Typography
-                      variant="body2"
-                      sx={{
-                        fontWeight: 600,
-                        color: client.totalOpenBalance > 0 ? 'error.main' : 'success.main',
-                      }}
-                    >
-                      ${client.totalOpenBalance.toLocaleString()}
-                    </Typography>
+                    {/* Total Cases */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <HistoryIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                      <Typography variant="body2" color="text.secondary">
+                        Total History: {client.totalCases} cases
+                      </Typography>
+                    </Box>
                   </Box>
+                </CardContent>
 
-                  {/* Total Cases */}
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <HistoryIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                    <Typography variant="body2" color="text.secondary">
-                      Total History: {client.totalCases} cases
-                    </Typography>
-                  </Box>
-                </Box>
-              </CardContent>
+                <CardActions sx={{ px: 2, pb: 2 }}>
+                  <Button
+                    variant="contained"
+                    fullWidth
+                    startIcon={<HistoryIcon />}
+                    onClick={() => navigate(`/clients/${client.id}`)}
+                  >
+                    View History
+                  </Button>
+                </CardActions>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      )}
 
-              <CardActions sx={{ px: 2, pb: 2 }}>
-                <Button
-                  variant="contained"
-                  fullWidth
-                  startIcon={<HistoryIcon />}
-                  onClick={() => navigate(`/clients/${client.id}`)}
-                >
-                  View History
-                </Button>
-              </CardActions>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
+      {/* List View */}
+      {viewMode === 'list' && (
+        <Paper sx={{ width: '100%' }}>
+          <DataGrid
+            rows={sortedClients}
+            columns={listViewColumns}
+            onRowClick={handleRowClick}
+            getRowClassName={getRowClassName}
+            pageSizeOptions={[10, 25, 50, 100]}
+            initialState={{
+              pagination: { paginationModel: { pageSize: 25 } },
+            }}
+            disableRowSelectionOnClick
+            autoHeight
+            sx={{
+              border: 0,
+              '& .MuiDataGrid-row': {
+                cursor: 'pointer',
+                '&:hover': {
+                  backgroundColor: 'action.hover',
+                },
+              },
+              '& .MuiDataGrid-row.critical-row': {
+                backgroundColor: 'error.light',
+                '&:hover': {
+                  backgroundColor: 'error.main',
+                },
+                '& .MuiDataGrid-cell': {
+                  color: 'error.contrastText',
+                },
+              },
+              '& .MuiDataGrid-columnHeaders': {
+                backgroundColor: 'grey.100',
+              },
+            }}
+          />
+        </Paper>
+      )}
 
       {/* Empty State */}
       {sortedClients.length === 0 && !loading && (
