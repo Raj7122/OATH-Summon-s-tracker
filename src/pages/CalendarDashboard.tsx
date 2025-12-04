@@ -71,6 +71,9 @@ import { updateSummons } from '../graphql/mutations';
 // Types
 import { Summons, isNewRecord, isUpdatedRecord } from '../types/summons';
 
+// Theme colors
+import { horizonColors } from '../theme';
+
 // Configure dayjs
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -659,19 +662,32 @@ const CalendarDashboard: React.FC = () => {
             Dashboard
           </Typography>
 
-          {/* Active filter indicator with smooth transitions */}
+          {/* Active filter indicator - matches Horizon chip color */}
           {horizonFilter && (
             <Chip
               label={`Filtered: ${horizonFilter.charAt(0).toUpperCase() + horizonFilter.slice(1)}`}
-              color="primary"
+              color={
+                horizonFilter === 'critical' ? 'error' :
+                horizonFilter === 'approaching' ? 'warning' :
+                horizonFilter === 'future' ? 'success' :
+                horizonFilter === 'new' ? 'info' : 'primary'
+              }
               onDelete={() => setHorizonFilter(null)}
               sx={{
                 fontWeight: 600,
                 borderRadius: 2,
+                // Use solid color for clear visibility
+                backgroundColor:
+                  horizonFilter === 'critical' ? horizonColors.critical :
+                  horizonFilter === 'approaching' ? horizonColors.approaching :
+                  horizonFilter === 'future' ? horizonColors.future :
+                  horizonFilter === 'new' ? horizonColors.new : undefined,
+                color: '#FFFFFF',
                 '& .MuiChip-deleteIcon': {
+                  color: 'rgba(255, 255, 255, 0.7)',
                   transition: 'all 0.2s ease',
                   '&:hover': {
-                    color: 'error.main',
+                    color: '#FFFFFF',
                   },
                 },
               }}
