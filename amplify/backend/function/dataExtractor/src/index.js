@@ -39,6 +39,7 @@ exports.handler = async (event) => {
   try {
     // Parse DynamoDB Stream event format
     let summons_id, summons_number, pdf_link, video_link, violation_date;
+    let healingMode = false; // Backend flag to force re-OCR on partial records
 
     if (event.Records && event.Records.length > 0) {
       // DynamoDB Stream trigger format
@@ -54,9 +55,10 @@ exports.handler = async (event) => {
 
       console.log('Parsed DynamoDB stream event:', { summons_id, summons_number, pdf_link, video_link });
     } else {
-      // Direct invocation format (for testing)
-      ({ summons_id, summons_number, pdf_link, video_link, violation_date } = event);
-      console.log('Direct invocation event:', { summons_id, summons_number, pdf_link, video_link });
+      // Direct invocation format (for testing or healing)
+      ({ summons_id, summons_number, pdf_link, video_link, violation_date, healingMode } = event);
+      healingMode = healingMode || false;
+      console.log('Direct invocation event:', { summons_id, summons_number, pdf_link, video_link, healingMode });
     }
 
     if (!summons_id || !summons_number) {
@@ -66,16 +68,45 @@ exports.handler = async (event) => {
     // SAFETY CHECK: Fetch current record to verify it hasn't been OCR'd already
     // This prevents wasting OCR credits on already-processed records
     const existingRecord = await fetchExistingRecord(summons_id);
+
+    // Check if record needs healing (has violation_narrative but missing key OCR fields)
+    const needsHealing = existingRecord &&
+      existingRecord.violation_narrative &&
+      existingRecord.violation_narrative.length > 0 &&
+      (!existingRecord.id_number || !existingRecord.license_plate_ocr);
+
+    // Skip if already fully OCR'd, UNLESS healing mode is enabled for partial records
     if (existingRecord && existingRecord.violation_narrative && existingRecord.violation_narrative.length > 0) {
-      console.log(`SKIPPED: ${summons_number} already has OCR data (immutability check)`);
-      return {
-        statusCode: 200,
-        body: JSON.stringify({
-          message: 'Skipped - already has OCR data',
-          summons_id,
-          skipped: true,
-        }),
-      };
+      if (healingMode && needsHealing) {
+        // Healing mode: Allow re-OCR for records with partial data
+        console.log(`HEALING MODE: ${summons_number} has partial OCR data, re-extracting...`);
+        console.log(`  - Missing id_number: ${!existingRecord.id_number}`);
+        console.log(`  - Missing license_plate_ocr: ${!existingRecord.license_plate_ocr}`);
+      } else if (healingMode && !needsHealing) {
+        // Healing mode but record is already complete
+        console.log(`SKIPPED (healing): ${summons_number} already fully OCR'd`);
+        return {
+          statusCode: 200,
+          body: JSON.stringify({
+            message: 'Skipped - already fully OCR\'d',
+            summons_id,
+            skipped: true,
+            hasOCRData: true, // Signal success to dailySweep
+          }),
+        };
+      } else {
+        // Normal mode: Skip any record with existing OCR data
+        console.log(`SKIPPED: ${summons_number} already has OCR data (immutability check)`);
+        return {
+          statusCode: 200,
+          body: JSON.stringify({
+            message: 'Skipped - already has OCR data',
+            summons_id,
+            skipped: true,
+            hasOCRData: true, // Signal success to dailySweep (fixes failure count bug)
+          }),
+        };
+      }
     }
 
     const extractedData = {};

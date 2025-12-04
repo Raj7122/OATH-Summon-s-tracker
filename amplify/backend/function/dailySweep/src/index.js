@@ -617,6 +617,7 @@ async function executePhase2PriorityOCR(remainingQuota = MAX_OCR_REQUESTS_PER_DA
     pendingRecords: 0,
     recordsProcessed: 0,
     ocrSuccess: 0,
+    ocrHealed: 0, // Records with partial data that were re-OCR'd
     ocrFailed: 0,
     ocrSkipped: 0,
     ocrExcludedMaxFailures: 0,
@@ -679,14 +680,29 @@ async function executePhase2PriorityOCR(remainingQuota = MAX_OCR_REQUESTS_PER_DA
     }
 
     try {
-      console.log(`[${i + 1}/${recordsToProcess.length}] Processing: ${record.summons_number} (score: ${record.priority_score})`);
+      // Check if this record needs healing (has partial OCR data)
+      const requiresHealing = needsOCRHealing(record);
+      if (requiresHealing) {
+        console.log(`[${i + 1}/${recordsToProcess.length}] HEALING: ${record.summons_number} (score: ${record.priority_score})`);
+      } else {
+        console.log(`[${i + 1}/${recordsToProcess.length}] Processing: ${record.summons_number} (score: ${record.priority_score})`);
+      }
 
-      const ocrResult = await invokeOCRExtractor(record);
+      // Invoke OCR with healing mode if needed
+      const ocrResult = await invokeOCRExtractor(record, requiresHealing);
 
       if (ocrResult.success) {
         await markOCRComplete(record.id);
-        results.ocrSuccess++;
-        console.log(`  ✓ OCR complete: ${record.summons_number}`);
+        if (ocrResult.skipped) {
+          results.ocrSkipped++;
+          console.log(`  ⊘ Skipped (already complete): ${record.summons_number}`);
+        } else if (requiresHealing) {
+          results.ocrHealed++;
+          console.log(`  ✓ HEALED: ${record.summons_number}`);
+        } else {
+          results.ocrSuccess++;
+          console.log(`  ✓ OCR complete: ${record.summons_number}`);
+        }
       } else {
         // Increment failure count (will retry tomorrow if < max)
         await incrementOCRFailureCount(record.id, ocrResult.error);
@@ -866,9 +882,23 @@ function hasExistingOCRData(record) {
 }
 
 /**
- * Invoke the OCR extractor Lambda synchronously
+ * Check if a record needs healing (has partial OCR data)
+ * A record needs healing if it has violation_narrative but is missing key fields
  */
-async function invokeOCRExtractor(record) {
+function needsOCRHealing(record) {
+  const hasNarrative = record.violation_narrative && record.violation_narrative.length > 0;
+  const missingIdNumber = !record.id_number;
+  const missingLicensePlate = !record.license_plate_ocr;
+
+  return hasNarrative && (missingIdNumber || missingLicensePlate);
+}
+
+/**
+ * Invoke the OCR extractor Lambda synchronously
+ * @param {Object} record - The summons record to process
+ * @param {boolean} healingMode - If true, allows re-OCR on partial records
+ */
+async function invokeOCRExtractor(record, healingMode = false) {
   try {
     const payload = {
       summons_id: record.id,
@@ -877,6 +907,7 @@ async function invokeOCRExtractor(record) {
       video_link: record.video_link,
       violation_date: record.violation_date,
       synchronous: true, // Tell extractor to return result
+      healingMode: healingMode, // Backend flag for partial record healing
     };
 
     const params = {
@@ -891,8 +922,9 @@ async function invokeOCRExtractor(record) {
     if (response.statusCode === 200) {
       // Parse the body to check if OCR data was actually extracted
       const body = JSON.parse(response.body || '{}');
-      if (body.hasOCRData) {
-        return { success: true };
+      if (body.hasOCRData || body.skipped) {
+        // Success: either new OCR data extracted or record was safely skipped
+        return { success: true, skipped: body.skipped || false };
       } else {
         // statusCode 200 but no OCR data (e.g., quota exceeded, extraction failed)
         return { success: false, error: body.message || 'No OCR data extracted' };
