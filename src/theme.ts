@@ -255,15 +255,14 @@ export const theme = createTheme({
         },
       },
     },
-    // AppBar - Blue Command Header (Arthur's mental model)
+    // AppBar - Glassmorphism effect
     MuiAppBar: {
       styleOverrides: {
         root: {
-          // Default to primary blue gradient - can be overridden in component
-          background: `linear-gradient(135deg, ${palette.primary.main} 0%, ${palette.primary.dark} 100%)`,
-          boxShadow: 'none',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-          color: '#FFFFFF',
+          backgroundColor: alpha('#FFFFFF', 0.8),
+          backdropFilter: 'blur(6px)',
+          boxShadow: '0px 1px 3px rgba(145, 158, 171, 0.12)',
+          color: palette.text.primary,
         },
       },
     },
