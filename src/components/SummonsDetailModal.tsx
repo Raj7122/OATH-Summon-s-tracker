@@ -529,6 +529,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                 />
                 <InfoRow label="License Plate" value={summons.license_plate_ocr || summons.license_plate} highlight />
                 <InfoRow label="Vehicle Type" value={summons.vehicle_type_ocr} />
+                <InfoRow label="ID Number" value={summons.id_number || summons.dep_id} />
                 <InfoRow label="Name on Summons" value={summons.name_on_summons_ocr} />
               </CardContent>
             </Card>

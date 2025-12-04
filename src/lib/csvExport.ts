@@ -218,10 +218,23 @@ export const EXPORT_COLUMNS: ExportColumn[] = [
     defaultChecked: false,
   },
   {
+    key: 'id_number',
+    label: 'ID Number',
+    category: 'ocr',
+    defaultChecked: false,
+  },
+  {
     key: 'violation_narrative',
     label: 'Violation Narrative',
     category: 'ocr',
     defaultChecked: false,
+  },
+  {
+    key: 'lag_days',
+    label: 'Wait/Lag Days',
+    category: 'ocr',
+    defaultChecked: false,
+    formatter: (value) => value != null ? String(value) : '',
   },
 ];
 
