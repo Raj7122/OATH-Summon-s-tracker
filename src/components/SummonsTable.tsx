@@ -6,7 +6,6 @@
  *
  * Key Features:
  * - Color-coded Status chips (Red/Blue/Green) for instant visual triage (Don't Make Me Think)
- * - Conditional formatting for Lag Days >60 (legal timeliness threshold)
  * - Master-Detail expandable rows for progressive disclosure (Miller's Law - 7±2 items)
  * - Mobile Bottom Sheet with large Switch components (Fitts's Law - 44px touch targets)
  * - "New" badges for rows updated in last 24 hours (Hooked Model - variable rewards)
@@ -587,34 +586,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   };
 
   /**
-   * Render Lag Days column with conditional formatting
-   *
-   * UX Improvement #2: Highlights values >60 days (legal timeliness threshold) in bold red.
-   * Enables instant identification of cases approaching statute limitations.
-   *
-   * @param {GridRenderCellParams} params - MUI DataGrid cell parameters
-   * @returns {JSX.Element | string} Typography component with conditional styling, or em dash for null values
-   */
-  const renderLagDaysCell = (params: GridRenderCellParams) => {
-    const lagDays = params.value;
-    if (lagDays === null || lagDays === undefined) return '—';
-
-    const isOverThreshold = lagDays > 60; // Legal timeliness threshold
-
-    return (
-      <Typography
-        sx={{
-          color: isOverThreshold ? 'error.main' : 'text.primary',
-          fontWeight: isOverThreshold ? 'bold' : 'normal',
-          fontSize: isOverThreshold ? '1.1rem' : 'inherit',
-        }}
-      >
-        {lagDays}
-      </Typography>
-    );
-  };
-
-  /**
    * Render Client column - clickable to open notes/drawer
    *
    * Provides clickable area to open notes dialog (desktop) or mobile drawer (mobile).
@@ -689,12 +660,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
         if (params.value == null) return '';
         return `$${params.value.toFixed(2)}`;
       },
-    },
-    {
-      field: 'lag_days',
-      headerName: 'Lag (Days)',
-      width: 110,
-      renderCell: renderLagDaysCell,
     },
     // TRD v1.8: Client Feedback Updates - New columns for manual workflow tracking
     {
@@ -859,7 +824,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
         </Box>
       ),
     },
-    { field: 'id_number', headerName: 'ID Number', width: 120 },
     { field: 'vehicle_type_ocr', headerName: 'Vehicle Type', width: 120 },
     { field: 'prior_offense_status', headerName: 'Prior Offense', width: 120 },
     { field: 'idling_duration_ocr', headerName: 'Idling Duration', width: 130 },
@@ -904,7 +868,6 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
               evidence_requested_date: false,
               evidence_received: false,
               critical_flags_ocr: false,
-              id_number: false,
               vehicle_type_ocr: false,
               prior_offense_status: false,
               idling_duration_ocr: false,

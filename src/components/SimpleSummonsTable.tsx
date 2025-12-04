@@ -4,7 +4,7 @@
  * Implements the "No-Scroll Rule" - a streamlined DataGrid with only 5 columns:
  * 1. Status (Chip with NEW/UPDATED badge) - Fixed Width
  * 2. Client Name - Flex Width
- * 3. Violation Date (NEW) - Sortable (for Lag Time calculation)
+ * 3. Violation Date - Sortable
  * 4. Hearing Date - Sortable (Default Sort)
  * 5. Action Icon (to open detail modal)
  *
@@ -13,9 +13,6 @@
  *
  * UX Philosophy: Fitts's Law - filter tabs attached directly to grid top,
  * reducing distance to high-frequency actions.
- *
- * Lag Time Strategy: Arthur compares Violation Date vs Hearing Date to calculate
- * "Lag Time" - a key defense strategy metric.
  *
  * @module components/SimpleSummonsTable
  */
@@ -217,7 +214,7 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
   
   /**
    * Render Violation Date column
-   * Shows the date when the violation occurred (for Lag Time calculation)
+   * Shows the date when the violation occurred
    */
   const renderViolationDateCell = (params: GridRenderCellParams) => {
     const row = params.row as Summons;
