@@ -184,7 +184,7 @@ function formatActivityType(type: ActivityLogEntry['type']): string {
 
 /**
  * Get text color for new value based on value content
- * Red for Default/Guilty, Orange for Adjourned, Green for Dismissed
+ * Red for Default/Guilty/Docketed, Orange for Adjourned, Green for Dismissed/Paid
  */
 function getActivityTextColor(_type: ActivityLogEntry['type'], value: string | null): string {
   if (!value) return 'text.primary';
@@ -192,14 +192,16 @@ function getActivityTextColor(_type: ActivityLogEntry['type'], value: string | n
   const upperValue = value.toUpperCase();
 
   // Check for specific result keywords
-  if (upperValue.includes('DEFAULT') || upperValue.includes('GUILTY') || upperValue.includes('JUDGMENT')) {
+  // Red: Danger statuses (DOCKETED = red)
+  if (upperValue.includes('DEFAULT') || upperValue.includes('GUILTY') || upperValue.includes('JUDGMENT') || upperValue.includes('DOCKETED')) {
     return '#d32f2f'; // Red
   }
   if (upperValue.includes('ADJOURN') || upperValue.includes('RESCHEDUL')) {
     return '#ed6c02'; // Orange
   }
+  // Green: Resolved statuses (PAID IN FULL = emerald green)
   if (upperValue.includes('DISMISS') || upperValue.includes('CLOSED') || upperValue.includes('PAID')) {
-    return '#2e7d32'; // Green
+    return '#2e7d32'; // Green (Emerald)
   }
 
   return 'text.primary';

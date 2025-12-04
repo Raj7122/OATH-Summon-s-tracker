@@ -243,15 +243,18 @@ export function getBusinessDays(startDate: Date, endDate: Date): number {
  * Get MUI color for Status chip based on text value
  * 
  * Implements "Don't Make Me Think" principle via visual signaling:
- * - Red (error): DEFAULT JUDGMENT - urgent action required
+ * - Red (error): DEFAULT JUDGMENT, DOCKETED - urgent action required
  * - Blue (info): SCHEDULED/HEARING - active case
- * - Green (success): DISMISSED/CLOSED - completed case
+ * - Green (success): DISMISSED/CLOSED/PAID IN FULL - completed case
  * - Gray (default): Unknown status
  */
 export function getStatusColor(status: string): 'error' | 'info' | 'success' | 'default' {
   const statusUpper = status?.toUpperCase() || '';
-  if (statusUpper.includes('DEFAULT') || statusUpper.includes('JUDGMENT') || statusUpper.includes('VIOLATION')) return 'error';
-  if (statusUpper.includes('DISMISS') || statusUpper.includes('CLOSED')) return 'success';
+  // Red: Danger statuses requiring urgent attention
+  if (statusUpper.includes('DEFAULT') || statusUpper.includes('JUDGMENT') || statusUpper.includes('VIOLATION') || statusUpper.includes('DOCKETED')) return 'error';
+  // Green: Resolved/completed statuses (PAID IN FULL = emerald green via success)
+  if (statusUpper.includes('DISMISS') || statusUpper.includes('CLOSED') || statusUpper.includes('PAID')) return 'success';
+  // Blue: Active case statuses
   if (statusUpper.includes('SCHEDULED') || statusUpper.includes('HEARING') || statusUpper.includes('RESCHEDULED')) return 'info';
   return 'default';
 }

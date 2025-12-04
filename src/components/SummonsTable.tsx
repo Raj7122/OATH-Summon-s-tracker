@@ -493,9 +493,12 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
    */
   const getStatusColor = (status: string): 'error' | 'info' | 'success' | 'default' => {
     const statusUpper = status?.toUpperCase() || '';
-    if (statusUpper.includes('DEFAULT') || statusUpper.includes('JUDGMENT')) return 'error';
-    if (statusUpper.includes('DISMISS') || statusUpper.includes('CLOSED')) return 'success';
-    if (statusUpper.includes('SCHEDULED') || statusUpper.includes('HEARING')) return 'info';
+    // Red: Danger statuses (DOCKETED = red)
+    if (statusUpper.includes('DEFAULT') || statusUpper.includes('JUDGMENT') || statusUpper.includes('VIOLATION') || statusUpper.includes('DOCKETED')) return 'error';
+    // Green: Resolved statuses (PAID IN FULL = emerald green)
+    if (statusUpper.includes('DISMISS') || statusUpper.includes('CLOSED') || statusUpper.includes('PAID')) return 'success';
+    // Blue: Active case statuses
+    if (statusUpper.includes('SCHEDULED') || statusUpper.includes('HEARING') || statusUpper.includes('RESCHEDULED')) return 'info';
     return 'default';
   };
 
