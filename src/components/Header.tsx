@@ -1,4 +1,4 @@
-import { AppBar, Toolbar, Typography, Button, Box, IconButton, Menu, MenuItem, alpha } from '@mui/material';
+import { AppBar, Toolbar, Typography, Button, Box, IconButton, Menu, MenuItem } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
@@ -47,10 +47,11 @@ const Header = () => {
       position="sticky"
       elevation={0}
       sx={{
-        backgroundColor: alpha('#FFFFFF', 0.8),
-        backdropFilter: 'blur(6px)',
-        borderBottom: (theme) => `1px solid ${alpha(theme.palette.grey[500], 0.12)}`,
-        color: 'text.primary',
+        // Royal Blue gradient header - Arthur's mental model
+        background: (theme) =>
+          `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+        borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+        color: '#FFFFFF',
       }}
     >
       <Toolbar>
@@ -62,7 +63,8 @@ const Header = () => {
             mr: 4,
             cursor: 'pointer',
             fontWeight: 700,
-            color: 'primary.main',
+            color: '#FFFFFF',
+            letterSpacing: '-0.01em',
           }}
           onClick={() => navigate('/dashboard')}
         >
@@ -75,14 +77,14 @@ const Header = () => {
             onClick={() => handleNavigate('/dashboard')}
             sx={{
               fontWeight: 600,
-              color: isActive('/dashboard') ? 'primary.main' : 'text.secondary',
+              color: '#FFFFFF',
               backgroundColor: isActive('/dashboard')
-                ? (theme) => alpha(theme.palette.primary.main, 0.08)
+                ? 'rgba(255, 255, 255, 0.15)'
                 : 'transparent',
               borderRadius: 2,
               px: 2,
               '&:hover': {
-                backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.12),
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
               },
             }}
           >
@@ -92,14 +94,14 @@ const Header = () => {
             onClick={() => handleNavigate('/clients')}
             sx={{
               fontWeight: 600,
-              color: location.pathname.startsWith('/clients') ? 'primary.main' : 'text.secondary',
+              color: '#FFFFFF',
               backgroundColor: location.pathname.startsWith('/clients')
-                ? (theme) => alpha(theme.palette.primary.main, 0.08)
+                ? 'rgba(255, 255, 255, 0.15)'
                 : 'transparent',
               borderRadius: 2,
               px: 2,
               '&:hover': {
-                backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.12),
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
               },
             }}
           >
@@ -112,7 +114,7 @@ const Header = () => {
           <IconButton
             size="large"
             onClick={handleMobileMenu}
-            sx={{ color: 'text.secondary' }}
+            sx={{ color: '#FFFFFF' }}
           >
             <MenuIcon />
           </IconButton>
@@ -132,9 +134,9 @@ const Header = () => {
             size="large"
             onClick={handleAccountMenu}
             sx={{
-              color: 'text.secondary',
+              color: '#FFFFFF',
               '&:hover': {
-                backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.08),
+                backgroundColor: 'rgba(255, 255, 255, 0.15)',
               },
             }}
           >
