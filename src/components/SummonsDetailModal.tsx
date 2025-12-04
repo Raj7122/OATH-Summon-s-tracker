@@ -457,7 +457,6 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   }
                 />
                 <InfoRow label="Status" value={summons.status} />
-                <InfoRow label="Lag Days" value={summons.lag_days} />
               </CardContent>
             </Card>
             
@@ -531,7 +530,6 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                 <InfoRow label="License Plate" value={summons.license_plate_ocr || summons.license_plate} highlight />
                 <InfoRow label="Vehicle Type" value={summons.vehicle_type_ocr} />
                 <InfoRow label="ID Number" value={summons.id_number || summons.dep_id} />
-                <InfoRow label="Agency ID" value={summons.agency_id_number} />
                 <InfoRow label="Name on Summons" value={summons.name_on_summons_ocr} />
               </CardContent>
             </Card>
