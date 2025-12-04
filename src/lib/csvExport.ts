@@ -229,13 +229,6 @@ export const EXPORT_COLUMNS: ExportColumn[] = [
     category: 'ocr',
     defaultChecked: false,
   },
-  {
-    key: 'lag_days',
-    label: 'Wait/Lag Days',
-    category: 'ocr',
-    defaultChecked: false,
-    formatter: (value) => value != null ? String(value) : '',
-  },
 ];
 
 /**
