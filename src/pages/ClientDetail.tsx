@@ -89,6 +89,16 @@ function isIdlingViolation(summons: Summons): boolean {
 }
 
 /**
+ * Calculate lag/wait time between violation date and hearing date
+ */
+function calculateLagDays(violationDate: string | undefined, hearingDate: string | undefined): number | null {
+  if (!violationDate || !hearingDate) return null;
+  const violation = dayjs(violationDate);
+  const hearing = dayjs(hearingDate);
+  return hearing.diff(violation, 'day');
+}
+
+/**
  * Format change timestamp for tooltip display
  */
 function formatChangeDate(dateString: string | undefined): string {
@@ -434,6 +444,24 @@ const ClientDetail: React.FC = () => {
       headerName: 'License Plate',
       width: 120,
       valueGetter: (params) => params.row.license_plate_ocr || params.row.license_plate || '—',
+    },
+    {
+      field: 'lag_days',
+      headerName: 'Wait/Lag',
+      width: 100,
+      valueGetter: (params) => calculateLagDays(params.row.violation_date, params.row.hearing_date),
+      renderCell: (params) => {
+        const days = params.value;
+        if (days === null) return '—';
+        return (
+          <Chip
+            label={`${days}d`}
+            size="small"
+            color={days > 60 ? 'warning' : 'default'}
+            variant="outlined"
+          />
+        );
+      },
     },
     {
       field: 'amount_due',
