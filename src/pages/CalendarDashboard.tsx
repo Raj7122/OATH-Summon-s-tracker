@@ -1,18 +1,21 @@
 /**
  * Calendar Dashboard Page
- * 
+ *
  * Implements the "Calendar-Centric Layout" (Strategic Pivot #1):
  * - Split-View Layout: 35% Command Center (Calendar) | 65% DataGrid
  * - Heatmap Calendar with colored dots for hearing dates
  * - Simplified 5-column DataGrid with no horizontal scroll
  * - Comprehensive detail modal on row click
  * - Filter tabs attached directly to DataGrid
- * 
+ *
  * This is the main dashboard for "Arthur" - designed for instant deadline
  * visibility and panic management per the UI/UX Design Guide.
- * 
+ *
  * Uses AWS Amplify GraphQL API for real data.
- * 
+ *
+ * Premium Visual Layer: Egret-inspired design with soft shadows,
+ * generous whitespace, and smooth transitions.
+ *
  * @module pages/CalendarDashboard
  */
 
@@ -27,7 +30,7 @@ import {
   Grid,
   Paper,
   Chip,
-  CircularProgress,
+  Skeleton,
   useTheme,
   useMediaQuery,
   Alert,
@@ -39,6 +42,7 @@ import {
   ListItemIcon,
   Divider,
   IconButton,
+  alpha,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
@@ -101,8 +105,96 @@ function isIdlingViolation(summons: Summons): boolean {
 }
 
 /**
+ * Skeleton loader for the Command Center
+ */
+const CommandCenterSkeleton = () => (
+  <Paper
+    elevation={0}
+    sx={{
+      p: 3,
+      height: '100%',
+      borderRadius: 4,
+      border: '1px solid',
+      borderColor: 'divider',
+    }}
+  >
+    <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+      <Skeleton variant="circular" width={24} height={24} sx={{ mr: 1.5 }} />
+      <Skeleton variant="text" width={140} height={28} />
+    </Box>
+    <Box sx={{ display: 'flex', gap: 1, mb: 3 }}>
+      <Skeleton variant="rounded" width={80} height={28} />
+      <Skeleton variant="rounded" width={100} height={28} />
+      <Skeleton variant="rounded" width={70} height={28} />
+    </Box>
+    <Skeleton variant="rounded" width="100%" height={280} sx={{ mb: 2 }} />
+    <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+      <Skeleton variant="rounded" width="48%" height={36} />
+      <Skeleton variant="rounded" width="48%" height={36} />
+    </Box>
+    <Skeleton variant="rounded" width="100%" height={100} />
+  </Paper>
+);
+
+/**
+ * Skeleton loader for the DataGrid
+ */
+const DataGridSkeleton = () => (
+  <Paper
+    elevation={0}
+    sx={{
+      height: '100%',
+      borderRadius: 4,
+      border: '1px solid',
+      borderColor: 'divider',
+      overflow: 'hidden',
+    }}
+  >
+    {/* Filter tabs skeleton */}
+    <Box sx={{ p: 2, backgroundColor: 'grey.50', display: 'flex', gap: 1, alignItems: 'center' }}>
+      <Skeleton variant="circular" width={20} height={20} />
+      <Skeleton variant="rounded" width={100} height={32} />
+      <Skeleton variant="rounded" width={90} height={32} />
+      <Skeleton variant="rounded" width={70} height={32} />
+      <Box sx={{ flex: 1 }} />
+      <Skeleton variant="text" width={80} />
+    </Box>
+    {/* Header row skeleton */}
+    <Box sx={{ display: 'flex', p: 2, backgroundColor: 'grey.50', borderBottom: '1px solid', borderColor: 'grey.200' }}>
+      <Skeleton variant="text" width="15%" height={24} sx={{ mr: 2 }} />
+      <Skeleton variant="text" width="25%" height={24} sx={{ mr: 2 }} />
+      <Skeleton variant="text" width="15%" height={24} sx={{ mr: 2 }} />
+      <Skeleton variant="text" width="15%" height={24} sx={{ mr: 2 }} />
+      <Skeleton variant="text" width="5%" height={24} />
+    </Box>
+    {/* Data rows skeleton */}
+    {[...Array(8)].map((_, i) => (
+      <Box
+        key={i}
+        sx={{
+          display: 'flex',
+          p: 2,
+          borderBottom: '1px solid',
+          borderColor: 'grey.100',
+          alignItems: 'center',
+        }}
+      >
+        <Box sx={{ width: '15%', mr: 2, display: 'flex', gap: 0.5 }}>
+          <Skeleton variant="rounded" width={50} height={24} />
+          <Skeleton variant="rounded" width={70} height={24} />
+        </Box>
+        <Skeleton variant="text" width="25%" height={24} sx={{ mr: 2 }} />
+        <Skeleton variant="text" width="15%" height={24} sx={{ mr: 2 }} />
+        <Skeleton variant="text" width="15%" height={24} sx={{ mr: 2 }} />
+        <Skeleton variant="circular" width={24} height={24} />
+      </Box>
+    ))}
+  </Paper>
+);
+
+/**
  * Calendar Dashboard Page Component
- * 
+ *
  * The main dashboard implementing the calendar-centric split-view layout.
  * Features:
  * - Left Column (35%): Calendar Command Center with heatmap dots
@@ -114,7 +206,7 @@ function isIdlingViolation(summons: Summons): boolean {
 const CalendarDashboard: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  
+
   // State
   const [loading, setLoading] = useState(true);
   const [summonses, setSummonses] = useState<Summons[]>([]);
@@ -194,7 +286,7 @@ const CalendarDashboard: React.FC = () => {
   useEffect(() => {
     loadSummonses();
   }, [loadSummonses]);
-  
+
   /**
    * Apply global filters: Active Era + Idling Guardrail
    *
@@ -216,9 +308,9 @@ const CalendarDashboard: React.FC = () => {
    * Filter summonses by selected date and Horizon System filter
    *
    * Horizon System Logic:
-   * - Critical (🔴): Hearings within 7 days OR Status is "Default/Failure to Appear"
-   * - Approaching (🟠): Hearings between 8 and 30 days from today
-   * - Future (🟢): Hearings > 30 days away
+   * - Critical (Red): Hearings within 7 days OR Status is "Default/Failure to Appear"
+   * - Approaching (Orange): Hearings between 8 and 30 days from today
+   * - Future (Green): Hearings > 30 days away
    *
    * Note: hearing_date is stored as ISO format (e.g., "2025-01-15T00:00:00.000Z")
    * We compare by extracting the date portion only.
@@ -292,7 +384,7 @@ const CalendarDashboard: React.FC = () => {
 
   /**
    * Handle Horizon System chip click (toggle behavior)
-   * Filters: critical (🔴), approaching (🟠), future (🟢), new
+   * Filters: critical (Red), approaching (Orange), future (Green), new
    */
   const handleHorizonFilterClick = useCallback((filter: 'critical' | 'approaching' | 'future' | 'new') => {
     // Toggle: if clicking the same filter, clear it; otherwise set it
@@ -302,7 +394,7 @@ const CalendarDashboard: React.FC = () => {
       setSelectedDate(null);
     }
   }, [horizonFilter]);
-  
+
   /**
    * Handle date selection from calendar
    */
@@ -317,35 +409,35 @@ const CalendarDashboard: React.FC = () => {
       setMobileView('grid');
     }
   }, [isMobile]);
-  
+
   /**
    * Handle activity filter change
    */
   const handleFilterChange = useCallback((filter: 'all' | 'updated' | 'new') => {
     setActivityFilter(filter);
   }, []);
-  
+
   /**
    * Handle data refresh
    */
   const handleRefresh = useCallback(() => {
     loadSummonses();
   }, [loadSummonses]);
-  
+
   /**
    * Handle summons field update via GraphQL mutation
    */
   const handleSummonsUpdate = useCallback(async (id: string, field: string, value: unknown) => {
     try {
       console.log(`Updating ${field} = ${value} for summons ${id}...`);
-      
+
       // Build the update input
       const updateInput: Record<string, unknown> = {
         id,
         [field]: value,
       };
-      
-      // If checking "evidence_requested" and it's being set to true, 
+
+      // If checking "evidence_requested" and it's being set to true,
       // auto-set the date if not already set
       if (field === 'evidence_requested' && value === true) {
         const summons = summonses.find(s => s.id === id);
@@ -353,7 +445,7 @@ const CalendarDashboard: React.FC = () => {
           updateInput.evidence_requested_date = new Date().toISOString();
         }
       }
-      
+
       // Execute GraphQL mutation
       await client.graphql({
         query: updateSummons,
@@ -361,9 +453,9 @@ const CalendarDashboard: React.FC = () => {
           input: updateInput,
         },
       });
-      
-      console.log(`✓ Successfully updated ${field}`);
-      
+
+      console.log(`Successfully updated ${field}`);
+
       // Update local state optimistically
       setSummonses((prev) =>
         prev.map((s) => {
@@ -377,7 +469,7 @@ const CalendarDashboard: React.FC = () => {
           return s;
         })
       );
-      
+
       // Show success feedback for certain fields
       if (['notes', 'internal_status'].includes(field)) {
         setSnackbar({
@@ -395,15 +487,15 @@ const CalendarDashboard: React.FC = () => {
       });
     }
   }, [summonses]);
-  
+
   /**
    * Get summary statistics for the header using Horizon System
    * Uses globally filtered summonses (Active Era + Idling only)
    *
    * Horizon System:
-   * - Critical (🔴): Hearings within 7 days OR Status is "Default/Failure to Appear"
-   * - Approaching (🟠): Hearings between 8 and 30 days from today
-   * - Future (🟢): Hearings > 30 days away
+   * - Critical (Red): Hearings within 7 days OR Status is "Default/Failure to Appear"
+   * - Approaching (Orange): Hearings between 8 and 30 days from today
+   * - Future (Green): Hearings > 30 days away
    */
   const stats = useMemo(() => {
     const now = dayjs().tz(NYC_TIMEZONE);
@@ -467,7 +559,7 @@ const CalendarDashboard: React.FC = () => {
       archivedCount,
     };
   }, [globallyFilteredSummonses, summonses]);
-  
+
   /**
    * Close snackbar
    */
@@ -481,25 +573,25 @@ const CalendarDashboard: React.FC = () => {
   const getActivityIcon = (type: string) => {
     switch (type) {
       case 'CREATED':
-        return <AddCircleIcon sx={{ color: '#4CAF50' }} />;
+        return <AddCircleIcon sx={{ color: 'success.main' }} />;
       case 'STATUS_CHANGE':
-        return <SwapHorizIcon sx={{ color: '#FF9800' }} />;
+        return <SwapHorizIcon sx={{ color: 'warning.main' }} />;
       case 'RESCHEDULE':
-        return <EventIcon sx={{ color: '#2196F3' }} />;
+        return <EventIcon sx={{ color: 'info.main' }} />;
       case 'RESULT_CHANGE':
-        return <GavelIcon sx={{ color: '#9C27B0' }} />;
+        return <GavelIcon sx={{ color: 'secondary.main' }} />;
       case 'AMOUNT_CHANGE':
-        return <AttachMoneyIcon sx={{ color: '#F44336' }} />;
+        return <AttachMoneyIcon sx={{ color: 'error.main' }} />;
       case 'PAYMENT':
-        return <PaymentIcon sx={{ color: '#4CAF50' }} />;
+        return <PaymentIcon sx={{ color: 'success.main' }} />;
       case 'AMENDMENT':
-        return <EditIcon sx={{ color: '#607D8B' }} />;
+        return <EditIcon sx={{ color: 'text.secondary' }} />;
       case 'OCR_COMPLETE':
-        return <DocumentScannerIcon sx={{ color: '#00BCD4' }} />;
+        return <DocumentScannerIcon sx={{ color: 'info.main' }} />;
       case 'ARCHIVED':
-        return <ArchiveIcon sx={{ color: '#757575' }} />;
+        return <ArchiveIcon sx={{ color: 'text.disabled' }} />;
       default:
-        return <HistoryIcon />;
+        return <HistoryIcon color="action" />;
     }
   };
 
@@ -537,32 +629,52 @@ const CalendarDashboard: React.FC = () => {
   }, [summonses]);
 
   return (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Header Section */}
-      <Box
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', p: { xs: 2, md: 3 } }}>
+      {/* Header Section - Premium styling */}
+      <Paper
+        elevation={0}
         sx={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          mb: 2,
+          mb: 3,
+          p: 2.5,
+          borderRadius: 4,
+          backgroundColor: 'background.paper',
+          border: '1px solid',
+          borderColor: 'divider',
           flexWrap: 'wrap',
           gap: 2,
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-          <Typography variant="h4" sx={{ fontWeight: 600 }}>
+          <Typography
+            variant="h4"
+            sx={{
+              fontWeight: 700,
+              color: 'text.primary',
+              letterSpacing: '-0.01em',
+            }}
+          >
             Dashboard
           </Typography>
 
-          {/* Horizon filter chips moved to Command Center for better UX */}
-
-          {/* Active filter indicator */}
+          {/* Active filter indicator with smooth transitions */}
           {horizonFilter && (
             <Chip
               label={`Filtered: ${horizonFilter.charAt(0).toUpperCase() + horizonFilter.slice(1)}`}
               color="primary"
               onDelete={() => setHorizonFilter(null)}
-              sx={{ fontWeight: 500 }}
+              sx={{
+                fontWeight: 600,
+                borderRadius: 2,
+                '& .MuiChip-deleteIcon': {
+                  transition: 'all 0.2s ease',
+                  '&:hover': {
+                    color: 'error.main',
+                  },
+                },
+              }}
             />
           )}
 
@@ -571,80 +683,105 @@ const CalendarDashboard: React.FC = () => {
             <Chip
               label={`Date: ${selectedDate.format('MMM D, YYYY')}`}
               color="primary"
+              variant="outlined"
               onDelete={() => setSelectedDate(null)}
-              sx={{ fontWeight: 500 }}
+              sx={{
+                fontWeight: 600,
+                borderRadius: 2,
+                borderWidth: '1.5px',
+              }}
             />
           )}
         </Box>
 
-        {/* OVERRIDE C: Archive toggle removed - main dashboard is active triage only */}
-        {/* Historical data (pre-2022) is accessible via Client View, not here */}
-
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          {/* Mobile view toggle */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          {/* Mobile view toggle - Premium button group */}
           {isMobile && (
-            <Box sx={{ display: 'flex', gap: 0.5 }}>
-              <Button
-                variant={mobileView === 'calendar' ? 'contained' : 'outlined'}
+            <Box
+              sx={{
+                display: 'flex',
+                gap: 0.5,
+                backgroundColor: alpha(theme.palette.primary.main, 0.08),
+                p: 0.5,
+                borderRadius: 2,
+              }}
+            >
+              <IconButton
                 size="small"
                 onClick={() => setMobileView('calendar')}
-                sx={{ minWidth: 40 }}
+                sx={{
+                  backgroundColor: mobileView === 'calendar' ? 'primary.main' : 'transparent',
+                  color: mobileView === 'calendar' ? 'primary.contrastText' : 'primary.main',
+                  borderRadius: 1.5,
+                  '&:hover': {
+                    backgroundColor: mobileView === 'calendar' ? 'primary.dark' : alpha(theme.palette.primary.main, 0.12),
+                  },
+                }}
               >
                 <CalendarMonthIcon fontSize="small" />
-              </Button>
-              <Button
-                variant={mobileView === 'grid' ? 'contained' : 'outlined'}
+              </IconButton>
+              <IconButton
                 size="small"
                 onClick={() => setMobileView('grid')}
-                sx={{ minWidth: 40 }}
+                sx={{
+                  backgroundColor: mobileView === 'grid' ? 'primary.main' : 'transparent',
+                  color: mobileView === 'grid' ? 'primary.contrastText' : 'primary.main',
+                  borderRadius: 1.5,
+                  '&:hover': {
+                    backgroundColor: mobileView === 'grid' ? 'primary.dark' : alpha(theme.palette.primary.main, 0.12),
+                  },
+                }}
               >
                 <TableChartIcon fontSize="small" />
-              </Button>
+              </IconButton>
             </Box>
           )}
-          
-          {/* Audit Trail button - clear action, not a filter */}
+
+          {/* Audit Trail button */}
           <Button
             variant="outlined"
             startIcon={<HistoryIcon />}
             onClick={() => setAuditTrailOpen(true)}
             size={isMobile ? 'small' : 'medium'}
+            sx={{
+              borderRadius: 2.5,
+              borderWidth: '1.5px',
+              '&:hover': {
+                borderWidth: '1.5px',
+              },
+            }}
           >
             Audit Trail
           </Button>
 
+          {/* Refresh button */}
           <Button
-            variant="outlined"
+            variant="contained"
             startIcon={<RefreshIcon />}
             onClick={handleRefresh}
             disabled={loading}
             size={isMobile ? 'small' : 'medium'}
+            sx={{
+              borderRadius: 2.5,
+              boxShadow: 'none',
+              '&:hover': {
+                boxShadow: '0px 4px 12px rgba(25, 118, 210, 0.25)',
+              },
+            }}
           >
             {loading ? 'Refreshing...' : 'Refresh'}
           </Button>
         </Box>
-      </Box>
-      
-      {/* Loading Overlay */}
-      {loading && (
-        <Box
-          sx={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            py: 8,
-          }}
-        >
-          <CircularProgress />
-        </Box>
-      )}
-      
-      {/* Main Content - Split View Layout */}
-      {!loading && (
-        <Grid container spacing={2} sx={{ flex: 1, minHeight: 0 }}>
-          {/* LEFT COLUMN: Calendar Command Center (35%) */}
-          {(!isMobile || mobileView === 'calendar') && (
-            <Grid item xs={12} md={4} lg={3.5}>
+      </Paper>
+
+      {/* Main Content - Split View Layout with Skeleton loading */}
+      <Grid container spacing={3} sx={{ flex: 1, minHeight: 0 }}>
+        {/* LEFT COLUMN: Calendar Command Center (35%) */}
+        {(!isMobile || mobileView === 'calendar') && (
+          <Grid item xs={12} md={4} lg={3.5}>
+            {loading ? (
+              <CommandCenterSkeleton />
+            ) : (
               <CalendarCommandCenter
                 summonses={globallyFilteredSummonses}
                 selectedDate={selectedDate}
@@ -658,20 +795,26 @@ const CalendarDashboard: React.FC = () => {
                 }}
                 onHorizonFilterClick={handleHorizonFilterClick}
               />
-            </Grid>
-          )}
-          
-          {/* RIGHT COLUMN: Summons DataGrid (65%) */}
-          {(!isMobile || mobileView === 'grid') && (
-            <Grid item xs={12} md={8} lg={8.5}>
+            )}
+          </Grid>
+        )}
+
+        {/* RIGHT COLUMN: Summons DataGrid (65%) */}
+        {(!isMobile || mobileView === 'grid') && (
+          <Grid item xs={12} md={8} lg={8.5}>
+            {loading ? (
+              <DataGridSkeleton />
+            ) : (
               <Paper
-                elevation={2}
+                elevation={0}
                 sx={{
                   height: '100%',
                   display: 'flex',
                   flexDirection: 'column',
-                  borderRadius: 2,
+                  borderRadius: 4,
                   overflow: 'hidden',
+                  border: '1px solid',
+                  borderColor: 'divider',
                 }}
               >
                 {/* Selected Date Header (when filtering) */}
@@ -687,6 +830,7 @@ const CalendarDashboard: React.FC = () => {
                         color="inherit"
                         size="small"
                         onClick={() => setSelectedDate(null)}
+                        sx={{ fontWeight: 600 }}
                       >
                         Show All
                       </Button>
@@ -699,7 +843,7 @@ const CalendarDashboard: React.FC = () => {
                     </Typography>
                   </Alert>
                 )}
-                
+
                 {/* Summons Table with Attached Filters */}
                 <SimpleSummonsTable
                   summonses={filteredByDate}
@@ -708,11 +852,11 @@ const CalendarDashboard: React.FC = () => {
                   onFilterChange={handleFilterChange}
                 />
               </Paper>
-            </Grid>
-          )}
-        </Grid>
-      )}
-      
+            )}
+          </Grid>
+        )}
+      </Grid>
+
       {/* Success/Error Snackbar */}
       <Snackbar
         open={snackbar.open}
@@ -729,70 +873,117 @@ const CalendarDashboard: React.FC = () => {
         </Alert>
       </Snackbar>
 
-      {/* Audit Trail Drawer - Comprehensive ledger of all NYC API changes */}
+      {/* Audit Trail Drawer - Premium styling */}
       <Drawer
         anchor="right"
         open={auditTrailOpen}
         onClose={() => setAuditTrailOpen(false)}
         PaperProps={{
-          sx: { width: { xs: '100%', sm: 450 } },
+          sx: {
+            width: { xs: '100%', sm: 480 },
+            borderRadius: '16px 0 0 16px',
+          },
         }}
       >
-        <Box sx={{ p: 2 }}>
+        <Box sx={{ p: 3 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <HistoryIcon color="action" />
+            <Typography variant="h5" sx={{ display: 'flex', alignItems: 'center', gap: 1.5, fontWeight: 600 }}>
+              <HistoryIcon color="primary" />
               Audit Trail
             </Typography>
-            <IconButton onClick={() => setAuditTrailOpen(false)} size="small">
-              <CloseIcon />
+            <IconButton
+              onClick={() => setAuditTrailOpen(false)}
+              size="small"
+              sx={{
+                backgroundColor: alpha(theme.palette.grey[500], 0.08),
+                '&:hover': {
+                  backgroundColor: alpha(theme.palette.grey[500], 0.16),
+                },
+              }}
+            >
+              <CloseIcon fontSize="small" />
             </IconButton>
           </Box>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3, lineHeight: 1.6 }}>
             Complete history of all changes detected by the daily sweep from NYC Open Data.
             This ledger persists beyond the 72-hour UPDATED badge window.
           </Typography>
           <Divider sx={{ mb: 2 }} />
 
           {getAllActivityLogs.length === 0 ? (
-            <Box sx={{ py: 4, textAlign: 'center' }}>
-              <HistoryIcon sx={{ fontSize: 48, color: 'grey.400', mb: 1 }} />
-              <Typography color="text.secondary">
+            <Box sx={{ py: 6, textAlign: 'center' }}>
+              <HistoryIcon sx={{ fontSize: 56, color: 'grey.300', mb: 2 }} />
+              <Typography color="text.secondary" sx={{ fontWeight: 500 }}>
                 No activity recorded yet.
               </Typography>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="text.disabled">
                 Changes will appear here after the daily sweep runs.
               </Typography>
             </Box>
           ) : (
-            <List dense>
+            <List disablePadding>
               {getAllActivityLogs.map((entry, index) => (
                 <Box key={`${entry.summons_number}-${entry.date}-${index}`}>
-                  <ListItem alignItems="flex-start" sx={{ px: 0 }}>
-                    <ListItemIcon sx={{ minWidth: 40 }}>
-                      {getActivityIcon(entry.type)}
+                  <ListItem
+                    alignItems="flex-start"
+                    sx={{
+                      px: 1.5,
+                      py: 1.5,
+                      borderRadius: 2,
+                      transition: 'background-color 0.2s ease',
+                      '&:hover': {
+                        backgroundColor: alpha(theme.palette.primary.main, 0.04),
+                      },
+                    }}
+                  >
+                    <ListItemIcon sx={{ minWidth: 44, mt: 0.5 }}>
+                      <Box
+                        sx={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 2,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          backgroundColor: alpha(theme.palette.primary.main, 0.08),
+                        }}
+                      >
+                        {getActivityIcon(entry.type)}
+                      </Box>
                     </ListItemIcon>
                     <ListItemText
                       primary={
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                          <Typography variant="subtitle2" component="span">
+                          <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'text.primary' }}>
                             {entry.respondent_name}
                           </Typography>
-                          <Typography variant="caption" color="text.secondary">
+                          <Typography variant="caption" color="text.disabled">
                             {new Date(entry.date).toLocaleDateString()}
                           </Typography>
                         </Box>
                       }
                       secondary={
                         <>
-                          <Typography variant="body2" color="text.secondary" component="span">
+                          <Typography variant="body2" color="text.secondary" component="span" sx={{ fontSize: '0.8rem' }}>
                             #{entry.summons_number}
                           </Typography>
-                          <Typography variant="body2" component="div" sx={{ mt: 0.5 }}>
+                          <Typography variant="body2" component="div" sx={{ mt: 0.5, color: 'text.primary' }}>
                             {entry.description}
                           </Typography>
                           {entry.old_value && entry.new_value && (
-                            <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
+                            <Typography
+                              variant="caption"
+                              component="div"
+                              sx={{
+                                mt: 0.5,
+                                color: 'text.secondary',
+                                backgroundColor: alpha(theme.palette.grey[500], 0.08),
+                                px: 1,
+                                py: 0.5,
+                                borderRadius: 1,
+                                display: 'inline-block',
+                              }}
+                            >
                               {entry.old_value} → {entry.new_value}
                             </Typography>
                           )}
@@ -800,7 +991,7 @@ const CalendarDashboard: React.FC = () => {
                       }
                     />
                   </ListItem>
-                  {index < getAllActivityLogs.length - 1 && <Divider variant="inset" component="li" />}
+                  {index < getAllActivityLogs.length - 1 && <Divider variant="inset" component="li" sx={{ ml: 7 }} />}
                 </Box>
               ))}
             </List>
