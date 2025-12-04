@@ -458,7 +458,7 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
         </Typography>
       </Paper>
 
-      {/* DataGrid - Premium styling with no horizontal scroll */}
+      {/* DataGrid - Premium styling with Color Spines for visual triage */}
       <DataGrid
         rows={filteredSummonses}
         columns={columns}
@@ -473,7 +473,23 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
         }}
         onRowClick={handleRowClick}
         getRowClassName={(params: GridRowParams) => {
-          return isFreshSummons(params.row) ? 'fresh-row' : '';
+          const summons = params.row as Summons;
+          const status = (summons.status || '').toUpperCase();
+          const classes: string[] = [];
+
+          // Fresh row highlighting
+          if (isFreshSummons(summons)) {
+            classes.push('fresh-row');
+          }
+
+          // Color Spine classes based on status - Arthur's visual triage system
+          if (status.includes('DEFAULT') || status.includes('FAILURE TO APPEAR') || status.includes('JUDGMENT')) {
+            classes.push('danger-spine'); // Red border - critical attention needed
+          } else if (status.includes('RESCHEDULED')) {
+            classes.push('warning-spine'); // Orange border - needs attention
+          }
+
+          return classes.join(' ');
         }}
         disableRowSelectionOnClick
         disableColumnMenu={isMobile}
@@ -491,16 +507,34 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
           },
           '& .MuiDataGrid-row': {
             transition: 'all 0.2s ease',
+            position: 'relative',
             '&:hover': {
               backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.04),
               transform: 'scale(1.001)',
             },
           },
+          // Fresh row highlighting
           '& .fresh-row': {
             backgroundColor: (theme) => alpha(theme.palette.info.main, 0.06),
           },
           '& .fresh-row:hover': {
             backgroundColor: (theme) => alpha(theme.palette.info.main, 0.1),
+          },
+          // Color Spine: Red - DEFAULT, FAILURE TO APPEAR, JUDGMENT (critical)
+          '& .danger-spine': {
+            borderLeft: (theme) => `4px solid ${theme.palette.error.main}`,
+            backgroundColor: (theme) => alpha(theme.palette.error.main, 0.04),
+            '&:hover': {
+              backgroundColor: (theme) => alpha(theme.palette.error.main, 0.08),
+            },
+          },
+          // Color Spine: Orange - RESCHEDULED (needs attention)
+          '& .warning-spine': {
+            borderLeft: (theme) => `4px solid ${theme.palette.warning.main}`,
+            backgroundColor: (theme) => alpha(theme.palette.warning.main, 0.04),
+            '&:hover': {
+              backgroundColor: (theme) => alpha(theme.palette.warning.main, 0.08),
+            },
           },
           // Ensure no horizontal scroll
           '& .MuiDataGrid-virtualScroller': {

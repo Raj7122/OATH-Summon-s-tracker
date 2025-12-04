@@ -367,31 +367,41 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
         </Typography>
       </Box>
 
-      {/* Horizon System Filter Chips - Interactive toggle buttons */}
+      {/* Horizon System Filter Chips - High-Contrast Soft-Filled Style */}
       {horizonStats && onHorizonFilterClick && (
         <Box sx={{ display: 'flex', gap: 1, mb: 2.5, flexWrap: 'wrap' }}>
-          {/* 🔴 Critical: ≤7 days OR dangerous status */}
+          {/* 🔴 Critical: ≤7 days OR dangerous status - Warning Light Style */}
           {horizonStats.criticalCount > 0 && (
             <Chip
               label={`${horizonStats.criticalCount} Critical`}
-              color="error"
               size="small"
               onClick={() => onHorizonFilterClick('critical')}
-              variant={horizonFilter === 'critical' ? 'filled' : 'outlined'}
               sx={{
-                fontWeight: 600,
+                fontWeight: 700,
                 cursor: 'pointer',
                 transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
                 borderRadius: 2,
-                px: 0.5,
-                '&:hover': {
-                  transform: 'translateY(-2px)',
-                  boxShadow: `0 4px 12px ${alpha(horizonColors.critical, 0.35)}`,
-                },
+                px: 1,
+                // Inactive: Soft-filled (12% bg, dark text)
+                ...(horizonFilter !== 'critical' && {
+                  backgroundColor: alpha(horizonColors.critical, 0.12),
+                  color: (theme) => theme.palette.error.dark,
+                  border: `1px solid ${alpha(horizonColors.critical, 0.24)}`,
+                }),
+                // Active: Solid color with white text
                 ...(horizonFilter === 'critical' && {
-                  boxShadow: `0 4px 14px ${alpha(horizonColors.critical, 0.4)}`,
+                  backgroundColor: horizonColors.critical,
+                  color: '#FFFFFF',
+                  boxShadow: `0 4px 14px ${alpha(horizonColors.critical, 0.5)}`,
                   transform: 'translateY(-1px)',
                 }),
+                '&:hover': {
+                  transform: 'translateY(-2px)',
+                  boxShadow: `0 4px 12px ${alpha(horizonColors.critical, 0.4)}`,
+                  backgroundColor: horizonFilter === 'critical'
+                    ? horizonColors.critical
+                    : alpha(horizonColors.critical, 0.18),
+                },
               }}
             />
           )}
@@ -399,24 +409,34 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
           {horizonStats.approachingCount > 0 && (
             <Chip
               label={`${horizonStats.approachingCount} Approaching`}
-              color="warning"
               size="small"
               onClick={() => onHorizonFilterClick('approaching')}
-              variant={horizonFilter === 'approaching' ? 'filled' : 'outlined'}
               sx={{
-                fontWeight: 600,
+                fontWeight: 700,
                 cursor: 'pointer',
                 transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
                 borderRadius: 2,
-                px: 0.5,
-                '&:hover': {
-                  transform: 'translateY(-2px)',
-                  boxShadow: `0 4px 12px ${alpha(horizonColors.approaching, 0.35)}`,
-                },
+                px: 1,
+                // Inactive: Soft-filled
+                ...(horizonFilter !== 'approaching' && {
+                  backgroundColor: alpha(horizonColors.approaching, 0.12),
+                  color: (theme) => theme.palette.warning.dark,
+                  border: `1px solid ${alpha(horizonColors.approaching, 0.24)}`,
+                }),
+                // Active: Solid color with white text
                 ...(horizonFilter === 'approaching' && {
-                  boxShadow: `0 4px 14px ${alpha(horizonColors.approaching, 0.4)}`,
+                  backgroundColor: horizonColors.approaching,
+                  color: '#FFFFFF',
+                  boxShadow: `0 4px 14px ${alpha(horizonColors.approaching, 0.5)}`,
                   transform: 'translateY(-1px)',
                 }),
+                '&:hover': {
+                  transform: 'translateY(-2px)',
+                  boxShadow: `0 4px 12px ${alpha(horizonColors.approaching, 0.4)}`,
+                  backgroundColor: horizonFilter === 'approaching'
+                    ? horizonColors.approaching
+                    : alpha(horizonColors.approaching, 0.18),
+                },
               }}
             />
           )}
@@ -424,24 +444,34 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
           {horizonStats.futureCount > 0 && (
             <Chip
               label={`${horizonStats.futureCount} Future`}
-              color="success"
               size="small"
               onClick={() => onHorizonFilterClick('future')}
-              variant={horizonFilter === 'future' ? 'filled' : 'outlined'}
               sx={{
-                fontWeight: 600,
+                fontWeight: 700,
                 cursor: 'pointer',
                 transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
                 borderRadius: 2,
-                px: 0.5,
-                '&:hover': {
-                  transform: 'translateY(-2px)',
-                  boxShadow: `0 4px 12px ${alpha(horizonColors.future, 0.35)}`,
-                },
+                px: 1,
+                // Inactive: Soft-filled
+                ...(horizonFilter !== 'future' && {
+                  backgroundColor: alpha(horizonColors.future, 0.12),
+                  color: (theme) => theme.palette.success.dark,
+                  border: `1px solid ${alpha(horizonColors.future, 0.24)}`,
+                }),
+                // Active: Solid color with white text
                 ...(horizonFilter === 'future' && {
-                  boxShadow: `0 4px 14px ${alpha(horizonColors.future, 0.4)}`,
+                  backgroundColor: horizonColors.future,
+                  color: '#FFFFFF',
+                  boxShadow: `0 4px 14px ${alpha(horizonColors.future, 0.5)}`,
                   transform: 'translateY(-1px)',
                 }),
+                '&:hover': {
+                  transform: 'translateY(-2px)',
+                  boxShadow: `0 4px 12px ${alpha(horizonColors.future, 0.4)}`,
+                  backgroundColor: horizonFilter === 'future'
+                    ? horizonColors.future
+                    : alpha(horizonColors.future, 0.18),
+                },
               }}
             />
           )}
@@ -449,24 +479,34 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
           {horizonStats.newCount > 0 && (
             <Chip
               label={`${horizonStats.newCount} New`}
-              color="info"
               size="small"
               onClick={() => onHorizonFilterClick('new')}
-              variant={horizonFilter === 'new' ? 'filled' : 'outlined'}
               sx={{
-                fontWeight: 600,
+                fontWeight: 700,
                 cursor: 'pointer',
                 transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
                 borderRadius: 2,
-                px: 0.5,
-                '&:hover': {
-                  transform: 'translateY(-2px)',
-                  boxShadow: `0 4px 12px ${alpha(horizonColors.new, 0.35)}`,
-                },
+                px: 1,
+                // Inactive: Soft-filled
+                ...(horizonFilter !== 'new' && {
+                  backgroundColor: alpha(horizonColors.new, 0.12),
+                  color: (theme) => theme.palette.info.dark,
+                  border: `1px solid ${alpha(horizonColors.new, 0.24)}`,
+                }),
+                // Active: Solid color with white text
                 ...(horizonFilter === 'new' && {
-                  boxShadow: `0 4px 14px ${alpha(horizonColors.new, 0.4)}`,
+                  backgroundColor: horizonColors.new,
+                  color: '#FFFFFF',
+                  boxShadow: `0 4px 14px ${alpha(horizonColors.new, 0.5)}`,
                   transform: 'translateY(-1px)',
                 }),
+                '&:hover': {
+                  transform: 'translateY(-2px)',
+                  boxShadow: `0 4px 12px ${alpha(horizonColors.new, 0.4)}`,
+                  backgroundColor: horizonFilter === 'new'
+                    ? horizonColors.new
+                    : alpha(horizonColors.new, 0.18),
+                },
               }}
             />
           )}

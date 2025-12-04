@@ -1,11 +1,22 @@
-import { AppBar, Toolbar, Typography, Button, Box, IconButton, Menu, MenuItem, alpha } from '@mui/material';
+import { AppBar, Toolbar, Typography, Button, Box, IconButton, Menu, MenuItem, Chip, Badge } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import MenuIcon from '@mui/icons-material/Menu';
+import UpdateIcon from '@mui/icons-material/Update';
 
-const Header = () => {
+/**
+ * Header Props for receiving update counts from parent
+ */
+interface HeaderProps {
+  /** Number of recently updated records (for the pulsing badge) */
+  updatedCount?: number;
+  /** Callback when Updated chip is clicked */
+  onUpdatedClick?: () => void;
+}
+
+const Header: React.FC<HeaderProps> = ({ updatedCount = 0, onUpdatedClick }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { signOut, user } = useAuth();
@@ -47,10 +58,12 @@ const Header = () => {
       position="sticky"
       elevation={0}
       sx={{
-        backgroundColor: alpha('#FFFFFF', 0.8),
-        backdropFilter: 'blur(6px)',
-        borderBottom: (theme) => `1px solid ${alpha(theme.palette.grey[500], 0.12)}`,
-        color: 'text.primary',
+        // Blue gradient from primary.main to primary.dark - Arthur's mental model
+        background: (theme) =>
+          `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+        // Subtle white border at bottom for separation
+        borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+        color: '#FFFFFF',
       }}
     >
       <Toolbar>
@@ -62,7 +75,8 @@ const Header = () => {
             mr: 4,
             cursor: 'pointer',
             fontWeight: 700,
-            color: 'primary.main',
+            color: '#FFFFFF',
+            letterSpacing: '-0.01em',
           }}
           onClick={() => navigate('/dashboard')}
         >
@@ -70,19 +84,19 @@ const Header = () => {
         </Typography>
 
         {/* Desktop Navigation */}
-        <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, gap: 1 }}>
+        <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, gap: 1, alignItems: 'center' }}>
           <Button
             onClick={() => handleNavigate('/dashboard')}
             sx={{
               fontWeight: 600,
-              color: isActive('/dashboard') ? 'primary.main' : 'text.secondary',
+              color: '#FFFFFF',
               backgroundColor: isActive('/dashboard')
-                ? (theme) => alpha(theme.palette.primary.main, 0.08)
+                ? 'rgba(255, 255, 255, 0.15)'
                 : 'transparent',
               borderRadius: 2,
               px: 2,
               '&:hover': {
-                backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.12),
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
               },
             }}
           >
@@ -92,30 +106,83 @@ const Header = () => {
             onClick={() => handleNavigate('/clients')}
             sx={{
               fontWeight: 600,
-              color: location.pathname.startsWith('/clients') ? 'primary.main' : 'text.secondary',
+              color: '#FFFFFF',
               backgroundColor: location.pathname.startsWith('/clients')
-                ? (theme) => alpha(theme.palette.primary.main, 0.08)
+                ? 'rgba(255, 255, 255, 0.15)'
                 : 'transparent',
               borderRadius: 2,
               px: 2,
               '&:hover': {
-                backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.12),
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
               },
             }}
           >
             Clients
           </Button>
+
+          {/* High-visibility Updated chip - Pulsing amber badge in header */}
+          {updatedCount > 0 && (
+            <Chip
+              icon={<UpdateIcon sx={{ color: '#FFFFFF !important', fontSize: 16 }} />}
+              label={`${updatedCount} Updated`}
+              onClick={onUpdatedClick}
+              sx={{
+                ml: 2,
+                fontWeight: 700,
+                fontSize: '0.8rem',
+                height: 32,
+                backgroundColor: (theme) => theme.palette.warning.main,
+                color: '#FFFFFF',
+                cursor: 'pointer',
+                animation: 'pulse-glow 2s ease-in-out infinite',
+                '@keyframes pulse-glow': {
+                  '0%': {
+                    boxShadow: '0 0 0 0 rgba(255, 152, 0, 0.7)',
+                  },
+                  '50%': {
+                    boxShadow: '0 0 12px 4px rgba(255, 152, 0, 0.4)',
+                  },
+                  '100%': {
+                    boxShadow: '0 0 0 0 rgba(255, 152, 0, 0.7)',
+                  },
+                },
+                '&:hover': {
+                  backgroundColor: (theme) => theme.palette.warning.dark,
+                  transform: 'scale(1.05)',
+                },
+                transition: 'transform 0.2s ease',
+                '& .MuiChip-icon': {
+                  color: '#FFFFFF',
+                },
+              }}
+            />
+          )}
         </Box>
 
         {/* Mobile Navigation */}
-        <Box sx={{ flexGrow: 1, display: { xs: 'flex', md: 'none' } }}>
+        <Box sx={{ flexGrow: 1, display: { xs: 'flex', md: 'none' }, alignItems: 'center' }}>
           <IconButton
             size="large"
             onClick={handleMobileMenu}
-            sx={{ color: 'text.secondary' }}
+            sx={{ color: '#FFFFFF' }}
           >
             <MenuIcon />
           </IconButton>
+          {/* Mobile Updated badge */}
+          {updatedCount > 0 && (
+            <Badge
+              badgeContent={updatedCount}
+              color="warning"
+              sx={{
+                ml: 1,
+                '& .MuiBadge-badge': {
+                  animation: 'pulse-glow 2s ease-in-out infinite',
+                },
+              }}
+            >
+              <UpdateIcon sx={{ color: '#FFFFFF' }} />
+            </Badge>
+          )}
           <Menu
             anchorEl={mobileMenuAnchor}
             open={Boolean(mobileMenuAnchor)}
@@ -132,9 +199,9 @@ const Header = () => {
             size="large"
             onClick={handleAccountMenu}
             sx={{
-              color: 'text.secondary',
+              color: '#FFFFFF',
               '&:hover': {
-                backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.08),
+                backgroundColor: 'rgba(255, 255, 255, 0.15)',
               },
             }}
           >
