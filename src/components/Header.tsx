@@ -43,35 +43,66 @@ const Header = () => {
   const isActive = (path: string) => location.pathname === path;
 
   return (
-    <AppBar position="sticky">
+    <AppBar
+      position="sticky"
+      elevation={0}
+      sx={{
+        // Royal Blue gradient header - Arthur's mental model
+        background: (theme) =>
+          `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+        borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+        color: '#FFFFFF',
+      }}
+    >
       <Toolbar>
         <Typography
           variant="h6"
           component="div"
-          sx={{ flexGrow: 0, mr: 4, cursor: 'pointer' }}
+          sx={{
+            flexGrow: 0,
+            mr: 4,
+            cursor: 'pointer',
+            fontWeight: 700,
+            color: '#FFFFFF',
+            letterSpacing: '-0.01em',
+          }}
           onClick={() => navigate('/dashboard')}
         >
           NYC OATH Tracker
         </Typography>
 
         {/* Desktop Navigation */}
-        <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, gap: 2 }}>
+        <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, gap: 1 }}>
           <Button
-            color="inherit"
             onClick={() => handleNavigate('/dashboard')}
             sx={{
-              fontWeight: isActive('/dashboard') ? 'bold' : 'normal',
-              textDecoration: isActive('/dashboard') ? 'underline' : 'none',
+              fontWeight: 600,
+              color: '#FFFFFF',
+              backgroundColor: isActive('/dashboard')
+                ? 'rgba(255, 255, 255, 0.15)'
+                : 'transparent',
+              borderRadius: 2,
+              px: 2,
+              '&:hover': {
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+              },
             }}
           >
             Dashboard
           </Button>
           <Button
-            color="inherit"
             onClick={() => handleNavigate('/clients')}
             sx={{
-              fontWeight: location.pathname.startsWith('/clients') ? 'bold' : 'normal',
-              textDecoration: location.pathname.startsWith('/clients') ? 'underline' : 'none',
+              fontWeight: 600,
+              color: '#FFFFFF',
+              backgroundColor: location.pathname.startsWith('/clients')
+                ? 'rgba(255, 255, 255, 0.15)'
+                : 'transparent',
+              borderRadius: 2,
+              px: 2,
+              '&:hover': {
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+              },
             }}
           >
             Clients
@@ -82,8 +113,8 @@ const Header = () => {
         <Box sx={{ flexGrow: 1, display: { xs: 'flex', md: 'none' } }}>
           <IconButton
             size="large"
-            color="inherit"
             onClick={handleMobileMenu}
+            sx={{ color: '#FFFFFF' }}
           >
             <MenuIcon />
           </IconButton>
@@ -101,8 +132,13 @@ const Header = () => {
         <Box>
           <IconButton
             size="large"
-            color="inherit"
             onClick={handleAccountMenu}
+            sx={{
+              color: '#FFFFFF',
+              '&:hover': {
+                backgroundColor: 'rgba(255, 255, 255, 0.15)',
+              },
+            }}
           >
             <AccountCircleIcon />
           </IconButton>

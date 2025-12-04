@@ -71,6 +71,9 @@ import { updateSummons } from '../graphql/mutations';
 // Types
 import { Summons, isNewRecord, isUpdatedRecord } from '../types/summons';
 
+// Theme colors
+import { horizonColors } from '../theme';
+
 // Configure dayjs
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -628,6 +631,47 @@ const CalendarDashboard: React.FC = () => {
     return allLogs;
   }, [summonses]);
 
+  // Show full-page loader while initial data is loading
+  if (loading && summonses.length === 0) {
+    return (
+      <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', p: { xs: 2, md: 3 } }}>
+        {/* Header Skeleton */}
+        <Paper
+          elevation={0}
+          sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            mb: 3,
+            p: 2.5,
+            borderRadius: 4,
+            backgroundColor: 'background.paper',
+            border: '1px solid',
+            borderColor: 'divider',
+          }}
+        >
+          <Skeleton variant="text" width={150} height={40} />
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Skeleton variant="rounded" width={100} height={36} />
+            <Skeleton variant="rounded" width={100} height={36} />
+          </Box>
+        </Paper>
+
+        {/* Main Content Skeleton */}
+        <Grid container spacing={3} sx={{ flex: 1, minHeight: 0 }}>
+          {!isMobile && (
+            <Grid item xs={12} md={4} lg={3.5}>
+              <CommandCenterSkeleton />
+            </Grid>
+          )}
+          <Grid item xs={12} md={8} lg={8.5}>
+            <DataGridSkeleton />
+          </Grid>
+        </Grid>
+      </Box>
+    );
+  }
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', p: { xs: 2, md: 3 } }}>
       {/* Header Section - Premium styling */}
@@ -659,19 +703,32 @@ const CalendarDashboard: React.FC = () => {
             Dashboard
           </Typography>
 
-          {/* Active filter indicator with smooth transitions */}
+          {/* Active filter indicator - matches Horizon chip color */}
           {horizonFilter && (
             <Chip
               label={`Filtered: ${horizonFilter.charAt(0).toUpperCase() + horizonFilter.slice(1)}`}
-              color="primary"
+              color={
+                horizonFilter === 'critical' ? 'error' :
+                horizonFilter === 'approaching' ? 'warning' :
+                horizonFilter === 'future' ? 'success' :
+                horizonFilter === 'new' ? 'info' : 'primary'
+              }
               onDelete={() => setHorizonFilter(null)}
               sx={{
                 fontWeight: 600,
                 borderRadius: 2,
+                // Use solid color for clear visibility
+                backgroundColor:
+                  horizonFilter === 'critical' ? horizonColors.critical :
+                  horizonFilter === 'approaching' ? horizonColors.approaching :
+                  horizonFilter === 'future' ? horizonColors.future :
+                  horizonFilter === 'new' ? horizonColors.new : undefined,
+                color: '#FFFFFF',
                 '& .MuiChip-deleteIcon': {
+                  color: 'rgba(255, 255, 255, 0.7)',
                   transition: 'all 0.2s ease',
                   '&:hover': {
-                    color: 'error.main',
+                    color: '#FFFFFF',
                   },
                 },
               }}

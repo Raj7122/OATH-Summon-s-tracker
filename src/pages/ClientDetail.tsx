@@ -62,7 +62,7 @@ import { generateClient } from 'aws-amplify/api';
 
 import { getClient, listSummons } from '../graphql/queries';
 import { updateSummons } from '../graphql/mutations';
-import { Client, Summons, getStatusColor, isNewRecord, isUpdatedRecord, getBusinessDays } from '../types/summons';
+import { Client, Summons, getStatusColor, isNewRecord, isUpdatedRecord } from '../types/summons';
 import SummonsDetailModal from '../components/SummonsDetailModal';
 import ExportConfigurationModal from '../components/ExportConfigurationModal';
 import { useCSVExport } from '../hooks/useCSVExport';
@@ -291,6 +291,10 @@ const ClientDetail: React.FC = () => {
 
   /**
    * Calculate header stats
+   *
+   * Critical logic matches CalendarDashboard.tsx exactly:
+   * - Hearings within 7 CALENDAR days (not business days)
+   * - OR dangerous status (DEFAULT, JUDGMENT, VIOLATION, FAILURE TO APPEAR)
    */
   const stats = useMemo(() => {
     const activeEraSummonses = summonses.filter((s) => {
@@ -299,15 +303,28 @@ const ClientDetail: React.FC = () => {
     });
 
     const openCases = activeEraSummonses.filter((s) => (s.amount_due || 0) > 0);
-    const now = new Date();
+    const now = dayjs();
     const criticalCases = activeEraSummonses.filter((s) => {
       if (!s.hearing_date) return false;
-      const hearingDate = new Date(s.hearing_date);
-      // Skip past dates
-      if (hearingDate < now) return false;
-      // TRD v1.8: Use business days to match Dashboard logic
-      const businessDays = getBusinessDays(now, hearingDate);
-      return businessDays <= 7;
+      // Use UTC parsing to avoid timezone shift (hearing_date is stored as date-only in UTC)
+      const hearingDate = dayjs.utc(s.hearing_date);
+      const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
+
+      // Exclude past hearings
+      if (daysUntil < 0) return false;
+
+      // Critical: within 7 calendar days
+      const isImminentDeadline = daysUntil <= 7;
+
+      // Dangerous status check (same as CalendarDashboard)
+      const status = (s.status || '').toUpperCase();
+      const isDangerStatus =
+        status.includes('DEFAULT') ||
+        status.includes('JUDGMENT') ||
+        status.includes('VIOLATION') ||
+        status.includes('FAILURE TO APPEAR');
+
+      return isImminentDeadline || isDangerStatus;
     });
 
     return {
@@ -423,16 +440,25 @@ const ClientDetail: React.FC = () => {
         if (!params.value) return '—';
         // Use UTC parsing to get the correct date without timezone shift
         const hearingDateUtc = dayjs.utc(params.value);
-        const hearingDate = hearingDateUtc.toDate();
-        const now = new Date();
+        const now = dayjs();
+        const daysUntil = hearingDateUtc.diff(now.startOf('day'), 'day');
         // Skip past dates for critical indicator
-        const isPast = hearingDate < now;
-        // TRD v1.8: Use business days to match Dashboard logic
-        const businessDays = isPast ? -1 : getBusinessDays(now, hearingDate);
+        const isPast = daysUntil < 0;
+        // Critical: within 7 calendar days (matches CalendarDashboard exactly)
+        const isImminentDeadline = !isPast && daysUntil <= 7;
+        // Also check for dangerous status
+        const summons = params.row as Summons;
+        const status = (summons.status || '').toUpperCase();
+        const isDangerStatus =
+          status.includes('DEFAULT') ||
+          status.includes('JUDGMENT') ||
+          status.includes('VIOLATION') ||
+          status.includes('FAILURE TO APPEAR');
+        const isCritical = !isPast && (isImminentDeadline || isDangerStatus);
         return (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <Typography variant="body2">{hearingDateUtc.format('MM/DD/YYYY')}</Typography>
-            {!isPast && businessDays <= 7 && (
+            {isCritical && (
               <WarningIcon sx={{ fontSize: 16, color: 'error.main' }} />
             )}
           </Box>
@@ -518,19 +544,35 @@ const ClientDetail: React.FC = () => {
   }, []);
 
   /**
-   * Determine row class based on critical status (hearing within 7 business days)
-   * TRD v1.8: Uses business days to match Dashboard logic
+   * Determine row class based on critical status
+   * Matches CalendarDashboard.tsx logic exactly:
+   * - Hearings within 7 CALENDAR days (not business days)
+   * - OR dangerous status (DEFAULT, JUDGMENT, VIOLATION, FAILURE TO APPEAR)
    */
   const getRowClassName = useCallback((params: GridRowParams) => {
     const summons = params.row as Summons;
     if (!summons.hearing_date) return '';
-    const hearingDate = new Date(summons.hearing_date);
-    const now = new Date();
+
+    // Use UTC parsing to avoid timezone shift
+    const hearingDate = dayjs.utc(summons.hearing_date);
+    const now = dayjs();
+    const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
+
     // Skip past dates
-    if (hearingDate < now) return '';
-    // Critical: hearing date is within 7 business days
-    const businessDays = getBusinessDays(now, hearingDate);
-    if (businessDays <= 7) {
+    if (daysUntil < 0) return '';
+
+    // Critical: within 7 calendar days
+    const isImminentDeadline = daysUntil <= 7;
+
+    // Dangerous status check (same as CalendarDashboard)
+    const status = (summons.status || '').toUpperCase();
+    const isDangerStatus =
+      status.includes('DEFAULT') ||
+      status.includes('JUDGMENT') ||
+      status.includes('VIOLATION') ||
+      status.includes('FAILURE TO APPEAR');
+
+    if (isImminentDeadline || isDangerStatus) {
       return 'critical-row';
     }
     return '';

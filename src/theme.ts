@@ -78,11 +78,11 @@ const palette = {
     800: '#424242',
     900: '#212121',
   },
-  // Background
+  // Background - #F9FAFB for floating card effect
   background: {
-    default: '#F4F6F8',
+    default: '#F9FAFB',
     paper: '#FFFFFF',
-    neutral: '#F4F6F8',
+    neutral: '#F9FAFB',
   },
   // Text
   text: {
@@ -154,6 +154,7 @@ export const theme = createTheme({
   },
   typography: {
     fontFamily: [
+      '"Public Sans"',
       'Inter',
       '-apple-system',
       'BlinkMacSystemFont',
@@ -246,6 +247,25 @@ export const theme = createTheme({
     },
   },
   components: {
+    // CssBaseline - Global styles
+    MuiCssBaseline: {
+      styleOverrides: {
+        body: {
+          backgroundColor: '#F9FAFB',
+        },
+      },
+    },
+    // AppBar - Royal Blue Command Header
+    MuiAppBar: {
+      styleOverrides: {
+        root: {
+          background: `linear-gradient(135deg, ${palette.primary.main} 0%, ${palette.primary.dark} 100%)`,
+          boxShadow: 'none',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+          color: '#FFFFFF',
+        },
+      },
+    },
     // Button - Premium flat style with hover shadows
     MuiButton: {
       defaultProps: {
@@ -324,7 +344,7 @@ export const theme = createTheme({
         },
       },
     },
-    // Chip - Interactive toggle style
+    // Chip - Soft/Alpha style (15% opacity background, 100% opacity text)
     MuiChip: {
       styleOverrides: {
         root: {
@@ -335,50 +355,74 @@ export const theme = createTheme({
             transform: 'scale(1.02)',
           },
         },
+        // Filled chips use soft alpha style by default
         filled: {
+          '&.MuiChip-colorDefault': {
+            backgroundColor: alpha(palette.grey[500], 0.15),
+            color: palette.text.primary,
+          },
+          '&.MuiChip-colorPrimary': {
+            backgroundColor: alpha(palette.primary.main, 0.15),
+            color: palette.primary.dark,
+          },
+          '&.MuiChip-colorSecondary': {
+            backgroundColor: alpha(palette.secondary.main, 0.15),
+            color: palette.secondary.dark,
+          },
           '&.MuiChip-colorError': {
-            backgroundColor: palette.error.main,
-            color: palette.error.contrastText,
+            backgroundColor: alpha(palette.error.main, 0.15),
+            color: palette.error.dark,
           },
           '&.MuiChip-colorWarning': {
-            backgroundColor: palette.warning.main,
-            color: palette.warning.contrastText,
+            backgroundColor: alpha(palette.warning.main, 0.15),
+            color: palette.warning.darker,
           },
           '&.MuiChip-colorSuccess': {
-            backgroundColor: palette.success.main,
-            color: palette.success.contrastText,
+            backgroundColor: alpha(palette.success.main, 0.15),
+            color: palette.success.dark,
           },
           '&.MuiChip-colorInfo': {
-            backgroundColor: palette.info.main,
-            color: palette.info.contrastText,
+            backgroundColor: alpha(palette.info.main, 0.15),
+            color: palette.info.dark,
           },
         },
+        // Outlined chips also use soft alpha background
         outlined: {
           borderWidth: '1.5px',
+          '&.MuiChip-colorDefault': {
+            borderColor: alpha(palette.grey[500], 0.32),
+            color: palette.text.primary,
+            backgroundColor: alpha(palette.grey[500], 0.08),
+          },
+          '&.MuiChip-colorPrimary': {
+            borderColor: alpha(palette.primary.main, 0.32),
+            color: palette.primary.dark,
+            backgroundColor: alpha(palette.primary.main, 0.08),
+          },
           '&.MuiChip-colorError': {
-            borderColor: palette.error.main,
-            color: palette.error.main,
+            borderColor: alpha(palette.error.main, 0.32),
+            color: palette.error.dark,
             backgroundColor: alpha(palette.error.main, 0.08),
           },
           '&.MuiChip-colorWarning': {
-            borderColor: palette.warning.main,
-            color: palette.warning.dark,
+            borderColor: alpha(palette.warning.main, 0.32),
+            color: palette.warning.darker,
             backgroundColor: alpha(palette.warning.main, 0.08),
           },
           '&.MuiChip-colorSuccess': {
-            borderColor: palette.success.main,
+            borderColor: alpha(palette.success.main, 0.32),
             color: palette.success.dark,
             backgroundColor: alpha(palette.success.main, 0.08),
           },
           '&.MuiChip-colorInfo': {
-            borderColor: palette.info.main,
+            borderColor: alpha(palette.info.main, 0.32),
             color: palette.info.dark,
             backgroundColor: alpha(palette.info.main, 0.08),
           },
         },
         clickable: {
           '&:hover': {
-            boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.15)',
+            boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.12)',
           },
         },
       },
