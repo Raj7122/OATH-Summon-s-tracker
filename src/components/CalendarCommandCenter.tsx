@@ -20,13 +20,14 @@ import { useMemo } from 'react';
 import dayjs, { Dayjs } from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
-import { Box, Typography, Paper, Card, CardContent, Chip, Button } from '@mui/material';
+import { Box, Typography, Paper, Card, CardContent, Chip, Button, alpha } from '@mui/material';
 import { DateCalendar } from '@mui/x-date-pickers/DateCalendar';
 import { PickersDay, PickersDayProps } from '@mui/x-date-pickers/PickersDay';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import TodayIcon from '@mui/icons-material/Today';
 import ClearIcon from '@mui/icons-material/Clear';
+import { horizonColors } from '../theme';
 
 // Import shared types
 import { Summons } from '../types/summons';
@@ -120,13 +121,13 @@ function ServerDay(props: ServerDayProps) {
     activeHorizonFilter === 'new' ||
     urgency === activeHorizonFilter;
 
-  // Determine dot color based on Horizon urgency
+  // Determine dot color based on Horizon urgency (using semantic colors)
   const dotColor = urgency === 'critical'
-    ? '#d32f2f'  // Red - Critical (≤7 days OR danger status)
+    ? horizonColors.critical  // Red - Critical (≤7 days OR danger status)
     : urgency === 'approaching'
-    ? '#ff9800'  // Orange - Approaching (8-30 days)
+    ? horizonColors.approaching  // Orange - Approaching (8-30 days)
     : urgency === 'future'
-    ? '#4caf50'  // Green - Future (> 30 days)
+    ? horizonColors.future  // Green - Future (> 30 days)
     : undefined;
 
   // Dim non-matching dates when a filter is active
@@ -143,7 +144,8 @@ function ServerDay(props: ServerDayProps) {
         flexDirection: 'column',
         alignItems: 'center',
         opacity: isDimmed ? 0.3 : 1,
-        transition: 'opacity 0.2s ease',
+        transition: 'all 0.25s ease-in-out',
+        transform: isDimmed ? 'scale(0.95)' : 'scale(1)',
       }}
     >
       <PickersDay
@@ -151,15 +153,21 @@ function ServerDay(props: ServerDayProps) {
         day={day}
         outsideCurrentMonth={outsideCurrentMonth}
         sx={{
+          transition: 'all 0.2s ease-in-out',
           ...(urgency && {
-            fontWeight: 'bold',
+            fontWeight: 600,
           }),
           // Highlight ring when this date matches active filter
           ...(activeHorizonFilter && matchesFilter && urgency && !outsideCurrentMonth && {
             border: '2px solid',
             borderColor: dotColor,
             borderRadius: '50%',
+            backgroundColor: alpha(dotColor || '#000', 0.08),
+            boxShadow: `0 0 8px ${alpha(dotColor || '#000', 0.3)}`,
           }),
+          '&:hover': {
+            transform: 'scale(1.1)',
+          },
         }}
       />
       {/* Colored dot indicator below the day */}
@@ -174,6 +182,8 @@ function ServerDay(props: ServerDayProps) {
             bottom: 2,
             left: '50%',
             transform: 'translateX(-50%)',
+            transition: 'all 0.2s ease',
+            boxShadow: `0 0 4px ${alpha(dotColor, 0.5)}`,
           }}
         />
       )}
@@ -324,27 +334,42 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
   
   return (
     <Paper
-      elevation={2}
+      elevation={0}
       sx={{
-        p: 2,
+        p: 3,
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
         backgroundColor: 'background.paper',
-        borderRadius: 2,
+        borderRadius: 4,
+        boxShadow: '0px 4px 20px rgba(145, 158, 171, 0.08)',
+        border: (theme) => `1px solid ${alpha(theme.palette.grey[500], 0.08)}`,
       }}
     >
       {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-        <TodayIcon sx={{ color: 'primary.main', mr: 1 }} />
-        <Typography variant="h6" sx={{ fontWeight: 600 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2.5 }}>
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 40,
+            height: 40,
+            borderRadius: 2.5,
+            backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.08),
+            mr: 1.5,
+          }}
+        >
+          <TodayIcon sx={{ color: 'primary.main', fontSize: 22 }} />
+        </Box>
+        <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary' }}>
           Command Center
         </Typography>
       </Box>
 
-      {/* Horizon System Filter Chips - Clickable to filter grid */}
+      {/* Horizon System Filter Chips - Interactive toggle buttons */}
       {horizonStats && onHorizonFilterClick && (
-        <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
+        <Box sx={{ display: 'flex', gap: 1, mb: 2.5, flexWrap: 'wrap' }}>
           {/* 🔴 Critical: ≤7 days OR dangerous status */}
           {horizonStats.criticalCount > 0 && (
             <Chip
@@ -356,13 +381,16 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
               sx={{
                 fontWeight: 600,
                 cursor: 'pointer',
-                transition: 'all 0.2s ease',
+                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                borderRadius: 2,
+                px: 0.5,
                 '&:hover': {
-                  opacity: 0.85,
-                  transform: 'scale(1.02)',
+                  transform: 'translateY(-2px)',
+                  boxShadow: `0 4px 12px ${alpha(horizonColors.critical, 0.35)}`,
                 },
                 ...(horizonFilter === 'critical' && {
-                  boxShadow: 2,
+                  boxShadow: `0 4px 14px ${alpha(horizonColors.critical, 0.4)}`,
+                  transform: 'translateY(-1px)',
                 }),
               }}
             />
@@ -378,13 +406,16 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
               sx={{
                 fontWeight: 600,
                 cursor: 'pointer',
-                transition: 'all 0.2s ease',
+                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                borderRadius: 2,
+                px: 0.5,
                 '&:hover': {
-                  opacity: 0.85,
-                  transform: 'scale(1.02)',
+                  transform: 'translateY(-2px)',
+                  boxShadow: `0 4px 12px ${alpha(horizonColors.approaching, 0.35)}`,
                 },
                 ...(horizonFilter === 'approaching' && {
-                  boxShadow: 2,
+                  boxShadow: `0 4px 14px ${alpha(horizonColors.approaching, 0.4)}`,
+                  transform: 'translateY(-1px)',
                 }),
               }}
             />
@@ -400,13 +431,16 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
               sx={{
                 fontWeight: 600,
                 cursor: 'pointer',
-                transition: 'all 0.2s ease',
+                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                borderRadius: 2,
+                px: 0.5,
                 '&:hover': {
-                  opacity: 0.85,
-                  transform: 'scale(1.02)',
+                  transform: 'translateY(-2px)',
+                  boxShadow: `0 4px 12px ${alpha(horizonColors.future, 0.35)}`,
                 },
                 ...(horizonFilter === 'future' && {
-                  boxShadow: 2,
+                  boxShadow: `0 4px 14px ${alpha(horizonColors.future, 0.4)}`,
+                  transform: 'translateY(-1px)',
                 }),
               }}
             />
@@ -422,13 +456,16 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
               sx={{
                 fontWeight: 600,
                 cursor: 'pointer',
-                transition: 'all 0.2s ease',
+                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                borderRadius: 2,
+                px: 0.5,
                 '&:hover': {
-                  opacity: 0.85,
-                  transform: 'scale(1.02)',
+                  transform: 'translateY(-2px)',
+                  boxShadow: `0 4px 12px ${alpha(horizonColors.new, 0.35)}`,
                 },
                 ...(horizonFilter === 'new' && {
-                  boxShadow: 2,
+                  boxShadow: `0 4px 14px ${alpha(horizonColors.new, 0.4)}`,
+                  transform: 'translateY(-1px)',
                 }),
               }}
             />
@@ -437,7 +474,15 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
       )}
       
       {/* MUI DateCalendar with Horizon System Heatmap */}
-      <Card variant="outlined" sx={{ mb: 2 }}>
+      <Card
+        elevation={0}
+        sx={{
+          mb: 2.5,
+          borderRadius: 3,
+          border: (theme) => `1px solid ${alpha(theme.palette.grey[300], 0.5)}`,
+          overflow: 'hidden',
+        }}
+      >
         <LocalizationProvider dateAdapter={AdapterDayjs}>
           <DateCalendar
             value={selectedDate}
@@ -457,17 +502,40 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
               '& .MuiPickersCalendarHeader-root': {
                 paddingLeft: 2,
                 paddingRight: 2,
+                marginTop: 1,
+                '& .MuiPickersCalendarHeader-label': {
+                  fontWeight: 600,
+                  fontSize: '1rem',
+                },
+              },
+              '& .MuiDayCalendar-weekDayLabel': {
+                fontWeight: 600,
+                color: 'text.secondary',
               },
               '& .MuiDayCalendar-weekContainer': {
                 justifyContent: 'space-around',
               },
               '& .MuiPickersDay-root': {
                 fontSize: '0.875rem',
+                fontWeight: 500,
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.08),
+                },
               },
               '& .Mui-selected': {
                 backgroundColor: 'primary.main',
+                fontWeight: 600,
+                boxShadow: '0 2px 8px rgba(25, 118, 210, 0.35)',
                 '&:hover': {
                   backgroundColor: 'primary.dark',
+                },
+              },
+              '& .MuiPickersArrowSwitcher-button': {
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.08),
+                  transform: 'scale(1.1)',
                 },
               },
             }}
@@ -476,56 +544,82 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
       </Card>
       
       {/* Calendar Legend - Horizon System (matches header chips EXACTLY) */}
-      <Box sx={{ display: 'flex', gap: 2, mb: 2, px: 1, flexWrap: 'wrap' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+      <Box
+        sx={{
+          display: 'flex',
+          gap: 2.5,
+          mb: 2.5,
+          px: 1.5,
+          py: 1,
+          flexWrap: 'wrap',
+          backgroundColor: (theme) => alpha(theme.palette.grey[500], 0.04),
+          borderRadius: 2,
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
           <Box
             sx={{
-              width: 8,
-              height: 8,
+              width: 10,
+              height: 10,
               borderRadius: '50%',
-              backgroundColor: '#d32f2f',
+              backgroundColor: horizonColors.critical,
+              boxShadow: `0 0 6px ${alpha(horizonColors.critical, 0.5)}`,
             }}
           />
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" sx={{ fontWeight: 500, color: 'text.secondary' }}>
             Critical (≤7 days)
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
           <Box
             sx={{
-              width: 8,
-              height: 8,
+              width: 10,
+              height: 10,
               borderRadius: '50%',
-              backgroundColor: '#ff9800',
+              backgroundColor: horizonColors.approaching,
+              boxShadow: `0 0 6px ${alpha(horizonColors.approaching, 0.5)}`,
             }}
           />
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" sx={{ fontWeight: 500, color: 'text.secondary' }}>
             Approaching (8-30 days)
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
           <Box
             sx={{
-              width: 8,
-              height: 8,
+              width: 10,
+              height: 10,
               borderRadius: '50%',
-              backgroundColor: '#4caf50',
+              backgroundColor: horizonColors.future,
+              boxShadow: `0 0 6px ${alpha(horizonColors.future, 0.5)}`,
             }}
           />
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" sx={{ fontWeight: 500, color: 'text.secondary' }}>
             Future (&gt;30 days)
           </Typography>
         </Box>
       </Box>
       
       {/* Quick Actions */}
-      <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+      <Box sx={{ display: 'flex', gap: 1.5, mb: 2.5 }}>
         <Button
           variant="outlined"
           size="small"
           startIcon={<TodayIcon />}
           onClick={handleGoToToday}
-          sx={{ flex: 1 }}
+          sx={{
+            flex: 1,
+            borderRadius: 2.5,
+            py: 1,
+            fontWeight: 600,
+            borderWidth: 1.5,
+            transition: 'all 0.2s ease',
+            '&:hover': {
+              borderWidth: 1.5,
+              transform: 'translateY(-1px)',
+              boxShadow: '0 4px 12px rgba(25, 118, 210, 0.2)',
+            },
+          }}
         >
           Today
         </Button>
@@ -535,7 +629,19 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
           startIcon={<ClearIcon />}
           onClick={handleClearSelection}
           disabled={!selectedDate}
-          sx={{ flex: 1 }}
+          sx={{
+            flex: 1,
+            borderRadius: 2.5,
+            py: 1,
+            fontWeight: 600,
+            borderWidth: 1.5,
+            transition: 'all 0.2s ease',
+            '&:hover': {
+              borderWidth: 1.5,
+              transform: 'translateY(-1px)',
+              boxShadow: '0 4px 12px rgba(25, 118, 210, 0.2)',
+            },
+          }}
         >
           Clear
         </Button>
@@ -543,23 +649,32 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
       
       {/* Day Breakdown Panel */}
       <Card
-        variant="outlined"
+        elevation={0}
         sx={{
           mt: 'auto',
-          backgroundColor: selectedDate ? 'grey.50' : 'transparent',
-          border: selectedDate ? '1px solid' : '1px dashed',
-          borderColor: selectedDate ? 'primary.main' : 'grey.300',
+          borderRadius: 3,
+          backgroundColor: selectedDate
+            ? (theme) => alpha(theme.palette.primary.main, 0.04)
+            : 'transparent',
+          border: selectedDate ? '1.5px solid' : '1.5px dashed',
+          borderColor: selectedDate
+            ? (theme) => alpha(theme.palette.primary.main, 0.3)
+            : (theme) => alpha(theme.palette.grey[400], 0.5),
+          transition: 'all 0.3s ease',
         }}
       >
-        <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+        <CardContent sx={{ py: 2, px: 2.5, '&:last-child': { pb: 2 } }}>
           {selectedDate ? (
             <>
               <Typography
-                variant="subtitle2"
+                variant="subtitle1"
                 sx={{
                   color: 'primary.main',
-                  fontWeight: 600,
-                  mb: 1,
+                  fontWeight: 700,
+                  mb: 1.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
                 }}
               >
                 {selectedDate.format('MMMM D, YYYY')}
@@ -568,60 +683,109 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
                     label="TODAY"
                     size="small"
                     color="primary"
-                    sx={{ ml: 1, height: 20, fontSize: '0.65rem' }}
+                    sx={{
+                      height: 22,
+                      fontSize: '0.7rem',
+                      fontWeight: 700,
+                      borderRadius: 1.5,
+                    }}
                   />
                 )}
               </Typography>
-              
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                <Typography variant="body2">
-                  <strong>{selectedDateSummonses.length}</strong> Hearing{selectedDateSummonses.length !== 1 ? 's' : ''} Scheduled
+
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  <Box component="span" sx={{ fontWeight: 700, color: 'primary.main' }}>
+                    {selectedDateSummonses.length}
+                  </Box>{' '}
+                  Hearing{selectedDateSummonses.length !== 1 ? 's' : ''} Scheduled
                 </Typography>
                 {selectedDateCriticalCount > 0 && (
                   <Typography
                     variant="body2"
-                    sx={{ color: 'error.main', fontWeight: 500 }}
+                    sx={{
+                      color: 'error.main',
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 0.5,
+                    }}
                   >
+                    <Box
+                      sx={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        backgroundColor: 'error.main',
+                        animation: 'pulse 2s infinite',
+                        '@keyframes pulse': {
+                          '0%': { opacity: 1 },
+                          '50%': { opacity: 0.5 },
+                          '100%': { opacity: 1 },
+                        },
+                      }}
+                    />
                     <strong>{selectedDateCriticalCount}</strong> Critical Status
                   </Typography>
                 )}
                 {selectedDateSummonses.length === 0 && (
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
                     No hearings on this date
                   </Typography>
                 )}
               </Box>
-              
+
               {/* Preview of clients on this date */}
               {selectedDateSummonses.length > 0 && (
-                <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                <Box sx={{ mt: 1.5, display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
                   {selectedDateSummonses.slice(0, 3).map((s) => (
                     <Chip
                       key={s.id}
                       label={s.respondent_name}
                       size="small"
                       variant="outlined"
-                      sx={{ fontSize: '0.7rem', height: 22 }}
+                      sx={{
+                        fontSize: '0.7rem',
+                        height: 24,
+                        fontWeight: 500,
+                        borderRadius: 1.5,
+                        borderColor: (theme) => alpha(theme.palette.primary.main, 0.3),
+                        transition: 'all 0.2s ease',
+                        '&:hover': {
+                          backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.08),
+                        },
+                      }}
                     />
                   ))}
                   {selectedDateSummonses.length > 3 && (
                     <Chip
                       label={`+${selectedDateSummonses.length - 3} more`}
                       size="small"
-                      variant="outlined"
-                      sx={{ fontSize: '0.7rem', height: 22, fontStyle: 'italic' }}
+                      sx={{
+                        fontSize: '0.7rem',
+                        height: 24,
+                        fontWeight: 500,
+                        fontStyle: 'italic',
+                        borderRadius: 1.5,
+                        backgroundColor: (theme) => alpha(theme.palette.grey[500], 0.08),
+                        color: 'text.secondary',
+                      }}
                     />
                   )}
                 </Box>
               )}
             </>
           ) : (
-            <Box sx={{ textAlign: 'center', py: 1 }}>
-              <Typography variant="body2" color="text.secondary">
+            <Box sx={{ textAlign: 'center', py: 2 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500, mb: 0.5 }}>
                 Select a date to view day breakdown
               </Typography>
-              <Typography variant="caption" color="text.secondary">
-                or view all {totalUpcomingHearings} upcoming hearings
+              <Typography variant="caption" color="text.disabled">
+                or view all{' '}
+                <Box component="span" sx={{ fontWeight: 600, color: 'primary.main' }}>
+                  {totalUpcomingHearings}
+                </Box>{' '}
+                upcoming hearings
               </Typography>
             </Box>
           )}

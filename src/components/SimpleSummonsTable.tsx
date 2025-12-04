@@ -43,12 +43,14 @@ import {
   Paper,
   useTheme,
   useMediaQuery,
+  alpha,
 } from '@mui/material';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import FiberNewIcon from '@mui/icons-material/FiberNew';
 import UpdateIcon from '@mui/icons-material/Update';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import SummonsDetailModal from './SummonsDetailModal';
+import { dataGridPremiumStyles } from '../theme';
 
 // Import shared types
 import { Summons, isNewRecord, isUpdatedRecord, isFreshSummons, getStatusColor } from '../types/summons';
@@ -315,30 +317,54 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
           display: 'flex',
           alignItems: 'center',
           gap: 2,
-          p: 1.5,
-          backgroundColor: 'grey.50',
-          borderTopLeftRadius: 8,
-          borderTopRightRadius: 8,
+          p: 2,
+          backgroundColor: (theme) => alpha(theme.palette.grey[500], 0.04),
+          borderTopLeftRadius: 12,
+          borderTopRightRadius: 12,
           borderBottom: '1px solid',
-          borderColor: 'divider',
+          borderColor: (theme) => alpha(theme.palette.grey[500], 0.12),
         }}
       >
-        <FilterListIcon sx={{ color: 'text.secondary' }} />
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 36,
+            height: 36,
+            borderRadius: 2,
+            backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.08),
+          }}
+        >
+          <FilterListIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+        </Box>
         <ToggleButtonGroup
           value={activityFilter}
           exclusive
           onChange={handleFilterChange}
           size="small"
           aria-label="activity filter"
+          sx={{
+            '& .MuiToggleButton-root': {
+              borderRadius: 2,
+              px: 2,
+              py: 0.75,
+              fontWeight: 600,
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                transform: 'translateY(-1px)',
+              },
+            },
+          }}
         >
           <ToggleButton
             value="all"
             aria-label="show all records"
             sx={{
-              px: 2,
               '&.Mui-selected': {
                 backgroundColor: 'primary.main',
                 color: 'primary.contrastText',
+                boxShadow: '0 4px 12px rgba(25, 118, 210, 0.25)',
                 '&:hover': { backgroundColor: 'primary.dark' },
               },
             }}
@@ -347,17 +373,23 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
             <Chip
               label={filterCounts.all}
               size="small"
-              sx={{ ml: 1, height: 20, fontSize: '0.7rem' }}
+              sx={{
+                ml: 1,
+                height: 22,
+                fontSize: '0.7rem',
+                fontWeight: 600,
+                borderRadius: 1.5,
+              }}
             />
           </ToggleButton>
           <ToggleButton
             value="updated"
             aria-label="show updated records"
             sx={{
-              px: 2,
               '&.Mui-selected': {
                 backgroundColor: 'warning.main',
                 color: 'warning.contrastText',
+                boxShadow: '0 4px 12px rgba(255, 152, 0, 0.25)',
                 '&:hover': { backgroundColor: 'warning.dark' },
               },
             }}
@@ -369,7 +401,13 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
                 label={filterCounts.updated}
                 size="small"
                 color="warning"
-                sx={{ ml: 1, height: 20, fontSize: '0.7rem' }}
+                sx={{
+                  ml: 1,
+                  height: 22,
+                  fontSize: '0.7rem',
+                  fontWeight: 600,
+                  borderRadius: 1.5,
+                }}
               />
             )}
           </ToggleButton>
@@ -377,10 +415,10 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
             value="new"
             aria-label="show new records"
             sx={{
-              px: 2,
               '&.Mui-selected': {
                 backgroundColor: 'info.main',
                 color: 'info.contrastText',
+                boxShadow: '0 4px 12px rgba(3, 169, 244, 0.25)',
                 '&:hover': { backgroundColor: 'info.dark' },
               },
             }}
@@ -392,19 +430,35 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
                 label={filterCounts.new}
                 size="small"
                 color="info"
-                sx={{ ml: 1, height: 20, fontSize: '0.7rem' }}
+                sx={{
+                  ml: 1,
+                  height: 22,
+                  fontSize: '0.7rem',
+                  fontWeight: 600,
+                  borderRadius: 1.5,
+                }}
               />
             )}
           </ToggleButton>
         </ToggleButtonGroup>
-        
+
         {/* Results count */}
-        <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
-          {filteredSummonses.length} record{filteredSummonses.length !== 1 ? 's' : ''}
+        <Typography
+          variant="body2"
+          sx={{
+            ml: 'auto',
+            fontWeight: 500,
+            color: 'text.secondary',
+          }}
+        >
+          <Box component="span" sx={{ fontWeight: 700, color: 'primary.main' }}>
+            {filteredSummonses.length}
+          </Box>{' '}
+          record{filteredSummonses.length !== 1 ? 's' : ''}
         </Typography>
       </Paper>
-      
-      {/* DataGrid - No horizontal scroll */}
+
+      {/* DataGrid - Premium styling with no horizontal scroll */}
       <DataGrid
         rows={filteredSummonses}
         columns={columns}
@@ -425,27 +479,28 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
         disableColumnMenu={isMobile}
         autoHeight
         sx={{
-          border: 'none',
-          borderBottomLeftRadius: 8,
-          borderBottomRightRadius: 8,
+          ...dataGridPremiumStyles,
+          borderTopLeftRadius: 0,
+          borderTopRightRadius: 0,
+          borderBottomLeftRadius: 12,
+          borderBottomRightRadius: 12,
           backgroundColor: 'background.paper',
           '& .MuiDataGrid-cell': {
-            padding: '8px 12px',
             cursor: 'pointer',
+            borderBottom: (theme) => `1px solid ${alpha(theme.palette.grey[200], 0.8)}`,
           },
-          '& .MuiDataGrid-columnHeaders': {
-            backgroundColor: 'grey.100',
-            borderBottom: '2px solid',
-            borderColor: 'divider',
-          },
-          '& .MuiDataGrid-row:hover': {
-            backgroundColor: 'action.hover',
+          '& .MuiDataGrid-row': {
+            transition: 'all 0.2s ease',
+            '&:hover': {
+              backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.04),
+              transform: 'scale(1.001)',
+            },
           },
           '& .fresh-row': {
-            backgroundColor: '#FFFDE7', // Pale yellow for freshness
+            backgroundColor: (theme) => alpha(theme.palette.info.main, 0.06),
           },
           '& .fresh-row:hover': {
-            backgroundColor: '#FFF9C4',
+            backgroundColor: (theme) => alpha(theme.palette.info.main, 0.1),
           },
           // Ensure no horizontal scroll
           '& .MuiDataGrid-virtualScroller': {
