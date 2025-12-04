@@ -51,7 +51,12 @@ import UpdateIcon from '@mui/icons-material/Update';
 import { generateClient } from 'aws-amplify/api';
 
 import { listClients, listSummons } from '../graphql/queries';
-import { Client, Summons, isUpdatedRecord, getBusinessDays } from '../types/summons';
+import { Client, Summons, isUpdatedRecord } from '../types/summons';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+
+// Extend dayjs with UTC plugin for correct date parsing
+dayjs.extend(utc);
 import ExportConfigurationModal from '../components/ExportConfigurationModal';
 import { useCSVExport } from '../hooks/useCSVExport';
 import { ExportConfig } from '../lib/csvExport';
@@ -82,17 +87,34 @@ interface ClientWithStats extends Client {
 }
 
 /**
- * Check if a summons is "critical" (hearing within 7 business days)
- * TRD v1.8: Uses business days (excludes weekends) to match Dashboard logic
+ * Check if a summons is "critical"
+ * Matches CalendarDashboard.tsx logic exactly:
+ * - Hearings within 7 CALENDAR days (not business days)
+ * - OR dangerous status (DEFAULT, JUDGMENT, VIOLATION, FAILURE TO APPEAR)
  */
 function isCriticalCase(summons: Summons): boolean {
   if (!summons.hearing_date) return false;
-  const hearingDate = new Date(summons.hearing_date);
-  const now = new Date();
-  // Skip past dates
-  if (hearingDate < now) return false;
-  const businessDays = getBusinessDays(now, hearingDate);
-  return businessDays <= 7;
+
+  // Use UTC parsing to avoid timezone shift (hearing_date is stored as date-only in UTC)
+  const hearingDate = dayjs.utc(summons.hearing_date);
+  const now = dayjs();
+  const daysUntil = hearingDate.diff(now.startOf('day'), 'day');
+
+  // Exclude past hearings
+  if (daysUntil < 0) return false;
+
+  // Critical: within 7 calendar days
+  const isImminentDeadline = daysUntil <= 7;
+
+  // Dangerous status check (same as CalendarDashboard)
+  const status = (summons.status || '').toUpperCase();
+  const isDangerStatus =
+    status.includes('DEFAULT') ||
+    status.includes('JUDGMENT') ||
+    status.includes('VIOLATION') ||
+    status.includes('FAILURE TO APPEAR');
+
+  return isImminentDeadline || isDangerStatus;
 }
 
 /**
