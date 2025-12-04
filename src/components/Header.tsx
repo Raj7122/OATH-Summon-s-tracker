@@ -1,4 +1,4 @@
-import { AppBar, Toolbar, Typography, Button, Box, IconButton, Menu, MenuItem } from '@mui/material';
+import { AppBar, Toolbar, Typography, Button, Box, IconButton, Menu, MenuItem, alpha } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
@@ -43,35 +43,64 @@ const Header = () => {
   const isActive = (path: string) => location.pathname === path;
 
   return (
-    <AppBar position="sticky">
+    <AppBar
+      position="sticky"
+      elevation={0}
+      sx={{
+        backgroundColor: alpha('#FFFFFF', 0.8),
+        backdropFilter: 'blur(6px)',
+        borderBottom: (theme) => `1px solid ${alpha(theme.palette.grey[500], 0.12)}`,
+        color: 'text.primary',
+      }}
+    >
       <Toolbar>
         <Typography
           variant="h6"
           component="div"
-          sx={{ flexGrow: 0, mr: 4, cursor: 'pointer' }}
+          sx={{
+            flexGrow: 0,
+            mr: 4,
+            cursor: 'pointer',
+            fontWeight: 700,
+            color: 'primary.main',
+          }}
           onClick={() => navigate('/dashboard')}
         >
           NYC OATH Tracker
         </Typography>
 
         {/* Desktop Navigation */}
-        <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, gap: 2 }}>
+        <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, gap: 1 }}>
           <Button
-            color="inherit"
             onClick={() => handleNavigate('/dashboard')}
             sx={{
-              fontWeight: isActive('/dashboard') ? 'bold' : 'normal',
-              textDecoration: isActive('/dashboard') ? 'underline' : 'none',
+              fontWeight: 600,
+              color: isActive('/dashboard') ? 'primary.main' : 'text.secondary',
+              backgroundColor: isActive('/dashboard')
+                ? (theme) => alpha(theme.palette.primary.main, 0.08)
+                : 'transparent',
+              borderRadius: 2,
+              px: 2,
+              '&:hover': {
+                backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.12),
+              },
             }}
           >
             Dashboard
           </Button>
           <Button
-            color="inherit"
             onClick={() => handleNavigate('/clients')}
             sx={{
-              fontWeight: location.pathname.startsWith('/clients') ? 'bold' : 'normal',
-              textDecoration: location.pathname.startsWith('/clients') ? 'underline' : 'none',
+              fontWeight: 600,
+              color: location.pathname.startsWith('/clients') ? 'primary.main' : 'text.secondary',
+              backgroundColor: location.pathname.startsWith('/clients')
+                ? (theme) => alpha(theme.palette.primary.main, 0.08)
+                : 'transparent',
+              borderRadius: 2,
+              px: 2,
+              '&:hover': {
+                backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.12),
+              },
             }}
           >
             Clients
@@ -82,8 +111,8 @@ const Header = () => {
         <Box sx={{ flexGrow: 1, display: { xs: 'flex', md: 'none' } }}>
           <IconButton
             size="large"
-            color="inherit"
             onClick={handleMobileMenu}
+            sx={{ color: 'text.secondary' }}
           >
             <MenuIcon />
           </IconButton>
@@ -101,8 +130,13 @@ const Header = () => {
         <Box>
           <IconButton
             size="large"
-            color="inherit"
             onClick={handleAccountMenu}
+            sx={{
+              color: 'text.secondary',
+              '&:hover': {
+                backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.08),
+              },
+            }}
           >
             <AccountCircleIcon />
           </IconButton>
