@@ -468,7 +468,7 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
             paginationModel: { pageSize: 25 },
           },
           sorting: {
-            sortModel: [{ field: 'hearing_date', sort: 'asc' }],
+            sortModel: [{ field: 'hearing_date', sort: 'desc' }],
           },
         }}
         onRowClick={handleRowClick}
