@@ -34,8 +34,6 @@ import {
   Button,
   CircularProgress,
   Alert,
-  Switch,
-  FormControlLabel,
   IconButton,
   Tooltip,
   LinearProgress,
@@ -52,8 +50,6 @@ import BusinessIcon from '@mui/icons-material/Business';
 import WarningIcon from '@mui/icons-material/Warning';
 import HistoryIcon from '@mui/icons-material/History';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ReceiptIcon from '@mui/icons-material/Receipt';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -86,16 +82,6 @@ const IDLING_FILTER_KEYWORDS = ['IDLING', 'IDLE'];
 function isIdlingViolation(summons: Summons): boolean {
   const codeDesc = (summons.code_description || '').toUpperCase();
   return IDLING_FILTER_KEYWORDS.some((keyword) => codeDesc.includes(keyword));
-}
-
-/**
- * Calculate lag/wait time between violation date and hearing date
- */
-function calculateLagDays(violationDate: string | undefined, hearingDate: string | undefined): number | null {
-  if (!violationDate || !hearingDate) return null;
-  const violation = dayjs(violationDate);
-  const hearing = dayjs(hearingDate);
-  return hearing.diff(violation, 'day');
 }
 
 /**
@@ -138,8 +124,7 @@ const ClientDetail: React.FC = () => {
   const [hasMore, setHasMore] = useState(true);
   const [allDataLoaded, setAllDataLoaded] = useState(false);
 
-  // Filter State
-  const [showHistorical, setShowHistorical] = useState(false);
+  // Sort State
   const [sortModel, setSortModel] = useState<GridSortModel>([
     { field: 'hearing_date', sort: 'desc' },
   ]);
@@ -276,18 +261,14 @@ const ClientDetail: React.FC = () => {
   }, [client]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
-   * Filter summonses based on historical toggle
+   * Filter summonses to Active Era (2022+) only
    */
   const filteredSummonses = useMemo(() => {
-    if (showHistorical) {
-      return summonses; // Show all records
-    }
-    // Filter to Active Era (2022+)
     return summonses.filter((s) => {
       if (!s.hearing_date) return true; // Include records without hearing date
       return new Date(s.hearing_date) >= new Date(PRE_2022_CUTOFF);
     });
-  }, [summonses, showHistorical]);
+  }, [summonses]);
 
   /**
    * Calculate header stats
@@ -333,7 +314,6 @@ const ClientDetail: React.FC = () => {
       openCases: openCases.length,
       criticalCases: criticalCases.length,
       totalDue: openCases.reduce((sum, s) => sum + (s.amount_due || 0), 0),
-      historicalCount: summonses.length - activeEraSummonses.length,
     };
   }, [summonses]);
 
@@ -470,24 +450,6 @@ const ClientDetail: React.FC = () => {
       headerName: 'License Plate',
       width: 120,
       valueGetter: (params) => params.row.license_plate_ocr || params.row.license_plate || '—',
-    },
-    {
-      field: 'lag_days',
-      headerName: 'Wait/Lag',
-      width: 100,
-      valueGetter: (params) => calculateLagDays(params.row.violation_date, params.row.hearing_date),
-      renderCell: (params) => {
-        const days = params.value;
-        if (days === null) return '—';
-        return (
-          <Chip
-            label={`${days}d`}
-            size="small"
-            color={days > 60 ? 'warning' : 'default'}
-            variant="outlined"
-          />
-        );
-      },
     },
     {
       field: 'amount_due',
@@ -742,33 +704,12 @@ const ClientDetail: React.FC = () => {
             )}
           </Box>
 
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            {/* Historical Toggle */}
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={showHistorical}
-                  onChange={(e) => setShowHistorical(e.target.checked)}
-                  size="small"
-                />
-              }
-              label={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  {showHistorical ? <VisibilityIcon fontSize="small" /> : <VisibilityOffIcon fontSize="small" />}
-                  <Typography variant="body2">
-                    Show Historical ({stats.historicalCount} pre-2022)
-                  </Typography>
-                </Box>
-              }
-            />
-
-            {/* Refresh Button */}
-            <Tooltip title="Refresh data">
-              <IconButton onClick={() => loadSummonses(true)} disabled={loadingMore}>
-                <RefreshIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
+          {/* Refresh Button */}
+          <Tooltip title="Refresh data">
+            <IconButton onClick={() => loadSummonses(true)} disabled={loadingMore}>
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
         </Box>
 
         {/* Loading indicator */}
