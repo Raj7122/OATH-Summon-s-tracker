@@ -611,15 +611,18 @@ const ClientList: React.FC = () => {
           {sortedClients.map((client) => (
             <Grid item xs={12} sm={6} md={4} lg={3} key={client.id}>
               <Card
+                elevation={3}
                 sx={{
                   height: '100%',
                   display: 'flex',
                   flexDirection: 'column',
                   borderLeft: client.criticalCount > 0 ? 4 : 0,
                   borderColor: 'error.main',
-                  transition: 'box-shadow 0.2s',
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.12)',
+                  transition: 'box-shadow 0.2s, transform 0.2s',
                   '&:hover': {
-                    boxShadow: 4,
+                    boxShadow: '0 6px 20px rgba(0, 0, 0, 0.15)',
+                    transform: 'translateY(-2px)',
                   },
                 }}
               >
