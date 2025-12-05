@@ -634,6 +634,7 @@ export const dataGridPremiumStyles = {
     borderBottom: `1px solid ${palette.grey[200]}`,
     borderTopLeftRadius: 12,
     borderTopRightRadius: 12,
+    minHeight: 52, // More height for headers
   },
   '& .MuiDataGrid-columnHeader': {
     '&:focus, &:focus-within': {
@@ -649,11 +650,15 @@ export const dataGridPremiumStyles = {
     borderBottom: `1px solid ${palette.grey[100]}`,
     fontSize: '0.875rem', // 14px - Row text: regular weight
     fontWeight: 400, // Regular weight for row text
+    display: 'flex',
+    alignItems: 'center', // Vertically center cell content
     '&:focus, &:focus-within': {
       outline: 'none',
     },
   },
+  // Row styling with height, transitions, and selection states
   '& .MuiDataGrid-row': {
+    minHeight: '58px !important', // Increased from 52px for more breathing room
     transition: 'background-color 0.2s ease',
     '&:hover': {
       backgroundColor: alpha(palette.primary.main, 0.04),
