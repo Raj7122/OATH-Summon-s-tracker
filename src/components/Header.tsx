@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import MenuIcon from '@mui/icons-material/Menu';
+import SyncStatusBadge from './SyncStatusBadge';
 
 const Header = () => {
   const navigate = useNavigate();
@@ -126,6 +127,11 @@ const Header = () => {
             <MenuItem onClick={() => handleNavigate('/dashboard')}>Dashboard</MenuItem>
             <MenuItem onClick={() => handleNavigate('/clients')}>Clients</MenuItem>
           </Menu>
+        </Box>
+
+        {/* Sync Status Badge - Shows daily sweep freshness */}
+        <Box sx={{ display: { xs: 'none', sm: 'flex' }, mr: 1 }}>
+          <SyncStatusBadge />
         </Box>
 
         {/* Account Menu */}

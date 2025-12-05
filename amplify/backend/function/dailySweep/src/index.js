@@ -1,7 +1,7 @@
 /**
  * NYC OATH Summons Tracker - Daily Sweep Lambda Function
  *
- * INCREMENTAL SYNC WITH PRIORITY QUEUING STRATEGY (v2.0)
+ * INCREMENTAL SYNC WITH PRIORITY QUEUING STRATEGY (v3.0)
  *
  * This function implements a two-phase approach to optimize OCR usage:
  *
@@ -16,26 +16,29 @@
  * - Ghost Detection: Archives records missing from API for 3+ consecutive days
  *
  * ============================================================================
- * PHASE 2: PRIORITY QUEUE OCR (The "Smart" 500)
+ * PHASE 2: PRIORITY QUEUE OCR (Future-First with Self-Healing)
  * ============================================================================
- * - Queries DB for records where ocr_status == 'pending'
- * - Excludes records with ocr_failure_count >= 3 (max retry limit)
- * - Sorts by TIERED PRIORITY SCORING:
- *   TIER 1 (0-99): CRITICAL - Hearing within 7 days
- *   TIER 2 (100-199): URGENT - Hearing within 30 days
- *   TIER 3 (200-299): STANDARD - Hearing 30-90 days out
- *   TIER 4 (300-399): LOW - Hearing 90+ days out
- *   TIER 5 (400+): ARCHIVE - Past hearings
- * - Takes Top 500 from sorted list (respects daily counter)
- * - Throttles requests (2 seconds between calls) to avoid rate limits
- * - On success: Sets ocr_status = 'complete', last_scan_date = NOW()
- * - On fail: Increments ocr_failure_count (retry tomorrow if < 3)
+ * v3.0 CHANGES:
+ * - PRIORITY: Sorts by hearing_date DESC (furthest future first)
+ *   - 2026 hearings processed before 2025, which process before 2023, etc.
+ *   - Ensures Arthur sees upcoming dates fully enriched immediately
+ * - FLOOR: Strictly filters out hearings before 2022-01-01
+ *   - Avoids wasting OCR on ancient archived cases
+ * - SELF-HEALING: Re-queues records where:
+ *   - ocr_status is PENDING or FAILED, OR
+ *   - ocr_status is SUCCESS BUT critical fields are missing
+ *   - Critical Fields: license_plate_ocr OR id_number (issuing_officer_id)
+ *   - These are logged as "Repair Jobs" for tracking
+ * - RESILIENCE:
+ *   - Graceful Exit: Checks time before each OCR, exits if near timeout
+ *   - Rate Limit (429): Wait 2s, retry once, then skip if still failing
+ *   - Timeout: 5 minute execution window
  *
  * CONSTRAINTS:
  * - Daily Quota: 500 OCR requests max (tracked in SyncStatus)
  * - Rate Limit: 1 request every 2 seconds
- * - Immutability: Never re-OCR a successfully processed PDF
- * - Retry Limit: Max 3 OCR attempts per record
+ * - Self-Healing: Re-OCR allowed for incomplete records (missing critical fields)
+ * - Retry Limit: Max 3 OCR attempts per record for hard failures
  *
  * FR-03: Automated Daily Data Sweep
  */
@@ -62,13 +65,23 @@ const OCR_THROTTLE_MS = 2000; // 2 seconds between requests
 const MAX_OCR_FAILURES = 3; // Max retry attempts before giving up
 const GHOST_GRACE_DAYS = 3; // Days before archiving missing records
 
+// v3.0: Resilience Configuration
+const MAX_EXECUTION_TIME_MS = 5 * 60 * 1000; // 5 minutes max execution
+const EXECUTION_BUFFER_MS = 30 * 1000; // 30 second buffer before timeout
+const RATE_LIMIT_RETRY_DELAY_MS = 2000; // 2 seconds wait on 429
+const HEARING_DATE_FLOOR = '2022-01-01'; // Ignore hearings before this date
+
 /**
  * Main handler for the daily sweep Lambda function
  */
 exports.handler = async (event) => {
+  // v3.0: Track execution start for graceful exit
+  const executionStartMs = Date.now();
+
   console.log('='.repeat(60));
-  console.log('DAILY SWEEP - INCREMENTAL SYNC WITH PRIORITY QUEUING v2.0');
+  console.log('DAILY SWEEP - INCREMENTAL SYNC WITH PRIORITY QUEUING v3.0');
   console.log('Started:', new Date().toISOString());
+  console.log(`Max Execution: ${MAX_EXECUTION_TIME_MS / 1000}s (buffer: ${EXECUTION_BUFFER_MS / 1000}s)`);
   console.log('='.repeat(60));
 
   const syncStartTime = new Date().toISOString();
@@ -115,7 +128,8 @@ exports.handler = async (event) => {
     const remainingQuota = MAX_OCR_REQUESTS_PER_DAY - ocrCounter.ocr_processed_today;
     console.log(`Remaining OCR quota for today: ${remainingQuota}`);
 
-    const phase2Results = await executePhase2PriorityOCR(remainingQuota);
+    // v3.0: Pass execution start time for graceful exit
+    const phase2Results = await executePhase2PriorityOCR(remainingQuota, executionStartMs);
     console.log('\nPhase 2 Complete:', phase2Results);
 
     // Update SyncStatus with Phase 2 results
@@ -606,21 +620,29 @@ async function fetchAllActiveSummons() {
 // ============================================================================
 
 /**
- * Phase 2: Process OCR requests using priority queue
- * - Fetches records with ocr_status = 'pending' (excluding max failures)
- * - Calculates TIERED PRIORITY SCORE for each
- * - Sorts by priority score (lower = higher priority)
- * - Processes up to remaining daily quota with throttling
+ * Phase 2: Process OCR requests using FUTURE-FIRST priority queue with Self-Healing
+ *
+ * v3.0 CHANGES:
+ * - PRIORITY: hearing_date DESC (furthest future first)
+ * - FLOOR: Excludes hearings before 2022-01-01
+ * - SELF-HEALING: Includes SUCCESS records with missing critical fields
+ * - RESILIENCE: Graceful exit before timeout, 429 retry handling
+ *
+ * @param {number} remainingQuota - Number of OCR requests remaining for today
+ * @param {number} executionStartMs - Timestamp when Lambda started (for graceful exit)
  */
-async function executePhase2PriorityOCR(remainingQuota = MAX_OCR_REQUESTS_PER_DAY) {
+async function executePhase2PriorityOCR(remainingQuota = MAX_OCR_REQUESTS_PER_DAY, executionStartMs = Date.now()) {
   const results = {
     pendingRecords: 0,
     recordsProcessed: 0,
     ocrSuccess: 0,
-    ocrHealed: 0, // Records with partial data that were re-OCR'd
+    ocrHealed: 0, // v3.0: Records with partial data that were re-OCR'd (Repair Jobs)
     ocrFailed: 0,
     ocrSkipped: 0,
     ocrExcludedMaxFailures: 0,
+    ocrExcludedOldHearings: 0, // v3.0: Records filtered by hearing date floor
+    gracefulExit: false, // v3.0: Did we exit early due to timeout?
+    rateLimitHits: 0, // v3.0: How many 429 errors encountered
   };
 
   if (remainingQuota <= 0) {
@@ -628,77 +650,97 @@ async function executePhase2PriorityOCR(remainingQuota = MAX_OCR_REQUESTS_PER_DA
     return results;
   }
 
-  // Step 1: Fetch all pending OCR records (excluding max failures)
-  const pendingRecords = await fetchPendingOCRRecords();
+  // Step 1: Fetch OCR queue with self-healing logic
+  // v3.0: Includes PENDING, FAILED, and SUCCESS with missing critical fields
+  const ocrQueue = await fetchOCRQueueWithSelfHealing();
+  console.log(`Fetched ${ocrQueue.length} records from OCR queue (including self-healing candidates)`);
 
-  // Filter out records that have exceeded max retry attempts
-  const eligibleRecords = pendingRecords.filter(record => {
+  // Step 2: Apply filters
+  const eligibleRecords = ocrQueue.filter(record => {
+    // Filter 1: Max failures exclusion
     const failureCount = record.ocr_failure_count || 0;
     if (failureCount >= MAX_OCR_FAILURES) {
       results.ocrExcludedMaxFailures++;
       return false;
     }
+
+    // Filter 2: v3.0 Hearing Date Floor - exclude hearings before 2022-01-01
+    if (record.hearing_date) {
+      const hearingDate = new Date(record.hearing_date);
+      const floorDate = new Date(HEARING_DATE_FLOOR);
+      if (hearingDate < floorDate) {
+        results.ocrExcludedOldHearings++;
+        return false;
+      }
+    }
+
     return true;
   });
 
   results.pendingRecords = eligibleRecords.length;
-  console.log(`Found ${pendingRecords.length} pending, ${eligibleRecords.length} eligible (${results.ocrExcludedMaxFailures} excluded due to max failures)`);
+  console.log(`Eligible: ${eligibleRecords.length} | Excluded: ${results.ocrExcludedMaxFailures} (max failures), ${results.ocrExcludedOldHearings} (pre-2022)`);
 
   if (eligibleRecords.length === 0) {
     console.log('No eligible OCR records. Phase 2 complete.');
     return results;
   }
 
-  // Step 2: Calculate priority scores and sort
-  const scoredRecords = eligibleRecords.map(record => ({
-    ...record,
-    priority_score: calculateTieredPriorityScore(record),
-  }));
+  // Step 3: v3.0 PRIORITY SORT - hearing_date DESC (furthest future first)
+  // Records without hearing_date go to the end
+  const sortedRecords = sortByHearingDateDescending(eligibleRecords);
+  console.log('Records sorted by hearing_date DESC (furthest future first, 2026 → 2025 → 2024 → ...)');
 
-  // Sort by priority score (lower = higher priority)
-  scoredRecords.sort((a, b) => a.priority_score - b.priority_score);
-  console.log('Records sorted by tiered priority score (CRITICAL → URGENT → STANDARD → LOW → ARCHIVE)');
+  // Log date range being processed
+  logPriorityDateRange(sortedRecords);
 
-  // Step 3: Take up to remaining quota
-  const recordsToProcess = scoredRecords.slice(0, remainingQuota);
+  // Step 4: Take up to remaining quota
+  const recordsToProcess = sortedRecords.slice(0, remainingQuota);
   console.log(`Processing ${recordsToProcess.length} records (quota: ${remainingQuota})`);
 
-  // Log priority breakdown
-  logTieredPriorityBreakdown(recordsToProcess);
-
-  // Step 4: Process with throttling
+  // Step 5: Process with throttling and graceful exit
   for (let i = 0; i < recordsToProcess.length; i++) {
+    // v3.0: GRACEFUL EXIT - Check if we're approaching timeout
+    const elapsedMs = Date.now() - executionStartMs;
+    const timeRemaining = MAX_EXECUTION_TIME_MS - elapsedMs;
+
+    if (timeRemaining < EXECUTION_BUFFER_MS) {
+      console.log(`\n⏱️ GRACEFUL EXIT: ${Math.round(timeRemaining / 1000)}s remaining (buffer: ${EXECUTION_BUFFER_MS / 1000}s)`);
+      console.log(`   Processed ${results.recordsProcessed} records before exit.`);
+      results.gracefulExit = true;
+      break;
+    }
+
     const record = recordsToProcess[i];
     results.recordsProcessed++;
 
-    // Safety check: Don't OCR if we already have data (immutability)
-    if (hasExistingOCRData(record)) {
-      console.log(`⊘ Skipped (already has data): ${record.summons_number}`);
-      await markOCRComplete(record.id);
-      results.ocrSkipped++;
-      continue;
+    // Check if this is a self-healing (repair) job
+    const isRepairJob = isRecordNeedingRepair(record);
+    const hearingDateStr = record.hearing_date
+      ? new Date(record.hearing_date).toISOString().split('T')[0]
+      : 'No Date';
+
+    if (isRepairJob) {
+      console.log(`[${i + 1}/${recordsToProcess.length}] 🔧 REPAIR JOB: ${record.summons_number} (${hearingDateStr}) - Missing: ${getMissingFields(record).join(', ')}`);
+    } else {
+      console.log(`[${i + 1}/${recordsToProcess.length}] Processing: ${record.summons_number} (${hearingDateStr})`);
     }
 
     try {
-      // Check if this record needs healing (has partial OCR data)
-      const requiresHealing = needsOCRHealing(record);
-      if (requiresHealing) {
-        console.log(`[${i + 1}/${recordsToProcess.length}] HEALING: ${record.summons_number} (score: ${record.priority_score})`);
-      } else {
-        console.log(`[${i + 1}/${recordsToProcess.length}] Processing: ${record.summons_number} (score: ${record.priority_score})`);
-      }
+      // v3.0: Invoke OCR with rate limit handling
+      const ocrResult = await invokeOCRExtractorWithRetry(record, isRepairJob);
 
-      // Invoke OCR with healing mode if needed
-      const ocrResult = await invokeOCRExtractor(record, requiresHealing);
+      if (ocrResult.rateLimitHit) {
+        results.rateLimitHits++;
+      }
 
       if (ocrResult.success) {
         await markOCRComplete(record.id);
         if (ocrResult.skipped) {
           results.ocrSkipped++;
           console.log(`  ⊘ Skipped (already complete): ${record.summons_number}`);
-        } else if (requiresHealing) {
+        } else if (isRepairJob) {
           results.ocrHealed++;
-          console.log(`  ✓ HEALED: ${record.summons_number}`);
+          console.log(`  ✓ REPAIRED: ${record.summons_number}`);
         } else {
           results.ocrSuccess++;
           console.log(`  ✓ OCR complete: ${record.summons_number}`);
@@ -719,6 +761,14 @@ async function executePhase2PriorityOCR(remainingQuota = MAX_OCR_REQUESTS_PER_DA
     if (i < recordsToProcess.length - 1) {
       await sleep(OCR_THROTTLE_MS);
     }
+  }
+
+  // v3.0: Summary logging
+  if (results.ocrHealed > 0) {
+    console.log(`\n🔧 SELF-HEALING SUMMARY: ${results.ocrHealed} records repaired`);
+  }
+  if (results.rateLimitHits > 0) {
+    console.log(`⚠️ RATE LIMIT: Encountered ${results.rateLimitHits} rate limit (429) responses`);
   }
 
   return results;
@@ -1392,3 +1442,338 @@ async function getOrResetDailyOCRCounter() {
     return { ocr_processed_today: 0, ocr_processing_date: today };
   }
 }
+
+// ============================================================================
+// v3.0: PRIORITY QUEUE HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * v3.0: Fetch OCR queue with Self-Healing logic
+ *
+ * Includes records where:
+ * 1. ocr_status is 'pending' (standard queue)
+ * 2. ocr_status is 'failed' (retry queue)
+ * 3. ocr_status is 'complete' BUT missing critical fields (self-healing queue)
+ *
+ * Critical Fields: license_plate_ocr OR id_number (issuing_officer_id)
+ *
+ * @returns {Promise<Array>} Records eligible for OCR processing
+ */
+async function fetchOCRQueueWithSelfHealing() {
+  const allRecords = [];
+  let lastEvaluatedKey = null;
+
+  do {
+    const params = {
+      TableName: SUMMONS_TABLE,
+      // v3.0: Include PENDING, FAILED, and records needing healing
+      // Note: DynamoDB doesn't support complex OR logic well, so we fetch more and filter
+      FilterExpression: '(is_archived <> :archived OR attribute_not_exists(is_archived))',
+      ExpressionAttributeValues: {
+        ':archived': true,
+      },
+    };
+
+    if (lastEvaluatedKey) {
+      params.ExclusiveStartKey = lastEvaluatedKey;
+    }
+
+    const result = await dynamodb.scan(params).promise();
+    allRecords.push(...(result.Items || []));
+    lastEvaluatedKey = result.LastEvaluatedKey;
+  } while (lastEvaluatedKey);
+
+  // v3.0: Filter to include:
+  // 1. PENDING status (standard queue)
+  // 2. FAILED status (retry queue)
+  // 3. COMPLETE but missing critical fields (self-healing queue)
+  // 4. NO STATUS but HAS narrative with missing critical fields (orphaned self-healing)
+  const ocrQueue = allRecords.filter(record => {
+    const status = record.ocr_status || '';
+    const hasNarrative = !!record.violation_narrative;
+
+    // Standard: pending status, ready for first OCR
+    if (status === 'pending') {
+      return true;
+    }
+
+    // Standard: no status and no narrative (never processed)
+    if (!status && !hasNarrative) {
+      return true;
+    }
+
+    // Retry: failed status
+    if (status === 'failed') {
+      return true;
+    }
+
+    // Self-Healing Case 1: status is 'complete' but missing critical fields
+    if (status === 'complete' && isMissingCriticalFields(record)) {
+      return true;
+    }
+
+    // Self-Healing Case 2: NO status but HAS narrative with missing critical fields
+    // These are "orphaned" records - OCR ran but status was never set
+    if (!status && hasNarrative && isMissingCriticalFields(record)) {
+      return true;
+    }
+
+    return false;
+  });
+
+  // Log breakdown
+  let pending = 0, failed = 0, healing = 0, orphaned = 0;
+  ocrQueue.forEach(r => {
+    const status = r.ocr_status || '';
+    const hasNarrative = !!r.violation_narrative;
+    if (status === 'complete') {
+      healing++;
+    } else if (status === 'failed') {
+      failed++;
+    } else if (!status && hasNarrative && isMissingCriticalFields(r)) {
+      orphaned++; // Orphaned self-healing
+    } else {
+      pending++;
+    }
+  });
+  console.log(`OCR Queue Breakdown: ${pending} pending, ${failed} failed, ${healing} self-healing, ${orphaned} orphaned`);
+
+  return ocrQueue;
+}
+
+/**
+ * v3.0: Check if a record is missing critical fields (for self-healing)
+ *
+ * Critical Fields:
+ * - license_plate_ocr: The license plate extracted from the PDF
+ * - id_number: The issuing officer/inspector ID
+ *
+ * If violation type suggests these should exist and they're null,
+ * the record is flagged for self-healing.
+ */
+function isMissingCriticalFields(record) {
+  // Only consider records that have been OCR'd at least once
+  if (!record.violation_narrative) {
+    return false;
+  }
+
+  const missingLicensePlate = !record.license_plate_ocr;
+  const missingIdNumber = !record.id_number;
+
+  // Return true if either critical field is missing
+  return missingLicensePlate || missingIdNumber;
+}
+
+/**
+ * v3.0: Check if a record is a repair job (needs self-healing)
+ *
+ * A repair job is a record where:
+ * - ocr_status is 'complete' BUT critical fields are missing, OR
+ * - ocr_status is NOT SET but HAS narrative with missing critical fields (orphaned)
+ *
+ * The "orphaned" case catches records where OCR ran but status was never set.
+ */
+function isRecordNeedingRepair(record) {
+  const status = record.ocr_status || '';
+  const hasNarrative = !!record.violation_narrative;
+
+  // Case 1: Explicitly complete but missing fields
+  if (status === 'complete' && isMissingCriticalFields(record)) {
+    return true;
+  }
+
+  // Case 2: Orphaned - has narrative (OCR ran) but no status, with missing fields
+  if (!status && hasNarrative && isMissingCriticalFields(record)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * v3.0: Get list of missing critical fields for logging
+ */
+function getMissingFields(record) {
+  const missing = [];
+  if (!record.license_plate_ocr) missing.push('license_plate_ocr');
+  if (!record.id_number) missing.push('id_number');
+  return missing;
+}
+
+/**
+ * v3.0: Sort records by hearing_date DESC (furthest future first)
+ *
+ * The Priority Logic:
+ * - 2026 hearings process before 2025
+ * - 2025 hearings process before 2024
+ * - Records without hearing_date go to the end
+ *
+ * This ensures Arthur sees upcoming dates fully enriched immediately,
+ * rather than waiting for the system to churn through 2022 archives.
+ *
+ * @param {Array} records - Records to sort
+ * @returns {Array} Sorted records (furthest future first)
+ */
+function sortByHearingDateDescending(records) {
+  return records.sort((a, b) => {
+    const dateA = a.hearing_date ? new Date(a.hearing_date) : null;
+    const dateB = b.hearing_date ? new Date(b.hearing_date) : null;
+
+    // Records without dates go to the end
+    if (!dateA && !dateB) return 0;
+    if (!dateA) return 1; // A has no date, goes after B
+    if (!dateB) return -1; // B has no date, goes after A
+
+    // Sort DESC: furthest future first (larger dates first)
+    return dateB.getTime() - dateA.getTime();
+  });
+}
+
+/**
+ * v3.0: Log the date range of records being processed
+ */
+function logPriorityDateRange(records) {
+  if (records.length === 0) return;
+
+  const datesWithDates = records.filter(r => r.hearing_date);
+  if (datesWithDates.length === 0) {
+    console.log('Date Range: No records with hearing dates');
+    return;
+  }
+
+  // Already sorted DESC, so first is furthest future, last is earliest
+  const furthestFuture = new Date(datesWithDates[0].hearing_date).toISOString().split('T')[0];
+  const earliest = new Date(datesWithDates[datesWithDates.length - 1].hearing_date).toISOString().split('T')[0];
+  const noDateCount = records.length - datesWithDates.length;
+
+  console.log(`\nPriority Date Range:`);
+  console.log(`  First (Furthest Future): ${furthestFuture}`);
+  console.log(`  Last (Earliest):         ${earliest}`);
+  if (noDateCount > 0) {
+    console.log(`  No Date (End of Queue):  ${noDateCount} records`);
+  }
+  console.log('');
+}
+
+/**
+ * v3.0: Invoke OCR extractor with rate limit (429) retry handling
+ *
+ * If OCR provider returns 429 (Too Many Requests):
+ * 1. Log the warning
+ * 2. Wait 2 seconds
+ * 3. Retry once
+ * 4. If still failing, skip to next record (don't crash)
+ *
+ * @param {Object} record - The summons record to process
+ * @param {boolean} healingMode - If true, allows re-OCR on partial records
+ * @returns {Object} Result with success/error status and rateLimitHit flag
+ */
+async function invokeOCRExtractorWithRetry(record, healingMode = false) {
+  const maxRetries = 1; // Retry once on 429
+  let lastError = null;
+  let rateLimitHit = false;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const payload = {
+        summons_id: record.id,
+        summons_number: record.summons_number,
+        pdf_link: record.summons_pdf_link,
+        video_link: record.video_link,
+        violation_date: record.violation_date,
+        synchronous: true,
+        healingMode: healingMode,
+      };
+
+      const params = {
+        FunctionName: DATA_EXTRACTOR_FUNCTION,
+        InvocationType: 'RequestResponse',
+        Payload: JSON.stringify(payload),
+      };
+
+      const result = await lambda.invoke(params).promise();
+      const response = JSON.parse(result.Payload);
+
+      // Check for rate limit (429)
+      if (response.statusCode === 429) {
+        rateLimitHit = true;
+        console.log(`  ⚠️ Rate limit (429) hit. Attempt ${attempt + 1}/${maxRetries + 1}`);
+
+        if (attempt < maxRetries) {
+          console.log(`  Waiting ${RATE_LIMIT_RETRY_DELAY_MS / 1000}s before retry...`);
+          await sleep(RATE_LIMIT_RETRY_DELAY_MS);
+          continue; // Retry
+        } else {
+          // Max retries reached, skip this record
+          return {
+            success: false,
+            error: 'Rate limit exceeded after retry',
+            rateLimitHit: true,
+          };
+        }
+      }
+
+      // Success case
+      if (response.statusCode === 200) {
+        const body = JSON.parse(response.body || '{}');
+        if (body.hasOCRData || body.skipped) {
+          return {
+            success: true,
+            skipped: body.skipped || false,
+            rateLimitHit,
+          };
+        } else {
+          return {
+            success: false,
+            error: body.message || 'No OCR data extracted',
+            rateLimitHit,
+          };
+        }
+      } else {
+        return {
+          success: false,
+          error: response.body || 'Unknown error',
+          rateLimitHit,
+        };
+      }
+    } catch (error) {
+      lastError = error;
+
+      // Check if this looks like a rate limit from the error message
+      if (error.message && error.message.includes('429')) {
+        rateLimitHit = true;
+        if (attempt < maxRetries) {
+          console.log(`  ⚠️ Rate limit error. Waiting ${RATE_LIMIT_RETRY_DELAY_MS / 1000}s before retry...`);
+          await sleep(RATE_LIMIT_RETRY_DELAY_MS);
+          continue;
+        }
+      }
+    }
+  }
+
+  return {
+    success: false,
+    error: lastError ? lastError.message : 'Unknown error',
+    rateLimitHit,
+  };
+}
+
+// ============================================================================
+// v3.0: EXPORTED FUNCTIONS FOR TESTING
+// ============================================================================
+
+/**
+ * v3.0: Export key functions for unit testing
+ *
+ * These functions can be imported by the verification script to test
+ * the priority sorting and self-healing logic without running a full sweep.
+ */
+module.exports.testExports = {
+  sortByHearingDateDescending,
+  isMissingCriticalFields,
+  isRecordNeedingRepair,
+  getMissingFields,
+  HEARING_DATE_FLOOR,
+  // v3.1: Export for testing orphaned record detection
+  fetchOCRQueueWithSelfHealing: null, // Set at runtime for testing
+};
