@@ -164,7 +164,7 @@ export const theme = createTheme({
       'Arial',
       'sans-serif',
     ].join(','),
-    // Display headings - High impact
+    // Display headings - Optical weight hierarchy
     h1: {
       fontSize: '2.5rem',
       fontWeight: 700,
@@ -173,28 +173,28 @@ export const theme = createTheme({
     },
     h2: {
       fontSize: '2rem',
-      fontWeight: 700,
+      fontWeight: 600,
       lineHeight: 1.3,
       letterSpacing: '-0.01em',
     },
     h3: {
-      fontSize: '1.75rem',
+      fontSize: '1.5rem',  // 24px - Page titles
       fontWeight: 600,
       lineHeight: 1.4,
     },
     h4: {
-      fontSize: '1.5rem',
+      fontSize: '1.25rem', // 20px - Section titles
       fontWeight: 600,
       lineHeight: 1.4,
     },
     h5: {
-      fontSize: '1.25rem',
-      fontWeight: 600,
+      fontSize: '1.125rem', // 18px - Subsection titles
+      fontWeight: 500,
       lineHeight: 1.5,
     },
     h6: {
-      fontSize: '1rem',
-      fontWeight: 600,
+      fontSize: '1rem',  // 16px - Minor headings
+      fontWeight: 500,
       lineHeight: 1.5,
     },
     // Subtitles
@@ -275,7 +275,7 @@ export const theme = createTheme({
         root: {
           borderRadius: 10,
           padding: '8px 20px',
-          fontWeight: 600,
+          fontWeight: 500, // Reduced from 600 for better hierarchy
           transition: 'all 0.2s ease-in-out',
         },
         contained: {
@@ -349,7 +349,7 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           borderRadius: 8,
-          fontWeight: 600,
+          fontWeight: 500, // Reduced from 600 for better hierarchy
           transition: 'all 0.2s ease',
           '&:hover': {
             transform: 'scale(1.02)',
@@ -576,7 +576,7 @@ export const theme = createTheme({
         root: {
           borderRadius: 10,
           textTransform: 'none',
-          fontWeight: 600,
+          fontWeight: 500, // Reduced from 600 for better hierarchy
           transition: 'all 0.2s ease',
           '&.Mui-selected': {
             backgroundColor: palette.primary.main,
@@ -601,7 +601,7 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           textTransform: 'none',
-          fontWeight: 600,
+          fontWeight: 500, // Reduced from 600 for better hierarchy
           fontSize: '0.9rem',
           minHeight: 48,
         },
@@ -641,12 +641,14 @@ export const dataGridPremiumStyles = {
     },
   },
   '& .MuiDataGrid-columnHeaderTitle': {
-    fontWeight: 600,
+    fontWeight: 600, // Column headers: 14px bold
     color: palette.text.primary,
-    fontSize: '0.875rem',
+    fontSize: '0.875rem', // 14px
   },
   '& .MuiDataGrid-cell': {
     borderBottom: `1px solid ${palette.grey[100]}`,
+    fontSize: '0.875rem', // 14px - Row text: regular weight
+    fontWeight: 400, // Regular weight for row text
     '&:focus, &:focus-within': {
       outline: 'none',
     },
