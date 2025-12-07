@@ -362,7 +362,7 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
         >
           <TodayIcon sx={{ color: 'primary.main', fontSize: 22 }} />
         </Box>
-        <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary' }}>
+        <Typography variant="h5" sx={{ fontWeight: 600, color: 'text.primary' }}>
           Hearing Docket
         </Typography>
       </Box>
