@@ -659,35 +659,69 @@ const CalendarDashboard: React.FC = () => {
   const getAllActivityLogs = useMemo((): AuditLogEntry[] => {
     const allLogs: AuditLogEntry[] = [];
 
+    // Debug: Count summonses with activity_log
+    const withActivityLog = summonses.filter(s => s.activity_log);
+    console.log(`[Audit Trail] Total summonses: ${summonses.length}, with activity_log: ${withActivityLog.length}`);
+
+    // Debug: Sample the first few with activity_log
+    if (withActivityLog.length > 0) {
+      withActivityLog.slice(0, 3).forEach((sample, i) => {
+        console.log(`[Audit Trail] Sample ${i + 1} (${sample.summons_number}):`, {
+          type: typeof sample.activity_log,
+          isArray: Array.isArray(sample.activity_log),
+          value: sample.activity_log
+        });
+      });
+    }
+
     summonses.forEach((summons) => {
       if (!summons.activity_log) return;
 
-      // Parse activity_log if it's a JSON string (AWSJSON from DynamoDB)
+      // Handle different formats that activity_log might come in
       let activityLog: ActivityLogEntry[] = [];
+
       if (typeof summons.activity_log === 'string') {
+        // AWSJSON comes as string - parse it
         try {
           activityLog = JSON.parse(summons.activity_log);
         } catch {
-          console.warn(`Failed to parse activity_log for summons ${summons.summons_number}`);
+          console.warn(`Failed to parse activity_log string for summons ${summons.summons_number}`);
           return;
         }
       } else if (Array.isArray(summons.activity_log)) {
+        // Already an array (Amplify DataStore or parsed by GraphQL)
         activityLog = summons.activity_log;
+      } else if (typeof summons.activity_log === 'object' && summons.activity_log !== null) {
+        // Might be an object with nested structure
+        console.warn(`[Audit Trail] Object format for ${summons.summons_number}:`, summons.activity_log);
+        // Try to extract if it has an array inside
+        const obj = summons.activity_log as Record<string, unknown>;
+        if (Array.isArray(obj.L)) {
+          activityLog = obj.L as ActivityLogEntry[];
+        } else if (Array.isArray(obj.items)) {
+          activityLog = obj.items as ActivityLogEntry[];
+        }
+      } else {
+        console.warn(`[Audit Trail] Unknown format for ${summons.summons_number}:`, typeof summons.activity_log);
+        return;
       }
 
       // Add each entry with summons context
       activityLog.forEach((entry) => {
-        allLogs.push({
-          ...entry,
-          summons_number: summons.summons_number,
-          respondent_name: summons.respondent_name || 'Unknown',
-        });
+        if (entry && entry.type && entry.date) {
+          allLogs.push({
+            ...entry,
+            summons_number: summons.summons_number,
+            respondent_name: summons.respondent_name || 'Unknown',
+          });
+        }
       });
     });
 
     // Sort by date, most recent first (All Time view)
     allLogs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
+    console.log(`[Audit Trail] Total log entries before filter: ${allLogs.length}`);
     return allLogs;
   }, [summonses]);
 
