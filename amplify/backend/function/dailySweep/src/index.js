@@ -58,7 +58,7 @@ const NYC_API_URL = 'https://data.cityofnewyork.us/resource/jz4z-kudi.json';
 
 // Priority Queue Configuration
 const MAX_OCR_REQUESTS_PER_DAY = 500;
-const OCR_THROTTLE_MS = 2000; // 2 seconds between requests
+const OCR_THROTTLE_MS = 5000; // 5 seconds between requests (increased from 2 to avoid NYC server rate limits)
 const MAX_OCR_FAILURES = 3; // Max retry attempts before giving up
 const GHOST_GRACE_DAYS = 3; // Days before archiving missing records
 
