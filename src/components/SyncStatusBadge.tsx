@@ -223,8 +223,26 @@ const SyncStatusBadge: React.FC = () => {
         sx={{
           cursor: 'pointer',
           fontWeight: 500,
+          // Ensure visibility on dark header background
+          bgcolor: level === 'fresh' ? 'success.main'
+            : level === 'stale' ? 'warning.main'
+            : level === 'failed' ? 'error.main'
+            : level === 'syncing' ? 'info.main'
+            : 'grey.600',
+          color: '#FFFFFF !important',
+          '& .MuiChip-label': {
+            color: '#FFFFFF',
+          },
+          '& .MuiChip-icon': {
+            color: '#FFFFFF',
+          },
           '&:hover': {
             opacity: 0.9,
+            bgcolor: level === 'fresh' ? 'success.dark'
+              : level === 'stale' ? 'warning.dark'
+              : level === 'failed' ? 'error.dark'
+              : level === 'syncing' ? 'info.dark'
+              : 'grey.700',
           },
         }}
       />

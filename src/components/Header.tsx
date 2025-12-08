@@ -1,9 +1,10 @@
-import { AppBar, Toolbar, Typography, Button, Box, IconButton, Menu, MenuItem } from '@mui/material';
+import { AppBar, Toolbar, Typography, Button, Box, IconButton, Menu, MenuItem, Divider } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import MenuIcon from '@mui/icons-material/Menu';
+import GavelIcon from '@mui/icons-material/Gavel';
 import SyncStatusBadge from './SyncStatusBadge';
 
 const Header = () => {
@@ -48,44 +49,88 @@ const Header = () => {
       position="sticky"
       elevation={0}
       sx={{
-        // Royal Blue gradient header - Arthur's mental model
-        background: (theme) =>
-          `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
-        borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+        // Professional neutral dark header
+        background: '#1C2536',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.12)',
         color: '#FFFFFF',
       }}
     >
-      <Toolbar>
-        <Typography
-          variant="h6"
-          component="div"
+      <Toolbar sx={{ gap: 1 }}>
+        {/* Brand Logo & Title */}
+        <Box
           sx={{
-            flexGrow: 0,
-            mr: 4,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
             cursor: 'pointer',
-            fontWeight: 700,
-            color: '#FFFFFF',
-            letterSpacing: '-0.01em',
+            mr: 3,
+            py: 0.5,
+            px: 1.5,
+            borderRadius: 2,
+            transition: 'background-color 0.2s',
+            '&:hover': {
+              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+            },
           }}
           onClick={() => navigate('/dashboard')}
         >
-          NYC OATH Tracker
-        </Typography>
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 36,
+              height: 36,
+              borderRadius: '8px',
+              backgroundColor: 'rgba(255, 255, 255, 0.2)',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+            }}
+          >
+            <GavelIcon sx={{ fontSize: 22, color: '#FFFFFF' }} />
+          </Box>
+          <Typography
+            variant="h6"
+            component="div"
+            sx={{
+              fontWeight: 700,
+              color: '#FFFFFF',
+              letterSpacing: '-0.01em',
+              display: { xs: 'none', sm: 'block' },
+            }}
+          >
+            NYC OATH Tracker
+          </Typography>
+        </Box>
+
+        {/* Divider */}
+        <Divider
+          orientation="vertical"
+          flexItem
+          sx={{
+            borderColor: 'rgba(255, 255, 255, 0.2)',
+            display: { xs: 'none', md: 'block' },
+            mx: 1,
+          }}
+        />
 
         {/* Desktop Navigation */}
-        <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, gap: 1 }}>
+        <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, gap: 1.5, ml: 1 }}>
           <Button
             onClick={() => handleNavigate('/dashboard')}
             sx={{
               fontWeight: 600,
               color: '#FFFFFF',
               backgroundColor: isActive('/dashboard')
-                ? 'rgba(255, 255, 255, 0.15)'
+                ? 'rgba(255, 255, 255, 0.18)'
                 : 'transparent',
               borderRadius: 2,
-              px: 2,
+              px: 2.5,
+              py: 1,
+              textTransform: 'none',
+              fontSize: '0.95rem',
               '&:hover': {
-                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                backgroundColor: 'rgba(255, 255, 255, 0.25)',
               },
             }}
           >
@@ -97,12 +142,15 @@ const Header = () => {
               fontWeight: 600,
               color: '#FFFFFF',
               backgroundColor: location.pathname.startsWith('/clients')
-                ? 'rgba(255, 255, 255, 0.15)'
+                ? 'rgba(255, 255, 255, 0.18)'
                 : 'transparent',
               borderRadius: 2,
-              px: 2,
+              px: 2.5,
+              py: 1,
+              textTransform: 'none',
+              fontSize: '0.95rem',
               '&:hover': {
-                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                backgroundColor: 'rgba(255, 255, 255, 0.25)',
               },
             }}
           >
@@ -129,10 +177,8 @@ const Header = () => {
           </Menu>
         </Box>
 
-        {/* Sync Status Badge - Shows daily sweep freshness */}
-        <Box sx={{ display: { xs: 'none', sm: 'flex' }, mr: 1 }}>
-          <SyncStatusBadge />
-        </Box>
+        {/* Sync Status Badge - Shows when last daily sweep ran */}
+        <SyncStatusBadge />
 
         {/* Account Menu */}
         <Box>

@@ -1,25 +1,14 @@
 /**
  * Client Detail View (/clients/:id)
  *
- * Implements the "Clio View" - comprehensive case history for a single client.
- * This is the core solution to Arthur's "Only 4 visible" problem.
- *
- * Features:
- * - Header Stats: Total Summonses, Active Open, Total Due
- * - AKA Display: Shows all aliases included in the view
- * - Master History Grid: Full-width DataGrid with SERVER-SIDE PAGINATION
- * - Default Filter: Show only cases with hearing_date >= 2022-01-01
- * - Toggle: "Show Historical" loads pre-2022 data
- * - Row click opens SummonsDetailModal (reused, not duplicated)
- *
- * CRITICAL: Uses cursor-based pagination (nextToken) - NOT client-side slicing
- * This ensures access to ALL records (5,000+) without arbitrary caps.
+ * Enterprise Data Grid - Comprehensive case history for a single client.
+ * Redesigned with professional aesthetics following financial ledger patterns.
  *
  * @module pages/ClientDetail
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
@@ -34,11 +23,12 @@ import {
   Button,
   CircularProgress,
   Alert,
-  Switch,
-  FormControlLabel,
   IconButton,
   Tooltip,
   LinearProgress,
+  Breadcrumbs,
+  Link,
+  alpha,
 } from '@mui/material';
 import {
   DataGrid,
@@ -47,22 +37,21 @@ import {
   GridRowParams,
   GridSortModel,
 } from '@mui/x-data-grid';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import BusinessIcon from '@mui/icons-material/Business';
-import WarningIcon from '@mui/icons-material/Warning';
-import HistoryIcon from '@mui/icons-material/History';
+import NavigateNextIcon from '@mui/icons-material/NavigateNext';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import ReceiptIcon from '@mui/icons-material/Receipt';
-import DownloadIcon from '@mui/icons-material/Download';
-import FiberNewIcon from '@mui/icons-material/FiberNew';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
+import GavelIcon from '@mui/icons-material/Gavel';
+import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { generateClient } from 'aws-amplify/api';
 
 import { getClient, listSummons } from '../graphql/queries';
 import { updateSummons } from '../graphql/mutations';
-import { Client, Summons, getStatusColor, isNewRecord, isUpdatedRecord } from '../types/summons';
+import { Client, Summons, isNewRecord, isUpdatedRecord } from '../types/summons';
 import SummonsDetailModal from '../components/SummonsDetailModal';
 import ExportConfigurationModal from '../components/ExportConfigurationModal';
 import { useCSVExport } from '../hooks/useCSVExport';
@@ -86,16 +75,6 @@ const IDLING_FILTER_KEYWORDS = ['IDLING', 'IDLE'];
 function isIdlingViolation(summons: Summons): boolean {
   const codeDesc = (summons.code_description || '').toUpperCase();
   return IDLING_FILTER_KEYWORDS.some((keyword) => codeDesc.includes(keyword));
-}
-
-/**
- * Calculate lag/wait time between violation date and hearing date
- */
-function calculateLagDays(violationDate: string | undefined, hearingDate: string | undefined): number | null {
-  if (!violationDate || !hearingDate) return null;
-  const violation = dayjs(violationDate);
-  const hearing = dayjs(hearingDate);
-  return hearing.diff(violation, 'day');
 }
 
 /**
@@ -135,11 +114,10 @@ const ClientDetail: React.FC = () => {
     pageSize: 50,
   });
   const [nextToken, setNextToken] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(true);
+  const [, setHasMore] = useState(true);
   const [allDataLoaded, setAllDataLoaded] = useState(false);
 
-  // Filter State
-  const [showHistorical, setShowHistorical] = useState(false);
+  // Sort State
   const [sortModel, setSortModel] = useState<GridSortModel>([
     { field: 'hearing_date', sort: 'desc' },
   ]);
@@ -276,18 +254,14 @@ const ClientDetail: React.FC = () => {
   }, [client]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
-   * Filter summonses based on historical toggle
+   * Filter summonses to Active Era (2022+) only
    */
   const filteredSummonses = useMemo(() => {
-    if (showHistorical) {
-      return summonses; // Show all records
-    }
-    // Filter to Active Era (2022+)
     return summonses.filter((s) => {
       if (!s.hearing_date) return true; // Include records without hearing date
       return new Date(s.hearing_date) >= new Date(PRE_2022_CUTOFF);
     });
-  }, [summonses, showHistorical]);
+  }, [summonses]);
 
   /**
    * Calculate header stats
@@ -333,7 +307,6 @@ const ClientDetail: React.FC = () => {
       openCases: openCases.length,
       criticalCases: criticalCases.length,
       totalDue: openCases.reduce((sum, s) => sum + (s.amount_due || 0), 0),
-      historicalCount: summonses.length - activeEraSummonses.length,
     };
   }, [summonses]);
 
@@ -362,21 +335,46 @@ const ClientDetail: React.FC = () => {
   }, []);
 
   /**
-   * DataGrid columns - Strict order per spec
+   * Get enterprise-style status chip styling
+   * Uses outlined for neutral states, soft filled for active states
+   */
+  const getEnterpriseStatusStyle = (status: string) => {
+    const upperStatus = (status || '').toUpperCase();
+
+    // Paid in Full - Soft Green
+    if (upperStatus.includes('PAID') || upperStatus.includes('SETTLED')) {
+      return { bgcolor: 'success.light', color: 'success.dark', variant: 'filled' as const };
+    }
+    // Default/Docketed - Soft Red (dangerous)
+    if (upperStatus.includes('DEFAULT') || upperStatus.includes('JUDGMENT') ||
+        upperStatus.includes('DOCKETED') || upperStatus.includes('VIOLATION')) {
+      return { bgcolor: 'error.light', color: 'error.dark', variant: 'filled' as const };
+    }
+    // Rescheduled/Adjourned - Soft Blue
+    if (upperStatus.includes('RESCHEDULE') || upperStatus.includes('ADJOURN')) {
+      return { bgcolor: 'info.light', color: 'info.dark', variant: 'filled' as const };
+    }
+    // New Issuance/Pending - Outlined Grey (neutral)
+    return { variant: 'outlined' as const, color: 'default' as const };
+  };
+
+  /**
+   * DataGrid columns - Enterprise Data Grid Style
    */
   const columns: GridColDef[] = useMemo(() => [
     {
       field: 'status',
       headerName: 'Status',
-      width: 220,
+      width: 200,
       renderCell: (params) => {
         const summons = params.row as Summons;
         const isNew = isNewRecord(summons);
         const isUpdated = isUpdatedRecord(summons);
+        const statusStyle = getEnterpriseStatusStyle(params.value);
 
-        // Build tooltip content for UPDATED badge - only show if we have actual change data
+        // Build tooltip content for UPDATED badge
         const changeTooltip = summons.last_change_summary
-          ? `Change: ${summons.last_change_summary} (${formatChangeDate(summons.last_change_at)})`
+          ? `${summons.last_change_summary} (${formatChangeDate(summons.last_change_at)})`
           : `Updated: ${formatChangeDate(summons.last_change_at)}`;
 
         return (
@@ -385,10 +383,14 @@ const ClientDetail: React.FC = () => {
             {isNew && (
               <Chip
                 label="NEW"
-                icon={<FiberNewIcon />}
-                color="info"
                 size="small"
-                sx={{ fontWeight: 'bold', fontSize: '0.65rem' }}
+                sx={{
+                  height: 20,
+                  fontSize: '0.65rem',
+                  fontWeight: 600,
+                  bgcolor: 'info.main',
+                  color: '#fff',
+                }}
               />
             )}
 
@@ -396,21 +398,41 @@ const ClientDetail: React.FC = () => {
             {isUpdated && !isNew && (
               <Tooltip title={changeTooltip} arrow placement="top">
                 <Chip
-                  label="UPDATED"
-                  color="warning"
+                  label="UPD"
                   size="small"
-                  sx={{ fontWeight: 'bold', fontSize: '0.65rem', cursor: 'help' }}
+                  sx={{
+                    height: 20,
+                    fontSize: '0.65rem',
+                    fontWeight: 600,
+                    bgcolor: 'warning.main',
+                    color: '#fff',
+                    cursor: 'help',
+                  }}
                 />
               </Tooltip>
             )}
 
-            {/* Status Chip */}
-            <Chip
-              label={params.value || 'Unknown'}
-              color={getStatusColor(params.value)}
-              size="small"
-              sx={{ fontWeight: 500 }}
-            />
+            {/* Status Chip - Enterprise Style */}
+            {statusStyle.variant === 'outlined' ? (
+              <Chip
+                label={params.value || 'Unknown'}
+                variant="outlined"
+                size="small"
+                sx={{ height: 22, fontSize: '0.7rem', fontWeight: 500 }}
+              />
+            ) : (
+              <Chip
+                label={params.value || 'Unknown'}
+                size="small"
+                sx={{
+                  height: 22,
+                  fontSize: '0.7rem',
+                  fontWeight: 500,
+                  bgcolor: statusStyle.bgcolor,
+                  color: statusStyle.color,
+                }}
+              />
+            )}
           </Box>
         );
       },
@@ -418,35 +440,30 @@ const ClientDetail: React.FC = () => {
     {
       field: 'summons_number',
       headerName: 'Summons #',
-      width: 150,
+      width: 140,
       renderCell: (params) => (
-        <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 500 }}>
+        <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 500, color: 'text.primary' }}>
           {params.value}
         </Typography>
       ),
     },
     {
       field: 'violation_date',
-      headerName: 'Violation Date',
-      width: 130,
-      // Use dayjs.utc() to parse date-only fields correctly without timezone shift
-      valueFormatter: (params) => params.value ? dayjs.utc(params.value).format('MM/DD/YYYY') : '—',
+      headerName: 'Violation',
+      width: 110,
+      valueFormatter: (params) => params.value ? dayjs.utc(params.value).format('MM/DD/YY') : '—',
     },
     {
       field: 'hearing_date',
-      headerName: 'Hearing Date',
-      width: 130,
+      headerName: 'Hearing',
+      width: 120,
       renderCell: (params) => {
-        if (!params.value) return '—';
-        // Use UTC parsing to get the correct date without timezone shift
+        if (!params.value) return <Typography variant="body2" color="text.disabled">—</Typography>;
         const hearingDateUtc = dayjs.utc(params.value);
         const now = dayjs();
         const daysUntil = hearingDateUtc.diff(now.startOf('day'), 'day');
-        // Skip past dates for critical indicator
         const isPast = daysUntil < 0;
-        // Critical: within 7 calendar days (matches CalendarDashboard exactly)
         const isImminentDeadline = !isPast && daysUntil <= 7;
-        // Also check for dangerous status
         const summons = params.row as Summons;
         const status = (summons.status || '').toUpperCase();
         const isDangerStatus =
@@ -457,9 +474,11 @@ const ClientDetail: React.FC = () => {
         const isCritical = !isPast && (isImminentDeadline || isDangerStatus);
         return (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <Typography variant="body2">{hearingDateUtc.format('MM/DD/YYYY')}</Typography>
+            <Typography variant="body2" sx={{ color: isCritical ? 'warning.dark' : 'text.primary' }}>
+              {hearingDateUtc.format('MM/DD/YY')}
+            </Typography>
             {isCritical && (
-              <WarningIcon sx={{ fontSize: 16, color: 'error.main' }} />
+              <WarningAmberIcon sx={{ fontSize: 14, color: 'warning.main' }} />
             )}
           </Box>
         );
@@ -467,40 +486,29 @@ const ClientDetail: React.FC = () => {
     },
     {
       field: 'license_plate',
-      headerName: 'License Plate',
-      width: 120,
-      valueGetter: (params) => params.row.license_plate_ocr || params.row.license_plate || '—',
-    },
-    {
-      field: 'lag_days',
-      headerName: 'Wait/Lag',
+      headerName: 'Plate',
       width: 100,
-      valueGetter: (params) => calculateLagDays(params.row.violation_date, params.row.hearing_date),
-      renderCell: (params) => {
-        const days = params.value;
-        if (days === null) return '—';
-        return (
-          <Chip
-            label={`${days}d`}
-            size="small"
-            color={days > 60 ? 'warning' : 'default'}
-            variant="outlined"
-          />
-        );
-      },
+      renderCell: (params) => (
+        <Typography variant="body2" color="text.secondary">
+          {params.row.license_plate_ocr || params.row.license_plate || '—'}
+        </Typography>
+      ),
     },
     {
       field: 'amount_due',
-      headerName: 'Amount Due',
-      width: 110,
+      headerName: 'Due',
+      width: 100,
+      align: 'right',
+      headerAlign: 'right',
       renderCell: (params) => {
         const amount = params.value || 0;
         return (
           <Typography
             variant="body2"
             sx={{
-              fontWeight: amount > 0 ? 600 : 400,
-              color: amount > 0 ? 'error.main' : 'success.main',
+              fontWeight: 500,
+              fontFamily: 'monospace',
+              color: amount > 0 ? 'text.primary' : 'success.main',
             }}
           >
             ${amount.toLocaleString()}
@@ -508,28 +516,31 @@ const ClientDetail: React.FC = () => {
         );
       },
     },
-    // Hidden columns (available via column visibility toggle)
     {
       field: 'evidence_reviewed',
       headerName: 'Evidence',
-      width: 90,
+      width: 80,
+      align: 'center',
+      headerAlign: 'center',
       renderCell: (params) => (
         params.value ? (
-          <CheckCircleIcon sx={{ color: 'success.main', fontSize: 20 }} />
+          <CheckCircleOutlineIcon sx={{ color: 'success.main', fontSize: 18 }} />
         ) : (
-          <Box sx={{ width: 20, height: 20, borderRadius: '50%', border: '2px solid', borderColor: 'grey.400' }} />
+          <Box sx={{ width: 16, height: 16, borderRadius: '50%', border: '1.5px solid', borderColor: 'grey.300' }} />
         )
       ),
     },
     {
       field: 'is_invoiced',
       headerName: 'Invoiced',
-      width: 90,
+      width: 80,
+      align: 'center',
+      headerAlign: 'center',
       renderCell: (params) => (
         params.value ? (
-          <ReceiptIcon sx={{ color: 'success.main', fontSize: 20 }} />
+          <ReceiptLongIcon sx={{ color: 'success.main', fontSize: 18 }} />
         ) : (
-          <Box sx={{ width: 20, height: 20, borderRadius: '50%', border: '2px solid', borderColor: 'grey.400' }} />
+          <Box sx={{ width: 16, height: 16, borderRadius: '50%', border: '1.5px solid', borderColor: 'grey.300' }} />
         )
       ),
     },
@@ -597,7 +608,7 @@ const ClientDetail: React.FC = () => {
   if (loading && !client) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
-        <CircularProgress size={60} />
+        <CircularProgress size={48} />
       </Box>
     );
   }
@@ -605,10 +616,10 @@ const ClientDetail: React.FC = () => {
   if (!client) {
     return (
       <Box sx={{ textAlign: 'center', py: 8 }}>
-        <Typography variant="h6" color="error">
+        <Typography variant="subtitle1" color="text.secondary">
           Client not found
         </Typography>
-        <Button onClick={() => navigate('/clients')} sx={{ mt: 2 }}>
+        <Button onClick={() => navigate('/clients')} sx={{ mt: 2 }} size="small">
           Back to Clients
         </Button>
       </Box>
@@ -616,89 +627,183 @@ const ClientDetail: React.FC = () => {
   }
 
   return (
-    <Box>
-      {/* Back Navigation */}
-      <Button
-        startIcon={<ArrowBackIcon />}
-        onClick={() => navigate('/clients')}
-        sx={{ mb: 2 }}
+    <Box sx={{ pt: 1 }}>
+      {/* Breadcrumbs Navigation */}
+      <Breadcrumbs
+        separator={<NavigateNextIcon fontSize="small" />}
+        sx={{ mb: 3 }}
       >
-        Back to Clients
-      </Button>
+        <Link
+          component={RouterLink}
+          to="/clients"
+          underline="hover"
+          color="inherit"
+          sx={{ display: 'flex', alignItems: 'center', fontSize: '0.875rem' }}
+        >
+          Clients
+        </Link>
+        <Typography color="text.primary" sx={{ fontSize: '0.875rem', fontWeight: 500 }}>
+          {client.name}
+        </Typography>
+      </Breadcrumbs>
 
-      {/* Client Header */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Grid container spacing={3} alignItems="center">
-          {/* Client Name & AKAs */}
-          <Grid item xs={12} md={6}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <BusinessIcon sx={{ fontSize: 40, color: 'primary.main' }} />
-              <Box sx={{ flexGrow: 1 }}>
-                <Typography variant="h4" sx={{ fontWeight: 700 }}>
-                  {client.name}
-                </Typography>
-                {client.akas && client.akas.length > 0 && (
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                    Includes records for: {client.akas.join(', ')}
-                  </Typography>
-                )}
-              </Box>
-              {/* Export Button */}
-              <Button
-                variant="outlined"
-                startIcon={<DownloadIcon />}
-                onClick={() => setExportModalOpen(true)}
-                disabled={summonses.length === 0}
+      {/* Client Header Card - Enterprise Style */}
+      <Paper
+        variant="outlined"
+        sx={{
+          p: 3,
+          mb: 4,
+          borderRadius: 2,
+          borderColor: 'divider',
+        }}
+      >
+        {/* Top Row: Client Name & Export */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
+          <Box>
+            <Typography variant="h5" sx={{ fontWeight: 600, color: 'text.primary', mb: 0.5 }}>
+              {client.name}
+            </Typography>
+            {client.akas && client.akas.length > 0 && (
+              <Typography variant="caption" color="text.secondary">
+                Also includes: {client.akas.join(', ')}
+              </Typography>
+            )}
+          </Box>
+          <Tooltip title="Download CSV export">
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<FileDownloadOutlinedIcon sx={{ fontSize: 18 }} />}
+              onClick={() => setExportModalOpen(true)}
+              disabled={summonses.length === 0}
+              sx={{
+                borderRadius: 2,
+                borderColor: 'divider',
+                color: 'text.secondary',
+                gap: 0.5,
+              }}
+            >
+              Export
+            </Button>
+          </Tooltip>
+        </Box>
+
+        {/* Metrics Grid - 4 columns */}
+        <Grid container spacing={3}>
+          <Grid item xs={6} sm={3}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box
+                sx={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 1.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  bgcolor: (theme) => alpha(theme.palette.primary.main, 0.08),
+                }}
               >
-                Export
-              </Button>
+                <DescriptionOutlinedIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+              </Box>
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+                  {stats.totalAllTime}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Total Records
+                </Typography>
+              </Box>
             </Box>
           </Grid>
-
-          {/* Stats */}
-          <Grid item xs={12} md={6}>
-            <Grid container spacing={2}>
-              <Grid item xs={4}>
-                <Box sx={{ textAlign: 'center' }}>
-                  <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>
-                    {stats.totalAllTime}
+          <Grid item xs={6} sm={3}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box
+                sx={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 1.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  bgcolor: (theme) => alpha(theme.palette.info.main, 0.08),
+                }}
+              >
+                <GavelIcon sx={{ color: 'info.main', fontSize: 20 }} />
+              </Box>
+              <Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+                    {stats.openCases}
                   </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Total Summonses
-                  </Typography>
+                  {stats.criticalCases > 0 && (
+                    <Chip
+                      label={stats.criticalCases}
+                      size="small"
+                      sx={{
+                        height: 18,
+                        fontSize: '0.65rem',
+                        fontWeight: 600,
+                        bgcolor: 'warning.main',
+                        color: '#fff',
+                      }}
+                    />
+                  )}
                 </Box>
-              </Grid>
-              <Grid item xs={4}>
-                <Box sx={{ textAlign: 'center' }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
-                    <Typography variant="h4" sx={{ fontWeight: 700, color: 'info.main' }}>
-                      {stats.openCases}
-                    </Typography>
-                    {stats.criticalCases > 0 && (
-                      <Chip
-                        label={stats.criticalCases}
-                        color="error"
-                        size="small"
-                        sx={{ fontWeight: 700 }}
-                      />
-                    )}
-                  </Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Active Open
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={4}>
-                <Box sx={{ textAlign: 'center' }}>
-                  <Typography variant="h4" sx={{ fontWeight: 700, color: 'error.main' }}>
-                    ${stats.totalDue.toLocaleString()}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Total Due
-                  </Typography>
-                </Box>
-              </Grid>
-            </Grid>
+                <Typography variant="caption" color="text.secondary">
+                  Active Open
+                </Typography>
+              </Box>
+            </Box>
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box
+                sx={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 1.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  bgcolor: (theme) => alpha(theme.palette.warning.main, 0.08),
+                }}
+              >
+                <ErrorOutlineIcon sx={{ color: 'warning.dark', fontSize: 20 }} />
+              </Box>
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+                  {stats.criticalCases}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Critical (7d)
+                </Typography>
+              </Box>
+            </Box>
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box
+                sx={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 1.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  bgcolor: (theme) => alpha(theme.palette.success.main, 0.08),
+                }}
+              >
+                <AccountBalanceWalletOutlinedIcon sx={{ color: 'success.main', fontSize: 20 }} />
+              </Box>
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+                  ${stats.totalDue.toLocaleString()}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Total Due
+                </Typography>
+              </Box>
+            </Box>
           </Grid>
         </Grid>
       </Paper>
@@ -709,72 +814,53 @@ const ClientDetail: React.FC = () => {
         </Alert>
       )}
 
-      {/* Master History Grid */}
-      <Paper sx={{ width: '100%' }}>
-        {/* Grid Header with Controls */}
-        <Box
-          sx={{
-            p: 2,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            borderBottom: 1,
-            borderColor: 'divider',
-          }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Case History
-            </Typography>
+      {/* Case History Section Divider */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'text.primary', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Case History
+          </Typography>
+          <Chip
+            label={`${filteredSummonses.length} records`}
+            size="small"
+            variant="outlined"
+            sx={{ height: 22, fontSize: '0.7rem' }}
+          />
+          {!allDataLoaded && (
             <Chip
-              label={`${filteredSummonses.length} records`}
+              label="Loading..."
               size="small"
-              color="primary"
               variant="outlined"
+              color="warning"
+              sx={{ height: 22, fontSize: '0.7rem' }}
             />
-            {!allDataLoaded && (
-              <Chip
-                label="Loading more..."
-                size="small"
-                color="warning"
-                variant="outlined"
-              />
-            )}
-          </Box>
-
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            {/* Historical Toggle */}
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={showHistorical}
-                  onChange={(e) => setShowHistorical(e.target.checked)}
-                  size="small"
-                />
-              }
-              label={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  {showHistorical ? <VisibilityIcon fontSize="small" /> : <VisibilityOffIcon fontSize="small" />}
-                  <Typography variant="body2">
-                    Show Historical ({stats.historicalCount} pre-2022)
-                  </Typography>
-                </Box>
-              }
-            />
-
-            {/* Refresh Button */}
-            <Tooltip title="Refresh data">
-              <IconButton onClick={() => loadSummonses(true)} disabled={loadingMore}>
-                <RefreshIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
+          )}
         </Box>
+        <Tooltip title="Refresh data">
+          <IconButton
+            size="small"
+            onClick={() => loadSummonses(true)}
+            disabled={loadingMore}
+            sx={{ color: 'text.secondary' }}
+          >
+            <RefreshIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      </Box>
 
-        {/* Loading indicator */}
-        {loadingMore && <LinearProgress />}
+      {/* Loading indicator */}
+      {loadingMore && <LinearProgress sx={{ mb: 1, borderRadius: 1 }} />}
 
-        {/* DataGrid with server-side pagination support */}
+      {/* Master History DataGrid - Enterprise Style */}
+      <Paper
+        variant="outlined"
+        sx={{
+          width: '100%',
+          borderRadius: 2,
+          borderColor: 'divider',
+          overflow: 'hidden',
+        }}
+      >
         <DataGrid
           rows={filteredSummonses}
           columns={columns}
@@ -791,30 +877,61 @@ const ClientDetail: React.FC = () => {
           autoHeight
           sx={{
             border: 0,
+            // Header row styling - Financial Ledger look
+            '& .MuiDataGrid-columnHeaders': {
+              bgcolor: 'grey.50',
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+              minHeight: '48px !important',
+            },
+            '& .MuiDataGrid-columnHeader': {
+              '&:focus, &:focus-within': { outline: 'none' },
+            },
+            '& .MuiDataGrid-columnHeaderTitle': {
+              fontWeight: 600,
+              fontSize: '0.7rem',
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              color: 'text.secondary',
+            },
+            // Row styling with hover
             '& .MuiDataGrid-row': {
               cursor: 'pointer',
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+              minHeight: '52px !important',
               '&:hover': {
-                backgroundColor: 'action.hover',
+                bgcolor: 'grey.50',
               },
             },
+            // Critical row styling - soft warning background
             '& .MuiDataGrid-row.critical-row': {
-              backgroundColor: 'error.light',
+              bgcolor: (theme) => alpha(theme.palette.warning.main, 0.08),
               '&:hover': {
-                backgroundColor: 'error.main',
-              },
-              '& .MuiDataGrid-cell': {
-                color: 'error.contrastText',
+                bgcolor: (theme) => alpha(theme.palette.warning.main, 0.12),
               },
             },
-            '& .MuiDataGrid-columnHeaders': {
-              backgroundColor: 'grey.100',
+            // Cell styling
+            '& .MuiDataGrid-cell': {
+              borderBottom: 'none',
+              '&:focus, &:focus-within': { outline: 'none' },
+            },
+            // Footer styling
+            '& .MuiDataGrid-footerContainer': {
+              borderTop: '1px solid',
+              borderColor: 'divider',
+              bgcolor: 'grey.50',
+            },
+            // Remove column separator
+            '& .MuiDataGrid-columnSeparator': {
+              display: 'none',
             },
           }}
           initialState={{
             columns: {
               columnVisibilityModel: {
-                evidence_reviewed: false,
-                is_invoiced: false,
+                evidence_reviewed: true,
+                is_invoiced: true,
               },
             },
           }}
@@ -825,20 +942,6 @@ const ClientDetail: React.FC = () => {
             },
           }}
         />
-
-        {/* Load More indicator for infinite scroll capability */}
-        {hasMore && !allDataLoaded && (
-          <Box sx={{ p: 2, textAlign: 'center' }}>
-            <Button
-              variant="outlined"
-              onClick={() => loadSummonses(false)}
-              disabled={loadingMore}
-              startIcon={loadingMore ? <CircularProgress size={16} /> : <HistoryIcon />}
-            >
-              {loadingMore ? 'Loading...' : 'Load More Records'}
-            </Button>
-          </Box>
-        )}
       </Paper>
 
       {/* Summons Detail Modal (REUSED - not duplicated) */}

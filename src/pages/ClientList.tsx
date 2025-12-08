@@ -1,12 +1,8 @@
 /**
  * Client List Page (/clients)
  *
- * Implements the "Practice Management" view similar to Clio.
- * Provides a high-level directory of all clients with:
- * - Searchable list/grid of Client Cards
- * - Active Case Count with critical badge
- * - Total Open Balance
- * - "View History" navigation to Client Detail
+ * Premium Enterprise UI - Practice Management View
+ * Redesigned with professional aesthetics following MUI soft palette principles.
  *
  * @module pages/ClientList
  */
@@ -18,19 +14,16 @@ import {
   Typography,
   TextField,
   Grid,
-  Card,
-  CardContent,
-  CardActions,
   Button,
   Chip,
   CircularProgress,
   InputAdornment,
   Paper,
-  Divider,
   Alert,
   ToggleButtonGroup,
   ToggleButton,
   Tooltip,
+  alpha,
 } from '@mui/material';
 import {
   DataGrid,
@@ -38,16 +31,17 @@ import {
   GridRowParams,
 } from '@mui/x-data-grid';
 import SearchIcon from '@mui/icons-material/Search';
-import BusinessIcon from '@mui/icons-material/Business';
-import HistoryIcon from '@mui/icons-material/History';
-import WarningIcon from '@mui/icons-material/Warning';
-import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import GavelIcon from '@mui/icons-material/Gavel';
 import SettingsIcon from '@mui/icons-material/Settings';
 import DownloadIcon from '@mui/icons-material/Download';
 import ViewModuleIcon from '@mui/icons-material/ViewModule';
 import ViewListIcon from '@mui/icons-material/ViewList';
-import UpdateIcon from '@mui/icons-material/Update';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import PeopleOutlineIcon from '@mui/icons-material/PeopleOutline';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import { generateClient } from 'aws-amplify/api';
 
 import { listClients, listSummons } from '../graphql/queries';
@@ -317,46 +311,44 @@ const ClientList: React.FC = () => {
   }, [clients.length, clientsWithStats]);
 
   /**
-   * DataGrid columns for list view
+   * DataGrid columns for list view - Premium Enterprise Style
    */
   const listViewColumns: GridColDef[] = useMemo(() => [
     {
       field: 'name',
-      headerName: 'Client Name',
+      headerName: 'Client',
       flex: 1,
       minWidth: 200,
       renderCell: (params) => (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <BusinessIcon sx={{ color: 'text.secondary', fontSize: 20 }} />
-          <Box>
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              {params.value}
+        <Box>
+          <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.primary' }}>
+            {params.value}
+          </Typography>
+          {params.row.akas && params.row.akas.length > 0 && (
+            <Typography variant="caption" color="text.disabled">
+              {params.row.akas.slice(0, 2).join(', ')}
+              {params.row.akas.length > 2 && ` +${params.row.akas.length - 2}`}
             </Typography>
-            {params.row.akas && params.row.akas.length > 0 && (
-              <Typography variant="caption" color="text.secondary">
-                AKA: {params.row.akas.slice(0, 2).join(', ')}
-                {params.row.akas.length > 2 && ` +${params.row.akas.length - 2}`}
-              </Typography>
-            )}
-          </Box>
+          )}
         </Box>
       ),
     },
     {
       field: 'activeCaseCount',
-      headerName: 'Active Cases',
-      width: 140,
+      headerName: 'Active',
+      width: 100,
       renderCell: (params) => (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
           <Chip
             label={params.value}
             size="small"
-            color={params.row.criticalCount > 0 ? 'error' : params.value > 0 ? 'primary' : 'default'}
-            sx={{ fontWeight: 600 }}
+            variant="outlined"
+            color={params.row.criticalCount > 0 ? 'warning' : params.value > 0 ? 'info' : 'default'}
+            sx={{ height: 22, fontSize: '0.75rem' }}
           />
           {params.row.criticalCount > 0 && (
-            <Tooltip title={`${params.row.criticalCount} critical case(s) within 7 days`}>
-              <WarningIcon sx={{ fontSize: 18, color: 'error.main' }} />
+            <Tooltip title={`${params.row.criticalCount} critical`}>
+              <WarningAmberIcon sx={{ fontSize: 16, color: 'warning.main' }} />
             </Tooltip>
           )}
         </Box>
@@ -365,31 +357,31 @@ const ClientList: React.FC = () => {
     {
       field: 'criticalCount',
       headerName: 'Critical',
-      width: 100,
+      width: 90,
       renderCell: (params) => (
         params.value > 0 ? (
           <Chip
-            icon={<WarningIcon sx={{ fontSize: 14 }} />}
             label={params.value}
             size="small"
-            color="error"
-            sx={{ fontWeight: 600 }}
+            variant="outlined"
+            color="warning"
+            sx={{ height: 22, fontSize: '0.75rem' }}
           />
         ) : (
-          <Typography variant="body2" color="text.secondary">—</Typography>
+          <Typography variant="body2" color="text.disabled">—</Typography>
         )
       ),
     },
     {
       field: 'totalOpenBalance',
-      headerName: 'Open Balance',
-      width: 130,
+      headerName: 'Balance',
+      width: 110,
       renderCell: (params) => (
         <Typography
           variant="body2"
           sx={{
-            fontWeight: 600,
-            color: params.value > 0 ? 'error.main' : 'success.main',
+            fontWeight: 500,
+            color: params.value > 0 ? 'text.primary' : 'success.main',
           }}
         >
           ${(params.value || 0).toLocaleString()}
@@ -397,49 +389,29 @@ const ClientList: React.FC = () => {
       ),
     },
     {
-      field: 'recentlyUpdatedCount',
-      headerName: 'Updated',
-      width: 100,
-      renderCell: (params) => (
-        params.value > 0 ? (
-          <Tooltip title={`${params.value} summons updated in last 72 hours`}>
-            <Chip
-              icon={<UpdateIcon sx={{ fontSize: 14 }} />}
-              label={params.value}
-              size="small"
-              color="warning"
-              sx={{ fontWeight: 600 }}
-            />
-          </Tooltip>
-        ) : (
-          <Typography variant="body2" color="text.secondary">—</Typography>
-        )
-      ),
-    },
-    {
       field: 'totalCases',
-      headerName: 'Total History',
-      width: 120,
+      headerName: 'History',
+      width: 90,
       renderCell: (params) => (
         <Typography variant="body2" color="text.secondary">
-          {params.value} cases
+          {params.value}
         </Typography>
       ),
     },
     {
       field: 'actions',
-      headerName: 'Actions',
-      width: 140,
+      headerName: '',
+      width: 100,
       sortable: false,
       renderCell: (params) => (
         <Button
-          variant="outlined"
           size="small"
-          startIcon={<HistoryIcon />}
+          endIcon={<ArrowForwardIcon sx={{ fontSize: 14 }} />}
           onClick={(e) => {
             e.stopPropagation();
             navigate(`/clients/${params.row.id}`);
           }}
+          sx={{ color: 'text.secondary', fontSize: '0.75rem' }}
         >
           View
         </Button>
@@ -484,7 +456,7 @@ const ClientList: React.FC = () => {
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
-        <CircularProgress size={60} />
+        <CircularProgress size={48} />
       </Box>
     );
   }
@@ -493,28 +465,27 @@ const ClientList: React.FC = () => {
     <Box>
       {/* Page Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Box>
-          <Typography variant="h4" sx={{ fontWeight: 600 }}>
-            Client Management
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Practice management view - {totals.totalClients} clients, {totals.totalActiveCases} active cases
-          </Typography>
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+        <Typography variant="h5" sx={{ fontWeight: 600, color: 'text.primary' }}>
+          Client Management
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 1.5 }}>
           <Button
             variant="outlined"
-            startIcon={<DownloadIcon />}
+            size="small"
+            startIcon={<DownloadIcon sx={{ fontSize: 18 }} />}
             onClick={() => setExportModalOpen(true)}
+            sx={{ borderColor: 'divider', color: 'text.secondary' }}
           >
-            Global Export
+            Export
           </Button>
           <Button
             variant="outlined"
-            startIcon={<SettingsIcon />}
+            size="small"
+            startIcon={<SettingsIcon sx={{ fontSize: 18 }} />}
             onClick={() => navigate('/manage-clients')}
+            sx={{ borderColor: 'divider', color: 'text.secondary' }}
           >
-            Manage Clients
+            Manage
           </Button>
         </Box>
       </Box>
@@ -525,65 +496,185 @@ const ClientList: React.FC = () => {
         </Alert>
       )}
 
-      {/* Summary Stats */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Grid container spacing={3}>
-          <Grid item xs={6} sm={3}>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>
+      {/* Metric Tiles - Distinct Paper components */}
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid item xs={6} sm={3}>
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 2.5,
+              borderRadius: 2,
+              borderColor: 'divider',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+            }}
+          >
+            <Box
+              sx={{
+                width: 48,
+                height: 48,
+                borderRadius: 2,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                bgcolor: (theme) => alpha(theme.palette.primary.main, 0.08),
+              }}
+            >
+              <PeopleOutlineIcon sx={{ color: 'primary.main', fontSize: 24 }} />
+            </Box>
+            <Box>
+              <Typography variant="h5" sx={{ fontWeight: 600, color: 'text.primary', lineHeight: 1.2 }}>
                 {totals.totalClients}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="caption" color="text.secondary">
                 Total Clients
               </Typography>
             </Box>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="h4" sx={{ fontWeight: 700, color: 'info.main' }}>
+          </Paper>
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 2.5,
+              borderRadius: 2,
+              borderColor: 'divider',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+            }}
+          >
+            <Box
+              sx={{
+                width: 48,
+                height: 48,
+                borderRadius: 2,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                bgcolor: (theme) => alpha(theme.palette.info.main, 0.08),
+              }}
+            >
+              <FolderOpenIcon sx={{ color: 'info.main', fontSize: 24 }} />
+            </Box>
+            <Box>
+              <Typography variant="h5" sx={{ fontWeight: 600, color: 'text.primary', lineHeight: 1.2 }}>
                 {totals.totalActiveCases}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="caption" color="text.secondary">
                 Active Cases
               </Typography>
             </Box>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="h4" sx={{ fontWeight: 700, color: 'error.main' }}>
+          </Paper>
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 2.5,
+              borderRadius: 2,
+              borderColor: totals.totalCritical > 0 ? 'warning.light' : 'divider',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+              bgcolor: totals.totalCritical > 0 ? (theme) => alpha(theme.palette.warning.main, 0.04) : 'background.paper',
+            }}
+          >
+            <Box
+              sx={{
+                width: 48,
+                height: 48,
+                borderRadius: 2,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                bgcolor: (theme) => alpha(theme.palette.warning.main, 0.12),
+              }}
+            >
+              <ErrorOutlineIcon sx={{ color: 'warning.dark', fontSize: 24 }} />
+            </Box>
+            <Box>
+              <Typography variant="h5" sx={{ fontWeight: 600, color: totals.totalCritical > 0 ? 'warning.dark' : 'text.primary', lineHeight: 1.2 }}>
                 {totals.totalCritical}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Critical (7 days)
+              <Typography variant="caption" color="text.secondary">
+                Critical Alerts
               </Typography>
             </Box>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="h4" sx={{ fontWeight: 700, color: 'success.main' }}>
+          </Paper>
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 2.5,
+              borderRadius: 2,
+              borderColor: 'divider',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+            }}
+          >
+            <Box
+              sx={{
+                width: 48,
+                height: 48,
+                borderRadius: 2,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                bgcolor: (theme) => alpha(theme.palette.success.main, 0.08),
+              }}
+            >
+              <AccountBalanceWalletIcon sx={{ color: 'success.main', fontSize: 24 }} />
+            </Box>
+            <Box>
+              <Typography variant="h5" sx={{ fontWeight: 600, color: 'text.primary', lineHeight: 1.2 }}>
                 ${totals.totalOpenBalance.toLocaleString()}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Total Open Balance
+              <Typography variant="caption" color="text.secondary">
+                Open Balance
               </Typography>
             </Box>
-          </Grid>
+          </Paper>
         </Grid>
-      </Paper>
+      </Grid>
 
-      {/* Search Bar and View Toggle */}
-      <Box sx={{ display: 'flex', gap: 2, mb: 3, alignItems: 'center' }}>
+      {/* Search Bar Section - Compact with integrated toggle */}
+      <Paper
+        variant="outlined"
+        sx={{
+          p: 1.5,
+          mb: 3,
+          borderRadius: 2,
+          borderColor: 'divider',
+          display: 'flex',
+          gap: 1.5,
+          alignItems: 'center',
+        }}
+      >
         <TextField
           fullWidth
+          size="small"
+          variant="outlined"
           placeholder="Search clients by name, AKA, or contact..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
-                <SearchIcon color="action" />
+                <SearchIcon sx={{ color: 'text.disabled', fontSize: 20 }} />
               </InputAdornment>
             ),
+          }}
+          sx={{
+            '& .MuiOutlinedInput-root': {
+              bgcolor: 'grey.50',
+              '& fieldset': { borderColor: 'transparent' },
+              '&:hover fieldset': { borderColor: 'divider' },
+              '&.Mui-focused fieldset': { borderColor: 'primary.main' },
+            },
           }}
         />
         <ToggleButtonGroup
@@ -591,131 +682,150 @@ const ClientList: React.FC = () => {
           exclusive
           onChange={(_, newValue) => newValue && setViewMode(newValue)}
           size="small"
+          sx={{
+            '& .MuiToggleButton-root': {
+              border: '1px solid',
+              borderColor: 'divider',
+              px: 1.5,
+            },
+          }}
         >
           <ToggleButton value="card">
-            <Tooltip title="Card View">
-              <ViewModuleIcon />
-            </Tooltip>
+            <ViewModuleIcon sx={{ fontSize: 20 }} />
           </ToggleButton>
           <ToggleButton value="list">
-            <Tooltip title="List View">
-              <ViewListIcon />
-            </Tooltip>
+            <ViewListIcon sx={{ fontSize: 20 }} />
           </ToggleButton>
         </ToggleButtonGroup>
-      </Box>
+      </Paper>
 
-      {/* Card View */}
+      {/* Section Title for Cards */}
+      <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 2, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        All Clients ({sortedClients.length})
+      </Typography>
+
+      {/* Card View - Premium Enterprise Style */}
       {viewMode === 'card' && (
-        <Grid container spacing={2}>
+        <Grid container spacing={3}>
           {sortedClients.map((client) => (
             <Grid item xs={12} sm={6} md={4} lg={3} key={client.id}>
-              <Card
+              <Paper
+                variant="outlined"
                 sx={{
                   height: '100%',
                   display: 'flex',
                   flexDirection: 'column',
-                  borderLeft: client.criticalCount > 0 ? 4 : 0,
-                  borderColor: 'error.main',
-                  transition: 'box-shadow 0.2s',
+                  borderRadius: 3,
+                  borderColor: client.criticalCount > 0 ? 'warning.light' : 'divider',
+                  transition: 'all 0.2s ease-in-out',
+                  cursor: 'pointer',
                   '&:hover': {
-                    boxShadow: 4,
+                    boxShadow: 2,
+                    borderColor: 'primary.main',
                   },
                 }}
+                onClick={() => navigate(`/clients/${client.id}`)}
               >
-                <CardContent sx={{ flexGrow: 1 }}>
+                {/* Card Content */}
+                <Box sx={{ p: 2.5, flexGrow: 1 }}>
                   {/* Client Name */}
-                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 1 }}>
-                    <BusinessIcon sx={{ color: 'text.secondary', mt: 0.5 }} />
-                    <Box sx={{ flexGrow: 1 }}>
-                      <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
-                        {client.name}
-                      </Typography>
-                      {client.akas && client.akas.length > 0 && (
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                          AKA: {client.akas.slice(0, 2).join(', ')}
-                          {client.akas.length > 2 && ` +${client.akas.length - 2} more`}
-                        </Typography>
-                      )}
-                    </Box>
-                  </Box>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'text.primary', mb: 0.5 }}>
+                    {client.name}
+                  </Typography>
+                  {client.akas && client.akas.length > 0 && (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+                      AKA: {client.akas.slice(0, 2).join(', ')}
+                      {client.akas.length > 2 && ` +${client.akas.length - 2}`}
+                    </Typography>
+                  )}
+                  {(!client.akas || client.akas.length === 0) && <Box sx={{ mb: 2 }} />}
 
-                  <Divider sx={{ my: 1.5 }} />
-
-                  {/* Stats */}
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    {/* Active Cases Badge */}
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <GavelIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                      <Typography variant="body2">Active Cases:</Typography>
-                      <Chip
-                        label={client.activeCaseCount}
-                        size="small"
-                        color={client.criticalCount > 0 ? 'error' : client.activeCaseCount > 0 ? 'primary' : 'default'}
-                        sx={{ fontWeight: 600 }}
-                      />
-                      {client.criticalCount > 0 && (
+                  {/* Stats Row */}
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                    {/* Active Cases */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <GavelIcon sx={{ fontSize: 16, color: 'text.disabled' }} />
+                        <Typography variant="body2" color="text.secondary">Active</Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                         <Chip
-                          icon={<WarningIcon sx={{ fontSize: 14 }} />}
-                          label={`${client.criticalCount} CRITICAL`}
+                          label={client.activeCaseCount}
                           size="small"
-                          color="error"
                           variant="outlined"
-                          sx={{ fontWeight: 600, fontSize: '0.7rem' }}
+                          color={client.criticalCount > 0 ? 'warning' : client.activeCaseCount > 0 ? 'info' : 'default'}
+                          sx={{ height: 22, fontSize: '0.75rem' }}
                         />
-                      )}
+                        {client.criticalCount > 0 && (
+                          <Tooltip title={`${client.criticalCount} critical case(s) within 7 days`}>
+                            <Chip
+                              icon={<WarningAmberIcon sx={{ fontSize: 12 }} />}
+                              label={client.criticalCount}
+                              size="small"
+                              variant="outlined"
+                              color="warning"
+                              sx={{ height: 22, fontSize: '0.7rem' }}
+                            />
+                          </Tooltip>
+                        )}
+                      </Box>
                     </Box>
 
-                    {/* Total Open Balance */}
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <AttachMoneyIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                      <Typography variant="body2">Open Balance:</Typography>
+                    {/* Open Balance */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Typography variant="body2" color="text.secondary">Balance</Typography>
                       <Typography
                         variant="body2"
                         sx={{
-                          fontWeight: 600,
-                          color: client.totalOpenBalance > 0 ? 'error.main' : 'success.main',
+                          fontWeight: 500,
+                          color: client.totalOpenBalance > 0 ? 'text.primary' : 'success.main',
                         }}
                       >
                         ${client.totalOpenBalance.toLocaleString()}
                       </Typography>
                     </Box>
 
-                    {/* Recently Updated */}
-                    {client.recentlyUpdatedCount > 0 && (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <UpdateIcon sx={{ fontSize: 18, color: 'warning.main' }} />
-                        <Typography variant="body2">Recently Updated:</Typography>
-                        <Chip
-                          label={`${client.recentlyUpdatedCount} summons`}
-                          size="small"
-                          color="warning"
-                          sx={{ fontWeight: 600, fontSize: '0.7rem' }}
-                        />
-                      </Box>
-                    )}
-
-                    {/* Total Cases */}
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <HistoryIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                    {/* Total History */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Typography variant="body2" color="text.secondary">History</Typography>
                       <Typography variant="body2" color="text.secondary">
-                        Total History: {client.totalCases} cases
+                        {client.totalCases} cases
                       </Typography>
                     </Box>
-                  </Box>
-                </CardContent>
 
-                <CardActions sx={{ px: 2, pb: 2 }}>
+                    {/* Recently Updated Badge */}
+                    {client.recentlyUpdatedCount > 0 && (
+                      <Chip
+                        label={`${client.recentlyUpdatedCount} updated`}
+                        size="small"
+                        variant="outlined"
+                        color="warning"
+                        sx={{ alignSelf: 'flex-start', height: 22, fontSize: '0.7rem' }}
+                      />
+                    )}
+                  </Box>
+                </Box>
+
+                {/* Card Footer - View Button */}
+                <Box sx={{ px: 2.5, pb: 2 }}>
                   <Button
-                    variant="contained"
+                    size="small"
                     fullWidth
-                    startIcon={<HistoryIcon />}
-                    onClick={() => navigate(`/clients/${client.id}`)}
+                    endIcon={<ArrowForwardIcon sx={{ fontSize: 16 }} />}
+                    sx={{
+                      justifyContent: 'space-between',
+                      color: 'text.secondary',
+                      bgcolor: 'grey.50',
+                      '&:hover': {
+                        bgcolor: 'grey.100',
+                        color: 'primary.main',
+                      },
+                    }}
                   >
-                    View History
+                    View Details
                   </Button>
-                </CardActions>
-              </Card>
+                </Box>
+              </Paper>
             </Grid>
           ))}
         </Grid>
@@ -723,7 +833,15 @@ const ClientList: React.FC = () => {
 
       {/* List View */}
       {viewMode === 'list' && (
-        <Paper sx={{ width: '100%' }}>
+        <Paper
+          variant="outlined"
+          sx={{
+            width: '100%',
+            borderRadius: 2,
+            borderColor: 'divider',
+            overflow: 'hidden',
+          }}
+        >
           <DataGrid
             rows={sortedClients}
             columns={listViewColumns}
@@ -740,20 +858,29 @@ const ClientList: React.FC = () => {
               '& .MuiDataGrid-row': {
                 cursor: 'pointer',
                 '&:hover': {
-                  backgroundColor: 'action.hover',
+                  backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.04),
                 },
               },
               '& .MuiDataGrid-row.critical-row': {
-                backgroundColor: 'error.light',
+                backgroundColor: (theme) => alpha(theme.palette.warning.main, 0.08),
                 '&:hover': {
-                  backgroundColor: 'error.main',
-                },
-                '& .MuiDataGrid-cell': {
-                  color: 'error.contrastText',
+                  backgroundColor: (theme) => alpha(theme.palette.warning.main, 0.12),
                 },
               },
               '& .MuiDataGrid-columnHeaders': {
-                backgroundColor: 'grey.100',
+                backgroundColor: 'grey.50',
+                borderBottom: '1px solid',
+                borderColor: 'divider',
+              },
+              '& .MuiDataGrid-columnHeaderTitle': {
+                fontWeight: 600,
+                color: 'text.secondary',
+                fontSize: '0.75rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+              },
+              '& .MuiDataGrid-cell': {
+                borderColor: 'divider',
               },
             }}
           />
@@ -762,15 +889,25 @@ const ClientList: React.FC = () => {
 
       {/* Empty State */}
       {sortedClients.length === 0 && !loading && (
-        <Box sx={{ textAlign: 'center', py: 8 }}>
-          <BusinessIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary">
+        <Paper
+          variant="outlined"
+          sx={{
+            textAlign: 'center',
+            py: 8,
+            px: 4,
+            borderRadius: 2,
+            borderColor: 'divider',
+            borderStyle: 'dashed',
+          }}
+        >
+          <PeopleOutlineIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
+          <Typography variant="subtitle1" color="text.secondary" sx={{ mb: 0.5 }}>
             {searchTerm ? 'No clients match your search' : 'No clients found'}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="text.disabled">
             {searchTerm ? 'Try a different search term' : 'Add clients via Manage Clients'}
           </Typography>
-        </Box>
+        </Paper>
       )}
 
       {/* Global Export Modal */}

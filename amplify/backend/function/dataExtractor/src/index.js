@@ -1,7 +1,8 @@
 /**
  * NYC OATH Summons Tracker - Data Extractor Lambda Function
  *
- * This function is invoked by the dailySweep Phase 2 Priority Queue.
+
+* This function is invoked by the dailySweep Phase 2 Priority Queue.
  * It performs:
  *   1. Safety check: Skip if violation_narrative already exists (immutability)
  *   2. Web scraping of the video page to extract "Video Created Date"
@@ -311,8 +312,9 @@ Return ONLY the JSON object. If a field cannot be determined, use null or an emp
     // Validate and sanitize id_number field
     // MUST match pattern YYYY-NNNNN or YYYY-NNNNNN (e.g., 2025-30846 or 2025-030846)
     // MUST NOT match summons number pattern (9 digits + 1 letter)
+    // Note: Gemini sometimes returns this as "dep_id" instead of "id_number", so check both
     let validatedIdNumber = null;
-    const rawIdNumber = ocrData.id_number || null;
+    const rawIdNumber = ocrData.id_number || ocrData.dep_id || null;
 
     if (rawIdNumber) {
       // Pattern for valid ID Number: exactly 4 digits, hyphen, 5 or 6 digits

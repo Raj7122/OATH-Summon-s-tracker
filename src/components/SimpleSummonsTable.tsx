@@ -239,21 +239,39 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
   
   /**
    * Render Action column with open modal button
+   * Icon size: 18px for better visibility and alignment
    */
   const renderActionCell = (params: GridRenderCellParams) => {
     return (
-      <Tooltip title="View Details">
-        <IconButton
-          size="small"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleOpenModal(params.row as Summons);
-          }}
-          sx={{ color: 'primary.main' }}
-        >
-          <OpenInNewIcon fontSize="small" />
-        </IconButton>
-      </Tooltip>
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '100%',
+          height: '100%',
+        }}
+      >
+        <Tooltip title="View Details">
+          <IconButton
+            size="small"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleOpenModal(params.row as Summons);
+            }}
+            sx={{
+              color: 'primary.main',
+              width: 32,
+              height: 32,
+              '&:hover': {
+                backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.12),
+              },
+            }}
+          >
+            <OpenInNewIcon sx={{ fontSize: 18 }} />
+          </IconButton>
+        </Tooltip>
+      </Box>
     );
   };
   
@@ -300,10 +318,12 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
     {
       field: 'actions',
       headerName: '',
-      width: 50,
+      width: 60,
       sortable: false,
       filterable: false,
       disableColumnMenu: true,
+      align: 'center',
+      headerAlign: 'center',
       renderCell: renderActionCell,
     },
   ];
@@ -362,10 +382,13 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
             aria-label="show all records"
             sx={{
               '&.Mui-selected': {
-                backgroundColor: 'primary.main',
-                color: 'primary.contrastText',
-                boxShadow: '0 4px 12px rgba(25, 118, 210, 0.25)',
-                '&:hover': { backgroundColor: 'primary.dark' },
+                backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.12),
+                color: 'primary.main',
+                border: '1px solid',
+                borderColor: (theme) => alpha(theme.palette.primary.main, 0.3),
+                '&:hover': {
+                  backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.18),
+                },
               },
             }}
           >
@@ -485,22 +508,40 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
           borderBottomLeftRadius: 12,
           borderBottomRightRadius: 12,
           backgroundColor: 'background.paper',
+          // Column header styling with more padding
+          '& .MuiDataGrid-columnHeader': {
+            paddingLeft: 3, // Match cell left padding (24px)
+            paddingRight: 2,
+          },
+          // Cell styling with more padding for better spacing
           '& .MuiDataGrid-cell': {
             cursor: 'pointer',
             borderBottom: (theme) => `1px solid ${alpha(theme.palette.grey[200], 0.8)}`,
+            paddingLeft: 3, // Increased left padding (24px)
+            paddingRight: 2,
+            paddingY: 1.5,
           },
+          // Row styling with zebra striping and improved hover
           '& .MuiDataGrid-row': {
-            transition: 'all 0.2s ease',
+            transition: 'background-color 0.15s ease',
+            // Zebra striping - subtle alternating background
+            '&:nth-of-type(even)': {
+              backgroundColor: (theme) => alpha(theme.palette.grey[500], 0.04),
+            },
             '&:hover': {
-              backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.04),
-              transform: 'scale(1.001)',
+              backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.08),
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
             },
           },
+          // Fresh row styling (new/updated records)
           '& .fresh-row': {
             backgroundColor: (theme) => alpha(theme.palette.info.main, 0.06),
+            '&:nth-of-type(even)': {
+              backgroundColor: (theme) => alpha(theme.palette.info.main, 0.08),
+            },
           },
           '& .fresh-row:hover': {
-            backgroundColor: (theme) => alpha(theme.palette.info.main, 0.1),
+            backgroundColor: (theme) => alpha(theme.palette.info.main, 0.12),
           },
           // Ensure no horizontal scroll
           '& .MuiDataGrid-virtualScroller': {
