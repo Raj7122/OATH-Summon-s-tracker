@@ -36,14 +36,18 @@ import {
   Alert,
   Snackbar,
   Drawer,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
-  Divider,
   IconButton,
   alpha,
+  TextField,
+  InputAdornment,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import TableChartIcon from '@mui/icons-material/TableChart';
@@ -56,8 +60,10 @@ import GavelIcon from '@mui/icons-material/Gavel';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import PaymentIcon from '@mui/icons-material/Payment';
 import EditIcon from '@mui/icons-material/Edit';
-import DocumentScannerIcon from '@mui/icons-material/DocumentScanner';
 import ArchiveIcon from '@mui/icons-material/Archive';
+import SearchIcon from '@mui/icons-material/Search';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import ClearAllIcon from '@mui/icons-material/ClearAll';
 import { generateClient } from 'aws-amplify/api';
 
 // Components
@@ -69,7 +75,7 @@ import { listSummons } from '../graphql/queries';
 import { updateSummons } from '../graphql/mutations';
 
 // Types
-import { Summons, isNewRecord, isUpdatedRecord } from '../types/summons';
+import { Summons, isNewRecord, isUpdatedRecord, ActivityLogEntry } from '../types/summons';
 
 // Theme colors
 import { horizonColors } from '../theme';
@@ -233,8 +239,17 @@ const CalendarDashboard: React.FC = () => {
   // Mobile: Toggle between calendar and grid view
   const [mobileView, setMobileView] = useState<'calendar' | 'grid'>('grid');
 
+  // Dashboard search state - filters summonses by company name or summons number
+  const [dashboardSearch, setDashboardSearch] = useState('');
+
   // Audit Trail drawer state
   const [auditTrailOpen, setAuditTrailOpen] = useState(false);
+
+  // Audit Trail filter state
+  const [auditSearchQuery, setAuditSearchQuery] = useState('');
+  const [auditDateStart, setAuditDateStart] = useState<Dayjs | null>(null);
+  const [auditDateEnd, setAuditDateEnd] = useState<Dayjs | null>(null);
+  const [auditActionType, setAuditActionType] = useState<string>('all');
 
   /**
    * Load summonses from GraphQL API with pagination
@@ -304,8 +319,17 @@ const CalendarDashboard: React.FC = () => {
       // Even though backend filters, double-check to prevent Fire Code violations leaking through
       .filter(isIdlingViolation)
       // Active Era filter: Default to 2022+ unless archive toggle is on
-      .filter((s) => showArchive || isActiveEra(s));
-  }, [summonses, showArchive]);
+      .filter((s) => showArchive || isActiveEra(s))
+      // Dashboard search filter: matches company name, summons number, or license plate
+      .filter((s) => {
+        if (!dashboardSearch.trim()) return true;
+        const query = dashboardSearch.toLowerCase().trim();
+        const matchesCompany = (s.respondent_name || '').toLowerCase().includes(query);
+        const matchesSummons = (s.summons_number || '').toLowerCase().includes(query);
+        const matchesPlate = (s.license_plate || '').toLowerCase().includes(query);
+        return matchesCompany || matchesSummons || matchesPlate;
+      });
+  }, [summonses, showArchive, dashboardSearch]);
 
   /**
    * Filter summonses by selected date and Horizon System filter
@@ -429,8 +453,12 @@ const CalendarDashboard: React.FC = () => {
 
   /**
    * Handle summons field update via GraphQL mutation
+   * Attribution fields (_attr suffix) fail silently until schema is deployed
    */
   const handleSummonsUpdate = useCallback(async (id: string, field: string, value: unknown) => {
+    // Check if this is an attribution field (not yet in deployed schema)
+    const isAttributionField = field.endsWith('_attr');
+
     try {
       console.log(`Updating ${field} = ${value} for summons ${id}...`);
 
@@ -482,12 +510,29 @@ const CalendarDashboard: React.FC = () => {
         });
       }
     } catch (error) {
-      console.error('Error updating summons:', error);
-      setSnackbar({
-        open: true,
-        message: `Failed to update ${field}. Please try again.`,
-        severity: 'error',
-      });
+      // Silently fail for attribution fields (schema not deployed yet)
+      if (isAttributionField) {
+        console.log(`Attribution field ${field} not yet in schema - update skipped`);
+        // Still update local state for UI responsiveness
+        setSummonses((prev) =>
+          prev.map((s) => {
+            if (s.id === id) {
+              return {
+                ...s,
+                [field]: value,
+              };
+            }
+            return s;
+          })
+        );
+      } else {
+        console.error('Error updating summons:', error);
+        setSnackbar({
+          open: true,
+          message: `Failed to update ${field}. Please try again.`,
+          severity: 'error',
+        });
+      }
     }
   }, [summonses]);
 
@@ -589,8 +634,6 @@ const CalendarDashboard: React.FC = () => {
         return <PaymentIcon sx={{ color: 'success.main' }} />;
       case 'AMENDMENT':
         return <EditIcon sx={{ color: 'text.secondary' }} />;
-      case 'OCR_COMPLETE':
-        return <DocumentScannerIcon sx={{ color: 'info.main' }} />;
       case 'ARCHIVED':
         return <ArchiveIcon sx={{ color: 'text.disabled' }} />;
       default:
@@ -599,37 +642,102 @@ const CalendarDashboard: React.FC = () => {
   };
 
   /**
-   * Get all activity log entries across all summonses, sorted by date (most recent first)
-   * This provides a comprehensive audit trail of all NYC API changes detected by daily sweep
+   * Extended activity log entry type with summons context
    */
-  const getAllActivityLogs = useMemo(() => {
-    const allLogs: Array<{
-      date: string;
-      type: string;
-      description: string;
-      old_value: string | null;
-      new_value: string | null;
-      summons_number: string;
-      respondent_name: string;
-    }> = [];
+  type AuditLogEntry = ActivityLogEntry & {
+    summons_number: string;
+    respondent_name: string;
+  };
+
+  /**
+   * Get all activity log entries across all summonses (MASTER LEDGER)
+   * This aggregates every history event from every summons in the database.
+   *
+   * CRITICAL: Parses activity_log from JSON string (AWSJSON from DynamoDB)
+   * NO temporal limits - this is the permanent master ledger.
+   */
+  const getAllActivityLogs = useMemo((): AuditLogEntry[] => {
+    const allLogs: AuditLogEntry[] = [];
 
     summonses.forEach((summons) => {
-      if (summons.activity_log && Array.isArray(summons.activity_log)) {
-        summons.activity_log.forEach((entry) => {
-          allLogs.push({
-            ...entry,
-            summons_number: summons.summons_number,
-            respondent_name: summons.respondent_name,
-          });
-        });
+      if (!summons.activity_log) return;
+
+      // Parse activity_log if it's a JSON string (AWSJSON from DynamoDB)
+      let activityLog: ActivityLogEntry[] = [];
+      if (typeof summons.activity_log === 'string') {
+        try {
+          activityLog = JSON.parse(summons.activity_log);
+        } catch {
+          console.warn(`Failed to parse activity_log for summons ${summons.summons_number}`);
+          return;
+        }
+      } else if (Array.isArray(summons.activity_log)) {
+        activityLog = summons.activity_log;
       }
+
+      // Add each entry with summons context
+      activityLog.forEach((entry) => {
+        allLogs.push({
+          ...entry,
+          summons_number: summons.summons_number,
+          respondent_name: summons.respondent_name || 'Unknown',
+        });
+      });
     });
 
-    // Sort by date, most recent first
+    // Sort by date, most recent first (All Time view)
     allLogs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     return allLogs;
   }, [summonses]);
+
+  /**
+   * Filtered activity logs based on user-selected filters
+   * Applies: date range, action type, and search query
+   * Excludes: OCR_COMPLETE entries (internal system events, not relevant for Arthur)
+   */
+  const filteredActivityLogs = useMemo(() => {
+    return getAllActivityLogs.filter((entry) => {
+      // Exclude OCR_COMPLETE entries - internal system events not relevant for audit trail
+      if (entry.type === 'OCR_COMPLETE') return false;
+
+      // Date range filter
+      if (auditDateStart) {
+        const entryDate = dayjs(entry.date);
+        if (entryDate.isBefore(auditDateStart, 'day')) return false;
+      }
+      if (auditDateEnd) {
+        const entryDate = dayjs(entry.date);
+        if (entryDate.isAfter(auditDateEnd, 'day')) return false;
+      }
+
+      // Action type filter
+      if (auditActionType !== 'all' && entry.type !== auditActionType) {
+        return false;
+      }
+
+      // Search filter (summons number or respondent name)
+      if (auditSearchQuery) {
+        const query = auditSearchQuery.toLowerCase();
+        const matchesSummons = entry.summons_number.toLowerCase().includes(query);
+        const matchesName = entry.respondent_name.toLowerCase().includes(query);
+        const matchesDescription = entry.description?.toLowerCase().includes(query);
+        if (!matchesSummons && !matchesName && !matchesDescription) return false;
+      }
+
+      return true;
+    });
+  }, [getAllActivityLogs, auditDateStart, auditDateEnd, auditActionType, auditSearchQuery]);
+
+  /**
+   * Clear all audit trail filters
+   */
+  const clearAuditFilters = useCallback(() => {
+    setAuditSearchQuery('');
+    setAuditDateStart(null);
+    setAuditDateEnd(null);
+    setAuditActionType('all');
+  }, []);
 
   // Show full-page loader while initial data is loading
   if (loading && summonses.length === 0) {
@@ -749,7 +857,70 @@ const CalendarDashboard: React.FC = () => {
               }}
             />
           )}
+
+          {/* Search filter indicator */}
+          {dashboardSearch && (
+            <Chip
+              label={`Search: "${dashboardSearch}"`}
+              color="default"
+              variant="outlined"
+              onDelete={() => setDashboardSearch('')}
+              sx={{
+                fontWeight: 600,
+                borderRadius: 2,
+                borderWidth: '1.5px',
+                maxWidth: 200,
+                '& .MuiChip-label': {
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                },
+              }}
+            />
+          )}
         </Box>
+
+        {/* Search Bar - Center position for prominence */}
+        <TextField
+          placeholder="Search company, summons #, or plate..."
+          value={dashboardSearch}
+          onChange={(e) => setDashboardSearch(e.target.value)}
+          size="small"
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon fontSize="small" color="action" />
+              </InputAdornment>
+            ),
+            endAdornment: dashboardSearch && (
+              <InputAdornment position="end">
+                <IconButton
+                  size="small"
+                  onClick={() => setDashboardSearch('')}
+                  edge="end"
+                  sx={{ mr: -0.5 }}
+                >
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              </InputAdornment>
+            ),
+          }}
+          sx={{
+            flex: { xs: '1 1 100%', sm: '0 1 320px' },
+            order: { xs: 3, sm: 0 },
+            '& .MuiOutlinedInput-root': {
+              borderRadius: 2.5,
+              backgroundColor: alpha(theme.palette.grey[500], 0.04),
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                backgroundColor: alpha(theme.palette.grey[500], 0.08),
+              },
+              '&.Mui-focused': {
+                backgroundColor: 'background.paper',
+                boxShadow: `0 0 0 2px ${alpha(theme.palette.primary.main, 0.2)}`,
+              },
+            },
+          }}
+        />
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           {/* Mobile view toggle - Premium button group */}
@@ -930,129 +1101,297 @@ const CalendarDashboard: React.FC = () => {
         </Alert>
       </Snackbar>
 
-      {/* Audit Trail Drawer - Premium styling */}
+      {/* Global Audit Trail Drawer - Professional Ledger */}
       <Drawer
         anchor="right"
         open={auditTrailOpen}
         onClose={() => setAuditTrailOpen(false)}
         PaperProps={{
           sx: {
-            width: { xs: '100%', sm: 480 },
+            width: { xs: '100%', sm: 560 },
             borderRadius: '16px 0 0 16px',
           },
         }}
       >
-        <Box sx={{ p: 3 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h5" sx={{ display: 'flex', alignItems: 'center', gap: 1.5, fontWeight: 600 }}>
-              <HistoryIcon color="primary" />
-              Audit Trail
-            </Typography>
-            <IconButton
-              onClick={() => setAuditTrailOpen(false)}
-              size="small"
-              sx={{
-                backgroundColor: alpha(theme.palette.grey[500], 0.08),
-                '&:hover': {
-                  backgroundColor: alpha(theme.palette.grey[500], 0.16),
-                },
-              }}
-            >
-              <CloseIcon fontSize="small" />
-            </IconButton>
-          </Box>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3, lineHeight: 1.6 }}>
-            Complete history of all changes detected by the daily sweep from NYC Open Data.
-            This ledger persists beyond the 72-hour UPDATED badge window.
-          </Typography>
-          <Divider sx={{ mb: 2 }} />
-
-          {getAllActivityLogs.length === 0 ? (
-            <Box sx={{ py: 6, textAlign: 'center' }}>
-              <HistoryIcon sx={{ fontSize: 56, color: 'grey.300', mb: 2 }} />
-              <Typography color="text.secondary" sx={{ fontWeight: 500 }}>
-                No activity recorded yet.
+        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          {/* Header - Fixed */}
+          <Box sx={{ p: 3, pb: 2, borderBottom: 1, borderColor: 'divider' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+              <Typography variant="h5" sx={{ display: 'flex', alignItems: 'center', gap: 1.5, fontWeight: 600 }}>
+                <HistoryIcon color="primary" />
+                Global Audit Trail
               </Typography>
-              <Typography variant="caption" color="text.disabled">
-                Changes will appear here after the daily sweep runs.
-              </Typography>
+              <IconButton
+                onClick={() => setAuditTrailOpen(false)}
+                size="small"
+                sx={{
+                  backgroundColor: alpha(theme.palette.grey[500], 0.08),
+                  '&:hover': {
+                    backgroundColor: alpha(theme.palette.grey[500], 0.16),
+                  },
+                }}
+              >
+                <CloseIcon fontSize="small" />
+              </IconButton>
             </Box>
-          ) : (
-            <List disablePadding>
-              {getAllActivityLogs.map((entry, index) => (
-                <Box key={`${entry.summons_number}-${entry.date}-${index}`}>
-                  <ListItem
-                    alignItems="flex-start"
+            <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.5 }}>
+              Permanent master ledger of all NYC API changes detected by daily sweep.
+            </Typography>
+
+            {/* Stats Bar */}
+            <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+              <Chip
+                label={`${getAllActivityLogs.length} Total`}
+                size="small"
+                variant="outlined"
+                sx={{ fontWeight: 500 }}
+              />
+              {filteredActivityLogs.length !== getAllActivityLogs.length && (
+                <Chip
+                  label={`${filteredActivityLogs.length} Filtered`}
+                  size="small"
+                  color="primary"
+                  sx={{ fontWeight: 500 }}
+                />
+              )}
+            </Box>
+          </Box>
+
+          {/* Filter Toolbar - Fixed */}
+          <Box sx={{ px: 3, py: 2, borderBottom: 1, borderColor: 'divider', backgroundColor: alpha(theme.palette.grey[500], 0.02) }}>
+            {/* Search */}
+            <TextField
+              fullWidth
+              size="small"
+              placeholder="Search summons # or company..."
+              value={auditSearchQuery}
+              onChange={(e) => setAuditSearchQuery(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" color="action" />
+                  </InputAdornment>
+                ),
+              }}
+              sx={{ mb: 2 }}
+            />
+
+            {/* Date Range & Action Type */}
+            <LocalizationProvider dateAdapter={AdapterDayjs}>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                <DatePicker
+                  label="From"
+                  value={auditDateStart}
+                  onChange={setAuditDateStart}
+                  slotProps={{
+                    textField: {
+                      size: 'small',
+                      sx: { flex: 1, minWidth: 130 },
+                    },
+                  }}
+                />
+                <DatePicker
+                  label="To"
+                  value={auditDateEnd}
+                  onChange={setAuditDateEnd}
+                  slotProps={{
+                    textField: {
+                      size: 'small',
+                      sx: { flex: 1, minWidth: 130 },
+                    },
+                  }}
+                />
+                <FormControl size="small" sx={{ minWidth: 120 }}>
+                  <InputLabel>Type</InputLabel>
+                  <Select
+                    value={auditActionType}
+                    label="Type"
+                    onChange={(e) => setAuditActionType(e.target.value)}
+                  >
+                    <MenuItem value="all">All Types</MenuItem>
+                    <MenuItem value="CREATED">Created</MenuItem>
+                    <MenuItem value="STATUS_CHANGE">Status</MenuItem>
+                    <MenuItem value="RESCHEDULE">Reschedule</MenuItem>
+                    <MenuItem value="RESULT_CHANGE">Result</MenuItem>
+                    <MenuItem value="AMOUNT_CHANGE">Amount</MenuItem>
+                    <MenuItem value="PAYMENT">Payment</MenuItem>
+                    <MenuItem value="AMENDMENT">Amendment</MenuItem>
+                    <MenuItem value="ARCHIVED">Archived</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+            </LocalizationProvider>
+
+            {/* Clear Filters Button */}
+            {(auditSearchQuery || auditDateStart || auditDateEnd || auditActionType !== 'all') && (
+              <Box sx={{ mt: 1.5 }}>
+                <Button
+                  size="small"
+                  startIcon={<ClearAllIcon />}
+                  onClick={clearAuditFilters}
+                  sx={{ textTransform: 'none' }}
+                >
+                  Clear Filters
+                </Button>
+              </Box>
+            )}
+          </Box>
+
+          {/* Scrollable List */}
+          <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+            {getAllActivityLogs.length === 0 ? (
+              // No data at all in the system
+              <Box sx={{ py: 8, textAlign: 'center' }}>
+                <HistoryIcon sx={{ fontSize: 64, color: 'grey.300', mb: 2 }} />
+                <Typography color="text.secondary" sx={{ fontWeight: 500, mb: 1 }}>
+                  No activity recorded yet
+                </Typography>
+                <Typography variant="body2" color="text.disabled">
+                  Changes will appear here after the daily sweep detects updates from NYC Open Data.
+                </Typography>
+              </Box>
+            ) : filteredActivityLogs.length === 0 ? (
+              // Data exists but filters exclude everything
+              <Box sx={{ py: 8, textAlign: 'center' }}>
+                <FilterListIcon sx={{ fontSize: 64, color: 'grey.300', mb: 2 }} />
+                <Typography color="text.secondary" sx={{ fontWeight: 500, mb: 1 }}>
+                  No matching entries
+                </Typography>
+                <Typography variant="body2" color="text.disabled" sx={{ mb: 2 }}>
+                  Try adjusting your filters to see more results.
+                </Typography>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<ClearAllIcon />}
+                  onClick={clearAuditFilters}
+                >
+                  Clear Filters
+                </Button>
+              </Box>
+            ) : (
+              // Ledger-style list
+              <Box sx={{
+                border: 1,
+                borderColor: 'divider',
+                borderRadius: 2,
+                overflow: 'hidden',
+              }}>
+                {filteredActivityLogs.map((entry, index) => (
+                  <Box
+                    key={`${entry.summons_number}-${entry.date}-${index}`}
                     sx={{
-                      px: 1.5,
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 1.5,
+                      px: 2,
                       py: 1.5,
-                      borderRadius: 2,
-                      transition: 'background-color 0.2s ease',
+                      backgroundColor: index % 2 === 0 ? 'transparent' : alpha(theme.palette.grey[500], 0.03),
+                      borderBottom: index < filteredActivityLogs.length - 1 ? 1 : 0,
+                      borderColor: 'divider',
+                      transition: 'background-color 0.15s ease',
                       '&:hover': {
                         backgroundColor: alpha(theme.palette.primary.main, 0.04),
                       },
                     }}
                   >
-                    <ListItemIcon sx={{ minWidth: 44, mt: 0.5 }}>
-                      <Box
+                    {/* Icon */}
+                    <Box
+                      sx={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: alpha(theme.palette.primary.main, 0.08),
+                        flexShrink: 0,
+                        mt: 0.25,
+                      }}
+                    >
+                      {getActivityIcon(entry.type)}
+                    </Box>
+
+                    {/* Content */}
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      {/* Header Row: Company Name + Date */}
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1 }}>
+                        <Typography
+                          variant="subtitle2"
+                          sx={{
+                            fontWeight: 600,
+                            color: 'text.primary',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {entry.respondent_name}
+                        </Typography>
+                        <Typography
+                          variant="caption"
+                          color="text.disabled"
+                          sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+                        >
+                          {dayjs(entry.date).format('MM/DD/YY')}
+                        </Typography>
+                      </Box>
+
+                      {/* Summons Number */}
+                      <Typography
+                        variant="caption"
                         sx={{
-                          width: 36,
-                          height: 36,
-                          borderRadius: 2,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          backgroundColor: alpha(theme.palette.primary.main, 0.08),
+                          color: 'text.secondary',
+                          fontFamily: 'monospace',
+                          fontSize: '0.7rem',
                         }}
                       >
-                        {getActivityIcon(entry.type)}
-                      </Box>
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'text.primary' }}>
-                            {entry.respondent_name}
-                          </Typography>
-                          <Typography variant="caption" color="text.disabled">
-                            {new Date(entry.date).toLocaleDateString()}
-                          </Typography>
+                        #{entry.summons_number}
+                      </Typography>
+
+                      {/* Description */}
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          color: 'text.primary',
+                          mt: 0.5,
+                          fontSize: '0.8rem',
+                        }}
+                      >
+                        {entry.description}
+                      </Typography>
+
+                      {/* Value Change Badge */}
+                      {entry.old_value && entry.new_value && (
+                        <Box
+                          sx={{
+                            mt: 0.75,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 0.5,
+                            px: 1,
+                            py: 0.25,
+                            borderRadius: 1,
+                            backgroundColor: alpha(theme.palette.grey[500], 0.08),
+                            fontSize: '0.7rem',
+                            color: 'text.secondary',
+                          }}
+                        >
+                          <span style={{ textDecoration: 'line-through', opacity: 0.7 }}>
+                            {entry.old_value}
+                          </span>
+                          <SwapHorizIcon sx={{ fontSize: 12 }} />
+                          <span style={{ fontWeight: 600, color: theme.palette.text.primary }}>
+                            {entry.new_value}
+                          </span>
                         </Box>
-                      }
-                      secondary={
-                        <>
-                          <Typography variant="body2" color="text.secondary" component="span" sx={{ fontSize: '0.8rem' }}>
-                            #{entry.summons_number}
-                          </Typography>
-                          <Typography variant="body2" component="div" sx={{ mt: 0.5, color: 'text.primary' }}>
-                            {entry.description}
-                          </Typography>
-                          {entry.old_value && entry.new_value && (
-                            <Typography
-                              variant="caption"
-                              component="div"
-                              sx={{
-                                mt: 0.5,
-                                color: 'text.secondary',
-                                backgroundColor: alpha(theme.palette.grey[500], 0.08),
-                                px: 1,
-                                py: 0.5,
-                                borderRadius: 1,
-                                display: 'inline-block',
-                              }}
-                            >
-                              {entry.old_value} → {entry.new_value}
-                            </Typography>
-                          )}
-                        </>
-                      }
-                    />
-                  </ListItem>
-                  {index < getAllActivityLogs.length - 1 && <Divider variant="inset" component="li" sx={{ ml: 7 }} />}
-                </Box>
-              ))}
-            </List>
-          )}
+                      )}
+                    </Box>
+                  </Box>
+                ))}
+              </Box>
+            )}
+          </Box>
         </Box>
       </Drawer>
     </Box>

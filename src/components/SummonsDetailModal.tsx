@@ -74,10 +74,18 @@ import EditIcon from '@mui/icons-material/Edit';
 import DocumentScannerIcon from '@mui/icons-material/DocumentScanner';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
 import WarningIcon from '@mui/icons-material/Warning';
+import PersonIcon from '@mui/icons-material/Person';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 
 // Import shared types
-import { Summons, getStatusColor, ActivityLogEntry } from '../types/summons';
+import { Summons, getStatusColor, ActivityLogEntry, AttributionData, DepFileDateAttribution } from '../types/summons';
 import { isNewRecord, isUpdatedRecord } from '../types/summons';
+
+// Mock current user (until real auth is connected)
+const MOCK_CURRENT_USER = {
+  id: 'user-arthur-001',
+  name: 'Arthur',
+};
 
 /**
  * Props for SummonsDetailModal component
@@ -265,12 +273,24 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   const [notesSaved, setNotesSaved] = useState(false);
   const [internalStatus, setInternalStatus] = useState('New');
 
-  // Local state for checkboxes (for immediate UI feedback)
-  const [evidenceReviewed, setEvidenceReviewed] = useState(false);
-  const [addedToCalendar, setAddedToCalendar] = useState(false);
-  const [evidenceRequested, setEvidenceRequested] = useState(false);
-  const [evidenceReceived, setEvidenceReceived] = useState(false);
+  // Local state for checkboxes with attribution (for immediate UI feedback)
+  const [evidenceReviewedAttr, setEvidenceReviewedAttr] = useState<AttributionData>({ completed: false });
+  const [addedToCalendarAttr, setAddedToCalendarAttr] = useState<AttributionData>({ completed: false });
+  const [evidenceRequestedAttr, setEvidenceRequestedAttr] = useState<AttributionData>({ completed: false });
+  const [evidenceReceivedAttr, setEvidenceReceivedAttr] = useState<AttributionData>({ completed: false });
   const [evidenceRequestedDate, setEvidenceRequestedDate] = useState<string | null>(null);
+
+  // DEP File Date with attribution
+  const [depFileDateAttr, setDepFileDateAttr] = useState<DepFileDateAttribution>({});
+
+  // Helper to get attribution from summons or create default from legacy boolean
+  const getAttrFromSummons = (
+    attrField: AttributionData | undefined,
+    legacyField: boolean
+  ): AttributionData => {
+    if (attrField) return attrField;
+    return { completed: legacyField };
+  };
 
   // Initialize local state when summons changes
   useEffect(() => {
@@ -278,12 +298,14 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       setNotes(summons.notes || '');
       setInternalStatus(summons.internal_status || 'New');
       setNotesSaved(false);
-      // Sync checkbox states
-      setEvidenceReviewed(summons.evidence_reviewed || false);
-      setAddedToCalendar(summons.added_to_calendar || false);
-      setEvidenceRequested(summons.evidence_requested || false);
-      setEvidenceReceived(summons.evidence_received || false);
+      // Sync checkbox states with attribution
+      setEvidenceReviewedAttr(getAttrFromSummons(summons.evidence_reviewed_attr, summons.evidence_reviewed || false));
+      setAddedToCalendarAttr(getAttrFromSummons(summons.added_to_calendar_attr, summons.added_to_calendar || false));
+      setEvidenceRequestedAttr(getAttrFromSummons(summons.evidence_requested_attr, summons.evidence_requested || false));
+      setEvidenceReceivedAttr(getAttrFromSummons(summons.evidence_received_attr, summons.evidence_received || false));
       setEvidenceRequestedDate(summons.evidence_requested_date || null);
+      // DEP File Date
+      setDepFileDateAttr(summons.dep_file_date_attr || {});
     }
   }, [summons]);
   
@@ -303,34 +325,89 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   if (!summons) return null;
   
   /**
-   * Handle checkbox changes for evidence tracking
+   * Handle checkbox changes for evidence tracking with attribution
    * Updates local state immediately for responsive UI, then persists to backend
    */
   const handleCheckboxChange = (field: string, checked: boolean) => {
+    const now = dayjs().toISOString();
+    const newAttr: AttributionData = {
+      completed: checked,
+      by: checked ? MOCK_CURRENT_USER.name : undefined,
+      userId: checked ? MOCK_CURRENT_USER.id : undefined,
+      date: checked ? now : undefined,
+    };
+
     // Update local state immediately for responsive UI
     switch (field) {
       case 'evidence_reviewed':
-        setEvidenceReviewed(checked);
+        setEvidenceReviewedAttr(newAttr);
         break;
       case 'added_to_calendar':
-        setAddedToCalendar(checked);
+        setAddedToCalendarAttr(newAttr);
         break;
       case 'evidence_requested':
-        setEvidenceRequested(checked);
+        setEvidenceRequestedAttr(newAttr);
         // Auto-set evidence_requested_date when checking
         if (checked && !evidenceRequestedDate) {
-          const now = dayjs().toISOString();
           setEvidenceRequestedDate(now);
           onUpdate(summons.id, 'evidence_requested_date', now);
         }
         break;
       case 'evidence_received':
-        setEvidenceReceived(checked);
+        setEvidenceReceivedAttr(newAttr);
         break;
     }
 
-    // Persist to backend
+    // Persist both legacy boolean and new attribution to backend
     onUpdate(summons.id, field, checked);
+    onUpdate(summons.id, `${field}_attr`, newAttr);
+  };
+
+  /**
+   * Handle DEP File Date change with attribution
+   */
+  const handleDepFileDateChange = (date: dayjs.Dayjs | null) => {
+    const now = dayjs().toISOString();
+    const newAttr: DepFileDateAttribution = {
+      value: date?.toISOString() || undefined,
+      by: MOCK_CURRENT_USER.name,
+      userId: MOCK_CURRENT_USER.id,
+      date: now,
+    };
+    setDepFileDateAttr(newAttr);
+    onUpdate(summons.id, 'dep_file_date_attr', newAttr);
+  };
+
+  /**
+   * Calculate delay days between violation date and DEP file date
+   * Returns positive number if DEP file was created after violation
+   */
+  const calculateDelayDays = (): number | null => {
+    if (!depFileDateAttr.value || !summons.violation_date) return null;
+
+    const violationDate = dayjs(summons.violation_date);
+    const depFileDate = dayjs(depFileDateAttr.value);
+
+    return depFileDate.diff(violationDate, 'day');
+  };
+
+  /**
+   * Format relative time for attribution (e.g., "Just now", "2 hours ago", "Dec 9")
+   */
+  const formatAttributionTime = (dateStr: string | undefined): string => {
+    if (!dateStr) return '';
+
+    const date = dayjs(dateStr);
+    const now = dayjs();
+    const diffMinutes = now.diff(date, 'minute');
+    const diffHours = now.diff(date, 'hour');
+    const diffDays = now.diff(date, 'day');
+
+    if (diffMinutes < 1) return 'Just now';
+    if (diffMinutes < 60) return `${diffMinutes}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return date.format('ddd h:mm A');
+    return date.format('MMM D, h:mm A');
   };
   
   /**
@@ -565,67 +642,175 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
               </CardContent>
             </Card>
             
-            {/* Evidence Tracking */}
+            {/* Evidence Tracking with Attribution */}
             <Card variant="outlined" sx={{ mb: 2 }}>
               <CardContent>
                 <SectionHeader
                   icon={<FactCheckIcon sx={{ color: 'warning.main' }} />}
                   title="Evidence Tracking"
                 />
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={evidenceReviewed}
-                        onChange={(e) => handleCheckboxChange('evidence_reviewed', e.target.checked)}
-                      />
-                    }
-                    label="Evidence Reviewed"
-                  />
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={addedToCalendar}
-                        onChange={(e) => handleCheckboxChange('added_to_calendar', e.target.checked)}
-                      />
-                    }
-                    label="Added to Calendar"
-                  />
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={evidenceRequested}
-                        onChange={(e) => handleCheckboxChange('evidence_requested', e.target.checked)}
-                      />
-                    }
-                    label="Evidence Requested"
-                  />
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                  {/* Evidence Requested */}
+                  <Box>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={evidenceRequestedAttr.completed}
+                          onChange={(e) => handleCheckboxChange('evidence_requested', e.target.checked)}
+                        />
+                      }
+                      label="Evidence Requested"
+                      sx={{ mb: 0 }}
+                    />
+                    {evidenceRequestedAttr.completed && evidenceRequestedAttr.by && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', ml: 4, mt: -0.5, mb: 0.5 }}>
+                        <PersonIcon sx={{ fontSize: 12, color: 'text.secondary', mr: 0.5 }} />
+                        <Typography variant="caption" color="text.secondary">
+                          {evidenceRequestedAttr.by} • {formatAttributionTime(evidenceRequestedAttr.date)}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
 
                   {/* Evidence Requested Date Picker */}
-                  {evidenceRequested && (
+                  {evidenceRequestedAttr.completed && (
+                    <Box sx={{ ml: 4, mb: 1 }}>
+                      <LocalizationProvider dateAdapter={AdapterDayjs}>
+                        <DatePicker
+                          label="Request Date"
+                          value={evidenceRequestedDate ? dayjs(evidenceRequestedDate) : null}
+                          onChange={handleDateChange}
+                          slotProps={{
+                            textField: { size: 'small', fullWidth: true },
+                          }}
+                        />
+                      </LocalizationProvider>
+                    </Box>
+                  )}
+
+                  {/* Evidence Received */}
+                  <Box>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={evidenceReceivedAttr.completed}
+                          onChange={(e) => handleCheckboxChange('evidence_received', e.target.checked)}
+                        />
+                      }
+                      label="Evidence Received"
+                      sx={{ mb: 0 }}
+                    />
+                    {evidenceReceivedAttr.completed && evidenceReceivedAttr.by && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', ml: 4, mt: -0.5, mb: 0.5 }}>
+                        <PersonIcon sx={{ fontSize: 12, color: 'text.secondary', mr: 0.5 }} />
+                        <Typography variant="caption" color="text.secondary">
+                          {evidenceReceivedAttr.by} • {formatAttributionTime(evidenceReceivedAttr.date)}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+
+                  {/* Evidence Reviewed */}
+                  <Box>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={evidenceReviewedAttr.completed}
+                          onChange={(e) => handleCheckboxChange('evidence_reviewed', e.target.checked)}
+                        />
+                      }
+                      label="Evidence Reviewed"
+                      sx={{ mb: 0 }}
+                    />
+                    {evidenceReviewedAttr.completed && evidenceReviewedAttr.by && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', ml: 4, mt: -0.5, mb: 0.5 }}>
+                        <PersonIcon sx={{ fontSize: 12, color: 'text.secondary', mr: 0.5 }} />
+                        <Typography variant="caption" color="text.secondary">
+                          {evidenceReviewedAttr.by} • {formatAttributionTime(evidenceReviewedAttr.date)}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+
+                  {/* Added to Calendar */}
+                  <Box>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={addedToCalendarAttr.completed}
+                          onChange={(e) => handleCheckboxChange('added_to_calendar', e.target.checked)}
+                        />
+                      }
+                      label="Added to Calendar"
+                      sx={{ mb: 0 }}
+                    />
+                    {addedToCalendarAttr.completed && addedToCalendarAttr.by && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', ml: 4, mt: -0.5, mb: 0.5 }}>
+                        <PersonIcon sx={{ fontSize: 12, color: 'text.secondary', mr: 0.5 }} />
+                        <Typography variant="caption" color="text.secondary">
+                          {addedToCalendarAttr.by} • {formatAttributionTime(addedToCalendarAttr.date)}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                </Box>
+
+                {/* DEP File Creation Date */}
+                <Divider sx={{ my: 2 }} />
+                <Box sx={{ mb: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                    <CalendarMonthIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                    <Typography variant="subtitle2" color="text.secondary">
+                      DEP File Creation Date
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                     <LocalizationProvider dateAdapter={AdapterDayjs}>
                       <DatePicker
-                        label="Request Date"
-                        value={evidenceRequestedDate ? dayjs(evidenceRequestedDate) : null}
-                        onChange={handleDateChange}
+                        value={depFileDateAttr.value ? dayjs(depFileDateAttr.value) : null}
+                        onChange={handleDepFileDateChange}
                         slotProps={{
-                          textField: { size: 'small', fullWidth: true },
+                          textField: {
+                            size: 'small',
+                            sx: { width: 180 },
+                            placeholder: 'Select date'
+                          },
                         }}
                       />
                     </LocalizationProvider>
-                  )}
+                    {/* Delay Days Indicator */}
+                    {(() => {
+                      const delayDays = calculateDelayDays();
+                      if (delayDays === null) return null;
 
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={evidenceReceived}
-                        onChange={(e) => handleCheckboxChange('evidence_received', e.target.checked)}
-                      />
-                    }
-                    label="Evidence Received"
-                  />
+                      const isWarning = delayDays > 30;
+                      return (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          {isWarning && <WarningIcon sx={{ fontSize: 18, color: 'warning.main' }} />}
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              fontWeight: 600,
+                              color: isWarning ? 'warning.main' : 'text.secondary',
+                            }}
+                          >
+                            (+{delayDays} Days{delayDays > 30 ? ' Delay' : ''})
+                          </Typography>
+                        </Box>
+                      );
+                    })()}
+                  </Box>
+                  {/* DEP File Date Attribution */}
+                  {depFileDateAttr.by && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
+                      <PersonIcon sx={{ fontSize: 12, color: 'text.secondary', mr: 0.5 }} />
+                      <Typography variant="caption" color="text.secondary">
+                        Updated by {depFileDateAttr.by} • {formatAttributionTime(depFileDateAttr.date)}
+                      </Typography>
+                    </Box>
+                  )}
                 </Box>
-                
+
                 {/* Documents */}
                 <Divider sx={{ my: 2 }} />
                 <Typography variant="subtitle2" color="text.secondary" gutterBottom>
