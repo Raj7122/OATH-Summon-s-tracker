@@ -362,7 +362,7 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
         >
           <TodayIcon sx={{ color: 'primary.main', fontSize: 22 }} />
         </Box>
-        <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary' }}>
+        <Typography variant="h5" sx={{ fontWeight: 600, color: 'text.primary' }}>
           Hearing Docket
         </Typography>
       </Box>
@@ -487,6 +487,8 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
           <DateCalendar
             value={selectedDate}
             onChange={handleDateChange}
+            views={['year', 'month', 'day']}
+            openTo="day"
             slots={{
               day: ServerDay as React.ComponentType<PickersDayProps<Dayjs>>,
             }}
@@ -502,10 +504,21 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
               '& .MuiPickersCalendarHeader-root': {
                 paddingLeft: 2,
                 paddingRight: 2,
-                marginTop: 1,
+                marginTop: 1.5,
+                marginBottom: 1,
                 '& .MuiPickersCalendarHeader-label': {
-                  fontWeight: 600,
-                  fontSize: '1rem',
+                  fontWeight: 700,
+                  fontSize: '1.25rem',
+                  cursor: 'pointer',
+                  '&:hover': {
+                    color: 'primary.main',
+                  },
+                },
+                '& .MuiPickersCalendarHeader-switchViewButton': {
+                  padding: 1,
+                  '&:hover': {
+                    backgroundColor: 'action.hover',
+                  },
                 },
               },
               '& .MuiDayCalendar-weekDayLabel': {

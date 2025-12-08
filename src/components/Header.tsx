@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import MenuIcon from '@mui/icons-material/Menu';
 import GavelIcon from '@mui/icons-material/Gavel';
+import SyncStatusBadge from './SyncStatusBadge';
 
 const Header = () => {
   const navigate = useNavigate();
@@ -48,11 +49,10 @@ const Header = () => {
       position="sticky"
       elevation={0}
       sx={{
-        // Royal Blue gradient header with shadow
-        background: (theme) =>
-          `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
-        borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+        // Professional neutral dark header
+        background: '#1C2536',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.12)',
         color: '#FFFFFF',
       }}
     >
@@ -176,6 +176,9 @@ const Header = () => {
             <MenuItem onClick={() => handleNavigate('/clients')}>Clients</MenuItem>
           </Menu>
         </Box>
+
+        {/* Sync Status Badge - Shows when last daily sweep ran */}
+        <SyncStatusBadge />
 
         {/* Account Menu */}
         <Box>
