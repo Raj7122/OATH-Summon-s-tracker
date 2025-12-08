@@ -617,10 +617,13 @@ async function executePhase2PriorityOCR(remainingQuota = MAX_OCR_REQUESTS_PER_DA
     pendingRecords: 0,
     recordsProcessed: 0,
     ocrSuccess: 0,
-    ocrHealed: 0, // Records with partial data that were re-OCR'd
+    ocrHealed: 0, // Records with partial data that were re-OCR'd successfully
     ocrFailed: 0,
     ocrSkipped: 0,
     ocrExcludedMaxFailures: 0,
+    ocrExcludedOldHearings: 0,
+    gracefulExit: false,
+    rateLimitHits: 0,
   };
 
   if (remainingQuota <= 0) {
@@ -628,21 +631,32 @@ async function executePhase2PriorityOCR(remainingQuota = MAX_OCR_REQUESTS_PER_DA
     return results;
   }
 
-  // Step 1: Fetch all pending OCR records (excluding max failures)
+  // Step 1: Fetch all OCR records (pending + self-healing candidates)
   const pendingRecords = await fetchPendingOCRRecords();
+  console.log(`Fetched ${pendingRecords.length} records from OCR queue (including self-healing candidates)`);
 
-  // Filter out records that have exceeded max retry attempts
+  // Filter out records that have exceeded max retry attempts OR have old hearing dates
   const eligibleRecords = pendingRecords.filter(record => {
     const failureCount = record.ocr_failure_count || 0;
     if (failureCount >= MAX_OCR_FAILURES) {
       results.ocrExcludedMaxFailures++;
       return false;
     }
+
+    // Exclude hearings before 2022 (too old to prioritize)
+    if (record.hearing_date) {
+      const hearingYear = new Date(record.hearing_date).getFullYear();
+      if (hearingYear < 2022) {
+        results.ocrExcludedOldHearings++;
+        return false;
+      }
+    }
+
     return true;
   });
 
   results.pendingRecords = eligibleRecords.length;
-  console.log(`Found ${pendingRecords.length} pending, ${eligibleRecords.length} eligible (${results.ocrExcludedMaxFailures} excluded due to max failures)`);
+  console.log(`Eligible: ${eligibleRecords.length} | Excluded: ${results.ocrExcludedMaxFailures} (max failures), ${results.ocrExcludedOldHearings} (pre-2022)`);
 
   if (eligibleRecords.length === 0) {
     console.log('No eligible OCR records. Phase 2 complete.');
@@ -671,19 +685,21 @@ async function executePhase2PriorityOCR(remainingQuota = MAX_OCR_REQUESTS_PER_DA
     const record = recordsToProcess[i];
     results.recordsProcessed++;
 
-    // Safety check: Don't OCR if we already have data (immutability)
-    if (hasExistingOCRData(record)) {
-      console.log(`⊘ Skipped (already has data): ${record.summons_number}`);
+    // Check if this record needs healing (has partial OCR data - missing id_number)
+    const requiresHealing = needsOCRHealing(record);
+
+    // Safety check: Don't OCR if we already have COMPLETE data (immutability)
+    // BUT allow re-OCR if record needs healing (missing id_number)
+    if (hasExistingOCRData(record) && !requiresHealing) {
+      console.log(`⊘ Skipped (already complete): ${record.summons_number}`);
       await markOCRComplete(record.id);
       results.ocrSkipped++;
       continue;
     }
 
     try {
-      // Check if this record needs healing (has partial OCR data)
-      const requiresHealing = needsOCRHealing(record);
       if (requiresHealing) {
-        console.log(`[${i + 1}/${recordsToProcess.length}] HEALING: ${record.summons_number} (score: ${record.priority_score})`);
+        console.log(`[${i + 1}/${recordsToProcess.length}] 🔧 HEALING: ${record.summons_number} (score: ${record.priority_score}) - missing id_number`);
       } else {
         console.log(`[${i + 1}/${recordsToProcess.length}] Processing: ${record.summons_number} (score: ${record.priority_score})`);
       }
@@ -801,12 +817,19 @@ function calculateTieredPriorityScore(summons) {
 }
 
 /**
- * Fetch all records with ocr_status = 'pending' (non-archived)
+ * Fetch all records that need OCR processing (non-archived)
+ *
+ * This includes:
+ * 1. Records with ocr_status = 'pending' (new records awaiting OCR)
+ * 2. Records with no ocr_status and no violation_narrative (legacy records)
+ * 3. SELF-HEALING: Records with ocr_status = 'complete' but missing id_number
+ *    (these have partial OCR data and need re-processing)
  */
 async function fetchPendingOCRRecords() {
   const allRecords = [];
   let lastEvaluatedKey = null;
 
+  // First scan: Get pending records and legacy records without OCR
   do {
     const params = {
       TableName: SUMMONS_TABLE,
@@ -826,7 +849,96 @@ async function fetchPendingOCRRecords() {
     lastEvaluatedKey = result.LastEvaluatedKey;
   } while (lastEvaluatedKey);
 
+  // Second scan: Get self-healing candidates (complete but missing id_number)
+  const selfHealingRecords = await fetchSelfHealingCandidates();
+
+  // Track counts for logging
+  const pendingCount = allRecords.length;
+  const selfHealingCount = selfHealingRecords.length;
+
+  // Merge and deduplicate (in case any overlap)
+  const seenIds = new Set(allRecords.map(r => r.id));
+  for (const record of selfHealingRecords) {
+    if (!seenIds.has(record.id)) {
+      allRecords.push(record);
+      seenIds.add(record.id);
+    }
+  }
+
+  // Also fetch orphaned records (have violation_narrative but ocr_status is null/missing)
+  const orphanedRecords = await fetchOrphanedOCRRecords();
+  const orphanedCount = orphanedRecords.length;
+
+  for (const record of orphanedRecords) {
+    if (!seenIds.has(record.id)) {
+      allRecords.push(record);
+      seenIds.add(record.id);
+    }
+  }
+
+  console.log(`OCR Queue Breakdown: ${pendingCount} pending, ${selfHealingCount} self-healing, ${orphanedCount} orphaned`);
+
   return allRecords;
+}
+
+/**
+ * Fetch records that are marked 'complete' but are missing critical OCR fields
+ * These are "self-healing candidates" - records with partial OCR data
+ */
+async function fetchSelfHealingCandidates() {
+  const records = [];
+  let lastEvaluatedKey = null;
+
+  do {
+    const params = {
+      TableName: SUMMONS_TABLE,
+      // Records marked complete but missing id_number (have violation_narrative)
+      FilterExpression: 'ocr_status = :complete AND attribute_exists(violation_narrative) AND attribute_not_exists(id_number) AND (is_archived <> :archived OR attribute_not_exists(is_archived))',
+      ExpressionAttributeValues: {
+        ':complete': 'complete',
+        ':archived': true,
+      },
+    };
+
+    if (lastEvaluatedKey) {
+      params.ExclusiveStartKey = lastEvaluatedKey;
+    }
+
+    const result = await dynamodb.scan(params).promise();
+    records.push(...(result.Items || []));
+    lastEvaluatedKey = result.LastEvaluatedKey;
+  } while (lastEvaluatedKey);
+
+  return records;
+}
+
+/**
+ * Fetch orphaned records - have violation_narrative but no ocr_status set
+ * These are legacy records that were processed before ocr_status tracking was added
+ */
+async function fetchOrphanedOCRRecords() {
+  const records = [];
+  let lastEvaluatedKey = null;
+
+  do {
+    const params = {
+      TableName: SUMMONS_TABLE,
+      FilterExpression: 'attribute_not_exists(ocr_status) AND attribute_exists(violation_narrative) AND (is_archived <> :archived OR attribute_not_exists(is_archived))',
+      ExpressionAttributeValues: {
+        ':archived': true,
+      },
+    };
+
+    if (lastEvaluatedKey) {
+      params.ExclusiveStartKey = lastEvaluatedKey;
+    }
+
+    const result = await dynamodb.scan(params).promise();
+    records.push(...(result.Items || []));
+    lastEvaluatedKey = result.LastEvaluatedKey;
+  } while (lastEvaluatedKey);
+
+  return records;
 }
 
 /**

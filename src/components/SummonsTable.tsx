@@ -430,53 +430,54 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   /**
    * Check if a summons is a brand new record (created within last 72 hours)
    *
-   * Logic: createdAt equals updatedAt (within 1 second tolerance) AND within 72 hours.
-   * Used to show [🆕 NEW] badge in Status column.
+   * A record is "NEW" if it was discovered/created within the last 72 hours.
+   * This indicates the daily sweep found a new summons from the NYC API.
+   *
+   * Note: We only check createdAt, not updatedAt, because the daily sweep
+   * updates last_metadata_sync on every run which changes updatedAt.
+   *
    * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
    *
    * @param {Summons} summons - Summons record to check
    * @returns {boolean} True if brand new, false otherwise
    */
   const isNewRecord = (summons: Summons): boolean => {
-    if (!summons.createdAt || !summons.updatedAt) return false;
+    if (!summons.createdAt) return false;
 
     const createdDate = new Date(summons.createdAt);
-    const updatedDate = new Date(summons.updatedAt);
     const now = new Date();
 
-    // Check if within 72 hours (TRD v1.9: cover weekends)
-    const diffHours = (now.getTime() - updatedDate.getTime()) / (1000 * 60 * 60);
-    if (diffHours >= 72) return false;
-
-    // Check if createdAt equals updatedAt (within 1 second tolerance)
-    const timeDiff = Math.abs(updatedDate.getTime() - createdDate.getTime());
-    return timeDiff < 1000; // Less than 1 second difference
+    // Check if created within 72 hours (TRD v1.9: cover weekends)
+    const diffHours = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
+    return diffHours < 72;
   };
 
   /**
-   * Check if a summons was recently updated (not new, but status/amount changed)
+   * Check if a summons was recently updated BY THE DAILY SWEEP (not manual user edits)
    *
-   * Logic: updatedAt is newer than createdAt AND within last 72 hours.
-   * Used to show [⚠️ UPDATED] badge in Status column.
+   * Uses last_change_at which is only set when NYC API changes are detected
+   * (status change, reschedule, amount change, etc.)
+   *
+   * Must not be a new record (new records get NEW badge, not UPDATED).
+   *
    * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
    *
    * @param {Summons} summons - Summons record to check
    * @returns {boolean} True if recently updated, false otherwise
    */
   const isUpdatedRecord = (summons: Summons): boolean => {
-    if (!summons.createdAt || !summons.updatedAt) return false;
+    // Use last_change_at which is only set by the daily sweep when API changes are detected
+    if (!summons.last_change_at) return false;
 
-    const createdDate = new Date(summons.createdAt);
-    const updatedDate = new Date(summons.updatedAt);
+    // Must not be a new record (new records get NEW badge, not UPDATED)
+    if (isNewRecord(summons)) return false;
+
+    const lastChangeDate = new Date(summons.last_change_at);
     const now = new Date();
 
-    // Check if within 72 hours (TRD v1.9: cover weekends)
-    const diffHours = (now.getTime() - updatedDate.getTime()) / (1000 * 60 * 60);
-    if (diffHours >= 72) return false;
-
-    // Check if updatedAt is meaningfully newer than createdAt
-    const timeDiff = updatedDate.getTime() - createdDate.getTime();
-    return timeDiff >= 1000; // At least 1 second difference
+    // Check if daily sweep detected changes within last 72 hours (TRD v1.9: cover weekends)
+    const diffHours = (now.getTime() - lastChangeDate.getTime()) / (1000 * 60 * 60);
+    return diffHours < 72;
   };
 
   /**
