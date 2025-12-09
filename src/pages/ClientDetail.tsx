@@ -312,8 +312,12 @@ const ClientDetail: React.FC = () => {
 
   /**
    * Handle summons update from modal
+   * Attribution fields (_attr suffix) fail silently until schema is deployed
    */
   const handleSummonsUpdate = useCallback(async (summonsId: string, field: string, value: unknown) => {
+    // Check if this is an attribution field (not yet in deployed schema)
+    const isAttributionField = field.endsWith('_attr');
+
     try {
       await apiClient.graphql({
         query: updateSummons,
@@ -330,7 +334,16 @@ const ClientDetail: React.FC = () => {
         prev.map((s) => (s.id === summonsId ? { ...s, [field]: value } : s))
       );
     } catch (err) {
-      console.error('Error updating summons:', err);
+      // Silently fail for attribution fields (schema not deployed yet)
+      if (isAttributionField) {
+        console.log(`Attribution field ${field} not yet in schema - update skipped`);
+        // Still update local state for UI responsiveness
+        setSummonses((prev) =>
+          prev.map((s) => (s.id === summonsId ? { ...s, [field]: value } : s))
+        );
+      } else {
+        console.error('Error updating summons:', err);
+      }
     }
   }, []);
 

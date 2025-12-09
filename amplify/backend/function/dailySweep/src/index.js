@@ -58,7 +58,7 @@ const NYC_API_URL = 'https://data.cityofnewyork.us/resource/jz4z-kudi.json';
 
 // Priority Queue Configuration
 const MAX_OCR_REQUESTS_PER_DAY = 500;
-const OCR_THROTTLE_MS = 2000; // 2 seconds between requests
+const OCR_THROTTLE_MS = 5000; // 5 seconds between requests (increased from 2 to avoid NYC server rate limits)
 const MAX_OCR_FAILURES = 3; // Max retry attempts before giving up
 const GHOST_GRACE_DAYS = 3; // Days before archiving missing records
 
@@ -1412,9 +1412,12 @@ async function updateSyncStatus(updates) {
     expressionAttributeValues[attrValue] = value;
   });
 
-  // Add updatedAt
+  // Add updatedAt and __typename (required by Amplify GraphQL)
   updateExpressions.push('updatedAt = :updatedAt');
   expressionAttributeValues[':updatedAt'] = new Date().toISOString();
+  updateExpressions.push('#typename = :typename');
+  expressionAttributeNames['#typename'] = '__typename';
+  expressionAttributeValues[':typename'] = 'SyncStatus';
 
   const params = {
     TableName: SYNC_STATUS_TABLE,
@@ -1436,6 +1439,7 @@ async function updateSyncStatus(updates) {
         TableName: SYNC_STATUS_TABLE,
         Item: {
           id: 'GLOBAL',
+          __typename: 'SyncStatus',
           ...updates,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -1469,6 +1473,7 @@ async function getOrResetDailyOCRCounter() {
         TableName: SYNC_STATUS_TABLE,
         Item: {
           id: 'GLOBAL',
+          __typename: 'SyncStatus',
           ocr_processed_today: 0,
           ocr_processing_date: today,
           createdAt: new Date().toISOString(),

@@ -58,6 +58,17 @@ type Summons @model @auth(rules: [{ allow: private }]) {
   evidence_requested_date: AWSDateTime
   evidence_received: Boolean @default(value: "false")
 
+  # Evidence Tracking Attribution (TRD v1.9: Audit Trail)
+  # Each stores: { completed: boolean, by: string, userId: string, date: string }
+  evidence_reviewed_attr: AWSJSON
+  added_to_calendar_attr: AWSJSON
+  evidence_requested_attr: AWSJSON
+  evidence_received_attr: AWSJSON
+
+  # DEP File Date with Attribution (for delay tracking)
+  # Stores: { value: string (ISO date), by: string, userId: string, date: string }
+  dep_file_date_attr: AWSJSON
+
   # TRD v1.8: Client Feedback Updates
   internal_status: String @default(value: "New")
   offense_level: String

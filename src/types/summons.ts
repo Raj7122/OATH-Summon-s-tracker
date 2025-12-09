@@ -11,6 +11,27 @@
  * Summons interface matching the GraphQL schema
  * All fields correspond to the DynamoDB table structure via Amplify
  */
+/**
+ * Attribution data for tracking who performed an action and when
+ * Used for audit trails on evidence tracking checkboxes and fields
+ */
+export interface AttributionData {
+  completed: boolean;
+  by?: string;       // User name who performed the action
+  userId?: string;   // User ID for reference
+  date?: string;     // ISO timestamp of when action was performed
+}
+
+/**
+ * DEP File Date attribution (includes the date value itself)
+ */
+export interface DepFileDateAttribution {
+  value?: string;    // The DEP file creation date (ISO string)
+  by?: string;       // User name who updated this field
+  userId?: string;   // User ID for reference
+  date?: string;     // ISO timestamp of when field was updated
+}
+
 export interface Summons {
   id: string;
   clientID: string;
@@ -34,11 +55,19 @@ export interface Summons {
   video_created_date?: string;
   lag_days?: number;
   notes?: string;
+  // Legacy boolean fields (kept for backward compatibility)
   added_to_calendar: boolean;
   evidence_reviewed: boolean;
   evidence_requested: boolean;
   evidence_requested_date?: string;
   evidence_received: boolean;
+  // New attribution-enabled evidence tracking fields
+  evidence_reviewed_attr?: AttributionData;
+  added_to_calendar_attr?: AttributionData;
+  evidence_requested_attr?: AttributionData;
+  evidence_received_attr?: AttributionData;
+  // DEP File Date with attribution (for delay tracking)
+  dep_file_date_attr?: DepFileDateAttribution;
   license_plate_ocr?: string;
   /** @deprecated Use id_number instead */
   dep_id?: string;
