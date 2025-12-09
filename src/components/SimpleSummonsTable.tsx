@@ -44,11 +44,15 @@ import {
   useTheme,
   useMediaQuery,
   alpha,
+  TextField,
+  InputAdornment,
 } from '@mui/material';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import FiberNewIcon from '@mui/icons-material/FiberNew';
 import UpdateIcon from '@mui/icons-material/Update';
 import FilterListIcon from '@mui/icons-material/FilterList';
+import SearchIcon from '@mui/icons-material/Search';
+import CloseIcon from '@mui/icons-material/Close';
 import SummonsDetailModal from './SummonsDetailModal';
 import { dataGridPremiumStyles } from '../theme';
 
@@ -67,6 +71,10 @@ interface SimpleSummonsTableProps {
   activeFilter?: 'all' | 'updated' | 'new';
   /** Optional: callback when filter changes */
   onFilterChange?: (filter: 'all' | 'updated' | 'new') => void;
+  /** Optional: search query value (controlled from parent) */
+  searchQuery?: string;
+  /** Optional: callback when search query changes */
+  onSearchChange?: (query: string) => void;
 }
 
 // Activity filter type
@@ -83,6 +91,8 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
   onUpdate,
   activeFilter: externalFilter,
   onFilterChange,
+  searchQuery = '',
+  onSearchChange,
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -464,6 +474,58 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
             )}
           </ToggleButton>
         </ToggleButtonGroup>
+
+        {/* Search Bar - After filter tabs */}
+        {onSearchChange && (
+          <TextField
+            placeholder="Search company, summons #, plate..."
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            size="small"
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" color="action" />
+                </InputAdornment>
+              ),
+              endAdornment: searchQuery && (
+                <InputAdornment position="end">
+                  <IconButton
+                    size="small"
+                    onClick={() => onSearchChange('')}
+                    edge="end"
+                    sx={{ mr: -0.5 }}
+                  >
+                    <CloseIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+            sx={{
+              flex: '1 1 auto',
+              maxWidth: { xs: '100%', sm: 280 },
+              minWidth: 180,
+              '& .MuiOutlinedInput-root': {
+                borderRadius: 2,
+                backgroundColor: 'background.paper',
+                border: '1.5px solid',
+                borderColor: (theme) => alpha(theme.palette.primary.main, 0.4),
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  borderColor: 'primary.main',
+                  boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)',
+                },
+                '&.Mui-focused': {
+                  borderColor: 'primary.main',
+                  boxShadow: (theme) => `0 0 0 3px ${alpha(theme.palette.primary.main, 0.2)}`,
+                },
+                '& .MuiOutlinedInput-notchedOutline': {
+                  border: 'none',
+                },
+              },
+            }}
+          />
+        )}
 
         {/* Results count */}
         <Typography

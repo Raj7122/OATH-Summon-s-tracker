@@ -913,49 +913,6 @@ const CalendarDashboard: React.FC = () => {
           )}
         </Box>
 
-        {/* Search Bar - Center position for prominence */}
-        <TextField
-          placeholder="Search company, summons #, or plate..."
-          value={dashboardSearch}
-          onChange={(e) => setDashboardSearch(e.target.value)}
-          size="small"
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon fontSize="small" color="action" />
-              </InputAdornment>
-            ),
-            endAdornment: dashboardSearch && (
-              <InputAdornment position="end">
-                <IconButton
-                  size="small"
-                  onClick={() => setDashboardSearch('')}
-                  edge="end"
-                  sx={{ mr: -0.5 }}
-                >
-                  <CloseIcon fontSize="small" />
-                </IconButton>
-              </InputAdornment>
-            ),
-          }}
-          sx={{
-            flex: { xs: '1 1 100%', sm: '0 1 320px' },
-            order: { xs: 3, sm: 0 },
-            '& .MuiOutlinedInput-root': {
-              borderRadius: 2.5,
-              backgroundColor: alpha(theme.palette.grey[500], 0.04),
-              transition: 'all 0.2s ease',
-              '&:hover': {
-                backgroundColor: alpha(theme.palette.grey[500], 0.08),
-              },
-              '&.Mui-focused': {
-                backgroundColor: 'background.paper',
-                boxShadow: `0 0 0 2px ${alpha(theme.palette.primary.main, 0.2)}`,
-              },
-            },
-          }}
-        />
-
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           {/* Mobile view toggle - Premium button group */}
           {isMobile && (
@@ -1106,12 +1063,14 @@ const CalendarDashboard: React.FC = () => {
                   </Alert>
                 )}
 
-                {/* Summons Table with Attached Filters */}
+                {/* Summons Table with Attached Filters and Search */}
                 <SimpleSummonsTable
                   summonses={filteredByDate}
                   onUpdate={handleSummonsUpdate}
                   activeFilter={activityFilter}
                   onFilterChange={handleFilterChange}
+                  searchQuery={dashboardSearch}
+                  onSearchChange={setDashboardSearch}
                 />
               </Paper>
             )}
