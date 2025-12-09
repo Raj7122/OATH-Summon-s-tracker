@@ -195,6 +195,7 @@ async function executePhase1MetadataSync() {
     newRecordsCreated: 0,
     recordsUpdated: 0,
     recordsSkipped: 0,
+    recordsSkippedNonIdling: 0, // Track non-IDLING violations that were filtered out
     recordsFlaggedForOCR: 0,
     recordsArchived: 0,
     errors: 0,
@@ -239,7 +240,12 @@ async function executePhase1MetadataSync() {
           results.recordsFlaggedForOCR++;
         }
       } else if (processResult.action === 'skipped') {
-        results.recordsSkipped++;
+        // Track non-IDLING violations separately for visibility
+        if (processResult.reason === 'not an IDLING violation') {
+          results.recordsSkippedNonIdling++;
+        } else {
+          results.recordsSkipped++;
+        }
       }
     } catch (error) {
       console.error(`Error processing summons ${apiSummons.ticket_number}:`, error.message);
@@ -259,9 +265,19 @@ async function executePhase1MetadataSync() {
 /**
  * Process a single summons - UPDATE METADATA ONLY (no OCR trigger)
  * Now includes Activity Log for audit trail and last_metadata_sync tracking
+ *
+ * IMPORTANT: Only processes IDLING violations per TRD requirements.
+ * Non-IDLING summonses are skipped entirely and not imported.
  */
 async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime) {
   const ticketNumber = apiSummons.ticket_number;
+
+  // FILTER: Only process IDLING violations (per TRD requirements)
+  const codeDescription = apiSummons.charge_1_code_description || apiSummons.charge_2_code_description || '';
+  if (!codeDescription.toUpperCase().includes('IDLING')) {
+    return { action: 'skipped', reason: 'not an IDLING violation' };
+  }
+
   const respondentFirstName = apiSummons.respondent_first_name || '';
   const respondentLastName = apiSummons.respondent_last_name || '';
   const respondentFullName = `${respondentFirstName} ${respondentLastName}`.trim();

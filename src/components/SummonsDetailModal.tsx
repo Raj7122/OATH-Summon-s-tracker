@@ -50,6 +50,8 @@ import {
   useTheme,
   useMediaQuery,
   Alert,
+  Snackbar,
+  Tooltip,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -64,6 +66,7 @@ import FactCheckIcon from '@mui/icons-material/FactCheck';
 import NotesIcon from '@mui/icons-material/Notes';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import VideocamIcon from '@mui/icons-material/Videocam';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import FiberNewIcon from '@mui/icons-material/FiberNew';
 import HistoryIcon from '@mui/icons-material/History';
@@ -282,6 +285,9 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
 
   // DEP File Date with attribution
   const [depFileDateAttr, setDepFileDateAttr] = useState<DepFileDateAttribution>({});
+
+  // Snackbar for copy feedback
+  const [copySnackbar, setCopySnackbar] = useState(false);
 
   // Helper to get attribution from summons or create default from legacy boolean
   const getAttrFromSummons = (
@@ -827,16 +833,27 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   >
                     Summons PDF
                   </Button>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    startIcon={<VideocamIcon />}
-                    component={Link}
-                    href={summons.video_link}
-                    target="_blank"
-                  >
-                    Video Evidence
-                  </Button>
+                  <Tooltip title="Copies summons # to clipboard, then opens NYC video search. Just paste and search!">
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={<VideocamIcon />}
+                      endIcon={<ContentCopyIcon sx={{ fontSize: 14 }} />}
+                      onClick={async () => {
+                        // Copy summons number to clipboard
+                        try {
+                          await navigator.clipboard.writeText(summons.summons_number);
+                          setCopySnackbar(true);
+                        } catch (err) {
+                          console.error('Failed to copy:', err);
+                        }
+                        // Open the search page
+                        window.open('https://nycidling.azurewebsites.net/idlingevidence', '_blank');
+                      }}
+                    >
+                      Video Evidence
+                    </Button>
+                  </Tooltip>
                 </Box>
               </CardContent>
             </Card>
@@ -1076,6 +1093,22 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
           Close
         </Button>
       </DialogActions>
+
+      {/* Copy confirmation snackbar */}
+      <Snackbar
+        open={copySnackbar}
+        autoHideDuration={3000}
+        onClose={() => setCopySnackbar(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setCopySnackbar(false)}
+          severity="success"
+          sx={{ width: '100%' }}
+        >
+          Summons # {summons?.summons_number} copied! Paste it in the search box.
+        </Alert>
+      </Snackbar>
     </Dialog>
   );
 };
