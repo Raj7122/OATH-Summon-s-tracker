@@ -348,27 +348,33 @@ const ClientDetail: React.FC = () => {
   }, []);
 
   /**
-   * Get enterprise-style status chip styling
-   * Uses outlined for neutral states, soft filled for active states
+   * Get MUI color for Status chip based on text value
+   *
+   * Matches the color scheme in SummonsTable.tsx for consistency:
+   * - Red (error): DEFAULT, JUDGMENT, VIOLATION, DOCKETED - urgent action required
+   * - Green (success): DISMISS, CLOSED, PAID - completed/resolved
+   * - Blue (info): SCHEDULED, HEARING, RESCHEDULED - active case
+   * - Gray (default): Unknown status
    */
-  const getEnterpriseStatusStyle = (status: string) => {
+  const getStatusColor = (status: string): 'error' | 'info' | 'success' | 'default' => {
     const upperStatus = (status || '').toUpperCase();
 
-    // Paid in Full - Soft Green
-    if (upperStatus.includes('PAID') || upperStatus.includes('SETTLED')) {
-      return { bgcolor: 'success.light', color: 'success.dark', variant: 'filled' as const };
-    }
-    // Default/Docketed - Soft Red (dangerous)
+    // Red: Danger statuses (DOCKETED = red)
     if (upperStatus.includes('DEFAULT') || upperStatus.includes('JUDGMENT') ||
-        upperStatus.includes('DOCKETED') || upperStatus.includes('VIOLATION')) {
-      return { bgcolor: 'error.light', color: 'error.dark', variant: 'filled' as const };
+        upperStatus.includes('VIOLATION') || upperStatus.includes('DOCKETED')) {
+      return 'error';
     }
-    // Rescheduled/Adjourned - Soft Blue
-    if (upperStatus.includes('RESCHEDULE') || upperStatus.includes('ADJOURN')) {
-      return { bgcolor: 'info.light', color: 'info.dark', variant: 'filled' as const };
+    // Green: Resolved statuses (PAID IN FULL = emerald green)
+    if (upperStatus.includes('DISMISS') || upperStatus.includes('CLOSED') ||
+        upperStatus.includes('PAID') || upperStatus.includes('SETTLED')) {
+      return 'success';
     }
-    // New Issuance/Pending - Outlined Grey (neutral)
-    return { variant: 'outlined' as const, color: 'default' as const };
+    // Blue: Active case statuses
+    if (upperStatus.includes('SCHEDULED') || upperStatus.includes('HEARING') ||
+        upperStatus.includes('RESCHEDULE') || upperStatus.includes('ADJOURN')) {
+      return 'info';
+    }
+    return 'default';
   };
 
   /**
@@ -383,7 +389,6 @@ const ClientDetail: React.FC = () => {
         const summons = params.row as Summons;
         const isNew = isNewRecord(summons);
         const isUpdated = isUpdatedRecord(summons);
-        const statusStyle = getEnterpriseStatusStyle(params.value);
 
         // Build tooltip content for UPDATED badge
         const changeTooltip = summons.last_change_summary
@@ -425,27 +430,13 @@ const ClientDetail: React.FC = () => {
               </Tooltip>
             )}
 
-            {/* Status Chip - Enterprise Style */}
-            {statusStyle.variant === 'outlined' ? (
-              <Chip
-                label={params.value || 'Unknown'}
-                variant="outlined"
-                size="small"
-                sx={{ height: 22, fontSize: '0.7rem', fontWeight: 500 }}
-              />
-            ) : (
-              <Chip
-                label={params.value || 'Unknown'}
-                size="small"
-                sx={{
-                  height: 22,
-                  fontSize: '0.7rem',
-                  fontWeight: 500,
-                  bgcolor: statusStyle.bgcolor,
-                  color: statusStyle.color,
-                }}
-              />
-            )}
+            {/* Status Chip - Color-coded to match Dashboard */}
+            <Chip
+              label={params.value || 'Unknown'}
+              color={getStatusColor(params.value)}
+              size="small"
+              sx={{ height: 22, fontSize: '0.7rem', fontWeight: 600 }}
+            />
           </Box>
         );
       },
