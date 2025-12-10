@@ -43,6 +43,9 @@ const STALE_THRESHOLD_HOURS = 48;
 // Polling interval (5 minutes)
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
 
+// Stuck sync threshold (15 minutes) - if syncing for longer, consider it stuck
+const STUCK_SYNC_THRESHOLD_MS = 15 * 60 * 1000;
+
 /**
  * Sync status badge color types
  */
@@ -78,13 +81,32 @@ function formatTimeAgo(timestamp: string | undefined | null): string {
 }
 
 /**
+ * Check if a sync appears to be stuck (in progress for too long)
+ */
+function isSyncStuck(syncStatus: SyncStatus | null): boolean {
+  if (!syncStatus?.sync_in_progress) return false;
+  if (!syncStatus.last_sync_attempt) return true; // No timestamp = stuck
+
+  const elapsedMs = Date.now() - new Date(syncStatus.last_sync_attempt).getTime();
+  return elapsedMs > STUCK_SYNC_THRESHOLD_MS;
+}
+
+/**
  * Determine the sync status level based on the sync data
  */
 function getSyncLevel(syncStatus: SyncStatus | null): SyncStatusLevel {
   if (!syncStatus) return 'unknown';
 
-  // If sync is currently in progress
-  if (syncStatus.sync_in_progress) return 'syncing';
+  // If sync is currently in progress, check if it's stuck
+  if (syncStatus.sync_in_progress) {
+    // If stuck for > 15 minutes, show actual status instead of "syncing"
+    if (isSyncStuck(syncStatus)) {
+      // Fall through to check last_successful_sync
+      console.warn('Sync appears stuck - showing last known status');
+    } else {
+      return 'syncing';
+    }
+  }
 
   // Check time since last successful sync
   const hoursSinceSync = getHoursSince(syncStatus.last_successful_sync);

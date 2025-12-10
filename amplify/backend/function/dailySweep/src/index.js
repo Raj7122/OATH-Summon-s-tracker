@@ -61,6 +61,49 @@ const MAX_OCR_REQUESTS_PER_DAY = 500;
 const OCR_THROTTLE_MS = 5000; // 5 seconds between requests (increased from 2 to avoid NYC server rate limits)
 const MAX_OCR_FAILURES = 3; // Max retry attempts before giving up
 const GHOST_GRACE_DAYS = 3; // Days before archiving missing records
+const SYNC_STUCK_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes - if sync_in_progress for longer, consider it stuck
+
+/**
+ * Check if a previous sync is stuck and reset if necessary.
+ * This handles cases where Lambda timed out or crashed before resetting sync_in_progress.
+ */
+async function checkAndResetStuckSync() {
+  try {
+    const result = await dynamodb.get({
+      TableName: SYNC_STATUS_TABLE,
+      Key: { id: 'GLOBAL' },
+    }).promise();
+
+    const syncStatus = result.Item;
+    if (!syncStatus || !syncStatus.sync_in_progress) {
+      return false; // Not stuck
+    }
+
+    // Check how long sync has been "in progress"
+    const lastAttempt = syncStatus.last_sync_attempt;
+    if (!lastAttempt) {
+      // No timestamp, reset it
+      console.warn('STUCK SYNC DETECTED: sync_in_progress=true but no last_sync_attempt timestamp');
+      await updateSyncStatus({ sync_in_progress: false });
+      return true;
+    }
+
+    const elapsedMs = Date.now() - new Date(lastAttempt).getTime();
+    if (elapsedMs > SYNC_STUCK_THRESHOLD_MS) {
+      console.warn(`STUCK SYNC DETECTED: sync_in_progress=true for ${Math.round(elapsedMs / 60000)} minutes`);
+      console.warn(`Resetting sync_in_progress flag (threshold: ${SYNC_STUCK_THRESHOLD_MS / 60000} minutes)`);
+      await updateSyncStatus({ sync_in_progress: false });
+      return true;
+    }
+
+    // Sync is legitimately in progress
+    console.log(`Another sync is in progress (started ${Math.round(elapsedMs / 1000)}s ago), skipping this run`);
+    return 'skip';
+  } catch (error) {
+    console.error('Error checking stuck sync:', error);
+    return false; // Proceed with sync on error
+  }
+}
 
 /**
  * Main handler for the daily sweep Lambda function
@@ -70,6 +113,18 @@ exports.handler = async (event) => {
   console.log('DAILY SWEEP - INCREMENTAL SYNC WITH PRIORITY QUEUING v2.0');
   console.log('Started:', new Date().toISOString());
   console.log('='.repeat(60));
+
+  // Check for stuck sync from previous run (Lambda timeout/crash recovery)
+  const stuckCheckResult = await checkAndResetStuckSync();
+  if (stuckCheckResult === 'skip') {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ message: 'Skipped - another sync is in progress' }),
+    };
+  }
+  if (stuckCheckResult === true) {
+    console.log('Recovered from stuck sync, proceeding with new sync...');
+  }
 
   const syncStartTime = new Date().toISOString();
 
