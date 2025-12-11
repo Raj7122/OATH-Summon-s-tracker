@@ -250,7 +250,8 @@ const ClientList: React.FC = () => {
 
       return {
         ...client,
-        totalCases: clientSummonses.length,
+        // totalCases now shows Active Era (2022+) count to match ClientDetail DataGrid display
+        totalCases: activeEraSummonses.length,
         activeCaseCount: activeCases.length,
         criticalCount: criticalCases.length,
         recentlyUpdatedCount: recentlyUpdatedCases.length,

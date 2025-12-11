@@ -192,22 +192,25 @@ export type DeadlineFilter = 'critical' | 'approaching' | 'hearing_complete' | '
 
 /**
  * Check if a summons is a new record (created within last 72 hours)
- * Brand new: created within last 72 hours AND createdAt matches updatedAt (never updated)
- * 
+ *
+ * A record is "NEW" if it was discovered/created within the last 72 hours.
+ * This indicates the daily sweep found a new summons from the NYC API.
+ *
  * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
+ *
+ * Note: We only check createdAt, not updatedAt, because the daily sweep runs OCR
+ * immediately after creation which updates updatedAt. Checking createdAt alone
+ * correctly identifies newly discovered summons.
  */
 export function isNewRecord(summons: Summons): boolean {
-  if (!summons.createdAt || !summons.updatedAt) return false;
+  if (!summons.createdAt) return false;
 
   const createdDate = new Date(summons.createdAt);
-  const updatedDate = new Date(summons.updatedAt);
   const now = new Date();
   const hoursSinceCreation = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
 
-  // Brand new: created within last 72 hours AND createdAt matches updatedAt (never updated)
-  const createdTimeStr = createdDate.toISOString().slice(0, 16);
-  const updatedTimeStr = updatedDate.toISOString().slice(0, 16);
-  return hoursSinceCreation <= 72 && createdTimeStr === updatedTimeStr;
+  // NEW: created within last 72 hours (discovered by daily sweep recently)
+  return hoursSinceCreation <= 72;
 }
 
 /**

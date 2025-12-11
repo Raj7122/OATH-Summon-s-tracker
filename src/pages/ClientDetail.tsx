@@ -302,7 +302,8 @@ const ClientDetail: React.FC = () => {
     });
 
     return {
-      totalAllTime: summonses.length,
+      // totalAllTime now shows Active Era (2022+) count to match DataGrid display
+      totalAllTime: activeEraSummonses.length,
       totalActive: activeEraSummonses.length,
       openCases: openCases.length,
       criticalCases: criticalCases.length,
