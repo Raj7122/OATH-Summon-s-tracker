@@ -1,8 +1,18 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { fetchAuthSession, signIn, signOut, getCurrentUser, AuthUser, confirmSignIn } from 'aws-amplify/auth';
+import { fetchAuthSession, signIn, signOut, getCurrentUser, AuthUser, confirmSignIn, fetchUserAttributes } from 'aws-amplify/auth';
+
+/**
+ * Extended user info including display name from Cognito attributes
+ */
+interface UserInfo {
+  userId: string;
+  username: string;  // email
+  displayName: string;  // name attribute (Jacky, Arthur, Jelly)
+}
 
 interface AuthContextType {
   user: AuthUser | null;
+  userInfo: UserInfo | null;  // Extended user info with display name
   loading: boolean;
   signIn: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -15,6 +25,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [requiresPasswordChange, setRequiresPasswordChange] = useState(false);
 
@@ -29,10 +40,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (session.tokens?.accessToken) {
         const currentUser = await getCurrentUser();
         setUser(currentUser);
+
+        // Fetch user attributes to get display name
+        try {
+          const attributes = await fetchUserAttributes();
+          setUserInfo({
+            userId: currentUser.userId,
+            username: currentUser.username,
+            displayName: attributes.name || currentUser.username.split('@')[0], // fallback to email prefix
+          });
+        } catch (attrError) {
+          console.log('Could not fetch user attributes:', attrError);
+          // Fallback to email prefix as display name
+          setUserInfo({
+            userId: currentUser.userId,
+            username: currentUser.username,
+            displayName: currentUser.username.split('@')[0],
+          });
+        }
       }
     } catch (error) {
       console.log('No authenticated user', error);
       setUser(null);
+      setUserInfo(null);
     } finally {
       setLoading(false);
     }
@@ -75,6 +105,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await signOut();
       setUser(null);
+      setUserInfo(null);
     } catch (error) {
       console.error('Error signing out:', error);
       throw error;
@@ -83,6 +114,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const value: AuthContextType = {
     user,
+    userInfo,
     loading,
     signIn: handleSignIn,
     signOut: handleSignOut,

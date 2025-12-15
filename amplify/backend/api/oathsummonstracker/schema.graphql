@@ -51,26 +51,21 @@ type Summons @model @auth(rules: [{ allow: private }]) {
   lag_days: Int
 
   # User-Input Fields (FR-05, FR-06, FR-07, TRD v1.8)
-  notes: String
+  notes: String  # Legacy field - kept for backward compatibility
+  # Threaded comments with attribution (replaces simple notes field)
+  # Structure: [{ id, text, by, userId, date }]
+  notes_comments: AWSJSON
   added_to_calendar: Boolean @default(value: "false")
   evidence_reviewed: Boolean @default(value: "false")
   evidence_requested: Boolean @default(value: "false")
   evidence_requested_date: AWSDateTime
   evidence_received: Boolean @default(value: "false")
 
-  # Evidence Tracking Attribution (TRD v1.9: Audit Trail)
-  # Each stores: { completed: boolean, by: string, userId: string, date: string }
-  evidence_reviewed_attr: AWSJSON
-  added_to_calendar_attr: AWSJSON
-  evidence_requested_attr: AWSJSON
-  evidence_received_attr: AWSJSON
-
-  # DEP File Date with Attribution (for delay tracking)
-  # Stores: { value: string (ISO date), by: string, userId: string, date: string }
-  dep_file_date_attr: AWSJSON
-
   # TRD v1.8: Client Feedback Updates
   internal_status: String @default(value: "New")
+  # Internal status with attribution (who changed it and when)
+  # Structure: { value: string, by: string, userId: string, date: string }
+  internal_status_attr: AWSJSON
   offense_level: String
   agency_id_number: String
 

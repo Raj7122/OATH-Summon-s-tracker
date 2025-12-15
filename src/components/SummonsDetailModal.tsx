@@ -67,7 +67,6 @@ import NotesIcon from '@mui/icons-material/Notes';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import VideocamIcon from '@mui/icons-material/Videocam';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import FiberNewIcon from '@mui/icons-material/FiberNew';
 import HistoryIcon from '@mui/icons-material/History';
 import ScheduleIcon from '@mui/icons-material/Schedule';
@@ -81,14 +80,10 @@ import PersonIcon from '@mui/icons-material/Person';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 
 // Import shared types
-import { Summons, getStatusColor, ActivityLogEntry, AttributionData, DepFileDateAttribution } from '../types/summons';
+import { Summons, getStatusColor, ActivityLogEntry, AttributionData, DepFileDateAttribution, NoteComment, InternalStatusAttribution } from '../types/summons';
 import { isNewRecord, isUpdatedRecord } from '../types/summons';
-
-// Mock current user (until real auth is connected)
-const MOCK_CURRENT_USER = {
-  id: 'user-arthur-001',
-  name: 'Arthur',
-};
+import { useAuth } from '../contexts/AuthContext';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Props for SummonsDetailModal component
@@ -270,11 +265,19 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  
+  const { userInfo } = useAuth();
+
+  // Get current user info (with fallback for safety)
+  const currentUser = {
+    id: userInfo?.userId || 'unknown',
+    name: userInfo?.displayName || 'Unknown User',
+  };
+
   // Local state for editable fields
-  const [notes, setNotes] = useState('');
-  const [notesSaved, setNotesSaved] = useState(false);
+  const [newComment, setNewComment] = useState('');  // For new comment input
+  const [comments, setComments] = useState<NoteComment[]>([]);  // Threaded comments
   const [internalStatus, setInternalStatus] = useState('New');
+  const [internalStatusAttr, setInternalStatusAttr] = useState<InternalStatusAttribution>({});
 
   // Local state for checkboxes with attribution (for immediate UI feedback)
   const [evidenceReviewedAttr, setEvidenceReviewedAttr] = useState<AttributionData>({ completed: false });
@@ -301,9 +304,26 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   // Initialize local state when summons changes
   useEffect(() => {
     if (summons) {
-      setNotes(summons.notes || '');
+      // Load threaded comments (parse if JSON string, or use as array)
+      let loadedComments: NoteComment[] = [];
+      if (summons.notes_comments) {
+        if (typeof summons.notes_comments === 'string') {
+          try {
+            loadedComments = JSON.parse(summons.notes_comments);
+          } catch {
+            loadedComments = [];
+          }
+        } else if (Array.isArray(summons.notes_comments)) {
+          loadedComments = summons.notes_comments;
+        }
+      }
+      setComments(loadedComments);
+      setNewComment('');
+
+      // Internal status with attribution
       setInternalStatus(summons.internal_status || 'New');
-      setNotesSaved(false);
+      setInternalStatusAttr(summons.internal_status_attr || {});
+
       // Sync checkbox states with attribution
       setEvidenceReviewedAttr(getAttrFromSummons(summons.evidence_reviewed_attr, summons.evidence_reviewed || false));
       setAddedToCalendarAttr(getAttrFromSummons(summons.added_to_calendar_attr, summons.added_to_calendar || false));
@@ -315,19 +335,6 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     }
   }, [summons]);
   
-  // Auto-save notes with debounce
-  useEffect(() => {
-    if (!summons || notes === (summons.notes || '')) return;
-    
-    const timer = setTimeout(() => {
-      onUpdate(summons.id, 'notes', notes);
-      setNotesSaved(true);
-      setTimeout(() => setNotesSaved(false), 2000);
-    }, 1000);
-    
-    return () => clearTimeout(timer);
-  }, [notes, summons, onUpdate]);
-  
   if (!summons) return null;
   
   /**
@@ -338,8 +345,8 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     const now = dayjs().toISOString();
     const newAttr: AttributionData = {
       completed: checked,
-      by: checked ? MOCK_CURRENT_USER.name : undefined,
-      userId: checked ? MOCK_CURRENT_USER.id : undefined,
+      by: checked ? currentUser.name : undefined,
+      userId: checked ? currentUser.id : undefined,
       date: checked ? now : undefined,
     };
 
@@ -376,12 +383,44 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     const now = dayjs().toISOString();
     const newAttr: DepFileDateAttribution = {
       value: date?.toISOString() || undefined,
-      by: MOCK_CURRENT_USER.name,
-      userId: MOCK_CURRENT_USER.id,
+      by: currentUser.name,
+      userId: currentUser.id,
       date: now,
     };
     setDepFileDateAttr(newAttr);
     onUpdate(summons.id, 'dep_file_date_attr', newAttr);
+  };
+
+  /**
+   * Handle adding a new comment
+   */
+  const handleAddComment = () => {
+    if (!newComment.trim()) return;
+
+    const now = dayjs().toISOString();
+    const comment: NoteComment = {
+      id: uuidv4(),
+      text: newComment.trim(),
+      by: currentUser.name,
+      userId: currentUser.id,
+      date: now,
+    };
+
+    const updatedComments = [...comments, comment];
+    setComments(updatedComments);
+    setNewComment('');
+
+    // Persist to backend
+    onUpdate(summons.id, 'notes_comments', updatedComments);
+  };
+
+  /**
+   * Handle deleting a comment (only own comments can be deleted)
+   */
+  const handleDeleteComment = (commentId: string) => {
+    const updatedComments = comments.filter(c => c.id !== commentId);
+    setComments(updatedComments);
+    onUpdate(summons.id, 'notes_comments', updatedComments);
   };
 
   /**
@@ -417,11 +456,23 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   };
   
   /**
-   * Handle internal status change
+   * Handle internal status change with attribution
    */
   const handleInternalStatusChange = (value: string) => {
+    const now = dayjs().toISOString();
+    const newAttr: InternalStatusAttribution = {
+      value,
+      by: currentUser.name,
+      userId: currentUser.id,
+      date: now,
+    };
+
     setInternalStatus(value);
+    setInternalStatusAttr(newAttr);
+
+    // Persist both legacy field and attribution
     onUpdate(summons.id, 'internal_status', value);
+    onUpdate(summons.id, 'internal_status_attr', newAttr);
   };
   
   /**
@@ -866,8 +917,8 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   title="Internal Notes"
                 />
 
-                {/* Internal Status Dropdown */}
-                <FormControl fullWidth size="small" sx={{ mb: 2 }}>
+                {/* Internal Status Dropdown with Attribution */}
+                <FormControl fullWidth size="small" sx={{ mb: 1 }}>
                   <InputLabel>Internal Status</InputLabel>
                   <Select
                     value={internalStatus}
@@ -881,41 +932,102 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                     ))}
                   </Select>
                 </FormControl>
+                {/* Internal Status Attribution */}
+                {internalStatusAttr.by && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                    <PersonIcon sx={{ fontSize: 12, color: 'text.secondary', mr: 0.5 }} />
+                    <Typography variant="caption" color="text.secondary">
+                      Changed by {internalStatusAttr.by} • {formatAttributionTime(internalStatusAttr.date)}
+                    </Typography>
+                  </Box>
+                )}
 
-                {/* Notes TextField with Auto-Save */}
-                <Box sx={{ position: 'relative' }}>
+                <Divider sx={{ my: 2 }} />
+
+                {/* Threaded Comments */}
+                <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+                  Comments ({comments.length})
+                </Typography>
+
+                {/* Comments List */}
+                <Box sx={{ maxHeight: 300, overflowY: 'auto', mb: 2 }}>
+                  {comments.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic', py: 2 }}>
+                      No comments yet. Add the first comment below.
+                    </Typography>
+                  ) : (
+                    comments
+                      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                      .map((comment) => (
+                        <Box
+                          key={comment.id}
+                          sx={{
+                            p: 1.5,
+                            mb: 1,
+                            bgcolor: comment.userId === currentUser.id ? 'primary.50' : 'grey.50',
+                            borderRadius: 1,
+                            border: '1px solid',
+                            borderColor: comment.userId === currentUser.id ? 'primary.200' : 'grey.200',
+                          }}
+                        >
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.5 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <PersonIcon sx={{ fontSize: 14, color: 'primary.main' }} />
+                              <Typography variant="caption" sx={{ fontWeight: 600, color: 'primary.main' }}>
+                                {comment.by}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                • {formatAttributionTime(comment.date)}
+                              </Typography>
+                            </Box>
+                            {/* Delete button - only for own comments */}
+                            {comment.userId === currentUser.id && (
+                              <IconButton
+                                size="small"
+                                onClick={() => handleDeleteComment(comment.id)}
+                                sx={{ p: 0.25, color: 'text.secondary', '&:hover': { color: 'error.main' } }}
+                              >
+                                <CloseIcon sx={{ fontSize: 14 }} />
+                              </IconButton>
+                            )}
+                          </Box>
+                          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                            {comment.text}
+                          </Typography>
+                        </Box>
+                      ))
+                  )}
+                </Box>
+
+                {/* Add New Comment */}
+                <Box sx={{ display: 'flex', gap: 1 }}>
                   <TextField
                     fullWidth
                     multiline
-                    rows={4}
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Add internal notes about this summons... (auto-saves after 1 second)"
+                    rows={2}
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    placeholder="Add a comment..."
                     variant="outlined"
                     size="small"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                        handleAddComment();
+                      }
+                    }}
                   />
-                  {notesSaved && (
-                    <Box
-                      sx={{
-                        position: 'absolute',
-                        top: 8,
-                        right: 8,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 0.5,
-                        backgroundColor: 'success.light',
-                        color: 'success.contrastText',
-                        px: 1,
-                        py: 0.25,
-                        borderRadius: 1,
-                        fontSize: '0.75rem',
-                      }}
-                    >
-                      <CheckCircleIcon sx={{ fontSize: 14 }} />
-                      Saved
-                    </Box>
-                  )}
+                  <Button
+                    variant="contained"
+                    onClick={handleAddComment}
+                    disabled={!newComment.trim()}
+                    sx={{ alignSelf: 'flex-end' }}
+                  >
+                    Add
+                  </Button>
                 </Box>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                  Press Cmd+Enter (Mac) or Ctrl+Enter (Windows) to submit
+                </Typography>
               </CardContent>
             </Card>
 
