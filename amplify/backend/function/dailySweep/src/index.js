@@ -58,52 +58,9 @@ const NYC_API_URL = 'https://data.cityofnewyork.us/resource/jz4z-kudi.json';
 
 // Priority Queue Configuration
 const MAX_OCR_REQUESTS_PER_DAY = 500;
-const OCR_THROTTLE_MS = 5000; // 5 seconds between requests (increased from 2 to avoid NYC server rate limits)
+const OCR_THROTTLE_MS = 2000; // 2 seconds between requests
 const MAX_OCR_FAILURES = 3; // Max retry attempts before giving up
 const GHOST_GRACE_DAYS = 3; // Days before archiving missing records
-const SYNC_STUCK_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes - if sync_in_progress for longer, consider it stuck
-
-/**
- * Check if a previous sync is stuck and reset if necessary.
- * This handles cases where Lambda timed out or crashed before resetting sync_in_progress.
- */
-async function checkAndResetStuckSync() {
-  try {
-    const result = await dynamodb.get({
-      TableName: SYNC_STATUS_TABLE,
-      Key: { id: 'GLOBAL' },
-    }).promise();
-
-    const syncStatus = result.Item;
-    if (!syncStatus || !syncStatus.sync_in_progress) {
-      return false; // Not stuck
-    }
-
-    // Check how long sync has been "in progress"
-    const lastAttempt = syncStatus.last_sync_attempt;
-    if (!lastAttempt) {
-      // No timestamp, reset it
-      console.warn('STUCK SYNC DETECTED: sync_in_progress=true but no last_sync_attempt timestamp');
-      await updateSyncStatus({ sync_in_progress: false });
-      return true;
-    }
-
-    const elapsedMs = Date.now() - new Date(lastAttempt).getTime();
-    if (elapsedMs > SYNC_STUCK_THRESHOLD_MS) {
-      console.warn(`STUCK SYNC DETECTED: sync_in_progress=true for ${Math.round(elapsedMs / 60000)} minutes`);
-      console.warn(`Resetting sync_in_progress flag (threshold: ${SYNC_STUCK_THRESHOLD_MS / 60000} minutes)`);
-      await updateSyncStatus({ sync_in_progress: false });
-      return true;
-    }
-
-    // Sync is legitimately in progress
-    console.log(`Another sync is in progress (started ${Math.round(elapsedMs / 1000)}s ago), skipping this run`);
-    return 'skip';
-  } catch (error) {
-    console.error('Error checking stuck sync:', error);
-    return false; // Proceed with sync on error
-  }
-}
 
 /**
  * Main handler for the daily sweep Lambda function
@@ -113,18 +70,6 @@ exports.handler = async (event) => {
   console.log('DAILY SWEEP - INCREMENTAL SYNC WITH PRIORITY QUEUING v2.0');
   console.log('Started:', new Date().toISOString());
   console.log('='.repeat(60));
-
-  // Check for stuck sync from previous run (Lambda timeout/crash recovery)
-  const stuckCheckResult = await checkAndResetStuckSync();
-  if (stuckCheckResult === 'skip') {
-    return {
-      statusCode: 200,
-      body: JSON.stringify({ message: 'Skipped - another sync is in progress' }),
-    };
-  }
-  if (stuckCheckResult === true) {
-    console.log('Recovered from stuck sync, proceeding with new sync...');
-  }
 
   const syncStartTime = new Date().toISOString();
 
@@ -250,7 +195,6 @@ async function executePhase1MetadataSync() {
     newRecordsCreated: 0,
     recordsUpdated: 0,
     recordsSkipped: 0,
-    recordsSkippedNonIdling: 0, // Track non-IDLING violations that were filtered out
     recordsFlaggedForOCR: 0,
     recordsArchived: 0,
     errors: 0,
@@ -295,12 +239,7 @@ async function executePhase1MetadataSync() {
           results.recordsFlaggedForOCR++;
         }
       } else if (processResult.action === 'skipped') {
-        // Track non-IDLING violations separately for visibility
-        if (processResult.reason === 'not an IDLING violation') {
-          results.recordsSkippedNonIdling++;
-        } else {
-          results.recordsSkipped++;
-        }
+        results.recordsSkipped++;
       }
     } catch (error) {
       console.error(`Error processing summons ${apiSummons.ticket_number}:`, error.message);
@@ -320,19 +259,9 @@ async function executePhase1MetadataSync() {
 /**
  * Process a single summons - UPDATE METADATA ONLY (no OCR trigger)
  * Now includes Activity Log for audit trail and last_metadata_sync tracking
- *
- * IMPORTANT: Only processes IDLING violations per TRD requirements.
- * Non-IDLING summonses are skipped entirely and not imported.
  */
 async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime) {
   const ticketNumber = apiSummons.ticket_number;
-
-  // FILTER: Only process IDLING violations (per TRD requirements)
-  const codeDescription = apiSummons.charge_1_code_description || apiSummons.charge_2_code_description || '';
-  if (!codeDescription.toUpperCase().includes('IDLING')) {
-    return { action: 'skipped', reason: 'not an IDLING violation' };
-  }
-
   const respondentFirstName = apiSummons.respondent_first_name || '';
   const respondentLastName = apiSummons.respondent_last_name || '';
   const respondentFullName = `${respondentFirstName} ${respondentLastName}`.trim();
@@ -1198,6 +1127,9 @@ function buildClientNameMap(clients) {
 
 /**
  * Fetch OATH summonses from NYC Open Data API for specific client names
+ * FILTERS:
+ *   - IDLING violations only (charge_1_code_description or charge_2_code_description contains 'IDLING')
+ *   - Hearing date >= 2022-01-01 (per TRD requirements)
  */
 async function fetchNYCDataForClients(clients) {
   const allSummonses = [];
@@ -1223,13 +1155,25 @@ async function fetchNYCDataForClients(clients) {
   });
 
   console.log(`Searching for ${searchTerms.size} unique client name patterns...`);
+  console.log('FILTERS: IDLING violations only, hearing_date >= 2022-01-01');
 
   for (const searchTerm of searchTerms) {
     try {
       const url = new URL(NYC_API_URL);
       url.searchParams.append('$limit', 500);
       const escapedTerm = searchTerm.replace(/'/g, "''");
-      url.searchParams.append('$where', `upper(respondent_last_name) like '%${escapedTerm}%'`);
+
+      // CRITICAL FILTERS:
+      // 1. Match client name in respondent_last_name
+      // 2. IDLING violations only (check both charge fields)
+      // 3. Hearing date >= 2022-01-01
+      const whereClause = [
+        `upper(respondent_last_name) like '%${escapedTerm}%'`,
+        `(upper(charge_1_code_description) like '%IDLING%' OR upper(charge_2_code_description) like '%IDLING%')`,
+        `hearing_date >= '2022-01-01T00:00:00'`
+      ].join(' AND ');
+
+      url.searchParams.append('$where', whereClause);
 
       const response = await fetch(url.toString(), { headers });
 
@@ -1247,7 +1191,7 @@ async function fetchNYCDataForClients(clients) {
         }
       }
 
-      console.log(`  Found ${data.length} for "${searchTerm}"`);
+      console.log(`  Found ${data.length} IDLING (2022+) for "${searchTerm}"`);
     } catch (error) {
       console.error(`Error querying for "${searchTerm}":`, error.message);
     }
@@ -1483,12 +1427,9 @@ async function updateSyncStatus(updates) {
     expressionAttributeValues[attrValue] = value;
   });
 
-  // Add updatedAt and __typename (required by Amplify GraphQL)
+  // Add updatedAt
   updateExpressions.push('updatedAt = :updatedAt');
   expressionAttributeValues[':updatedAt'] = new Date().toISOString();
-  updateExpressions.push('#typename = :typename');
-  expressionAttributeNames['#typename'] = '__typename';
-  expressionAttributeValues[':typename'] = 'SyncStatus';
 
   const params = {
     TableName: SYNC_STATUS_TABLE,
@@ -1510,7 +1451,6 @@ async function updateSyncStatus(updates) {
         TableName: SYNC_STATUS_TABLE,
         Item: {
           id: 'GLOBAL',
-          __typename: 'SyncStatus',
           ...updates,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -1544,7 +1484,6 @@ async function getOrResetDailyOCRCounter() {
         TableName: SYNC_STATUS_TABLE,
         Item: {
           id: 'GLOBAL',
-          __typename: 'SyncStatus',
           ocr_processed_today: 0,
           ocr_processing_date: today,
           createdAt: new Date().toISOString(),
