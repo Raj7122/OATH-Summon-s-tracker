@@ -8,6 +8,30 @@ This system replaces the firm's manual process of downloading and filtering publ
 
 **Target MVP Date**: December 18, 2025
 
+## Quick Start
+
+```bash
+# Install dependencies
+npm install
+
+# Run locally (requires Amplify backend to be deployed first)
+npm run dev
+
+# Build for production
+npm run build
+
+# Run tests
+npm test
+
+# Deploy backend to AWS
+amplify push
+
+# Deploy frontend + backend to production
+amplify publish
+```
+
+See [Getting Started](#getting-started) below for full setup instructions including AWS Amplify configuration.
+
 ## Features
 
 - ✅ User authentication (Amazon Cognito)
@@ -852,6 +876,54 @@ For issues or questions:
 2. Review CloudWatch logs for Lambda function errors
 3. Consult the AWS Amplify documentation: https://docs.amplify.aws/
 
+---
+
+## Backup & Recovery
+
+### Code Backup
+
+The application code is stored in a GitHub repository. The owner can download a complete backup at any time:
+
+1. Go to the GitHub repository URL (provided separately)
+2. Click the green "Code" button
+3. Select "Download ZIP"
+4. Save the ZIP file to a safe location
+
+This ZIP contains all frontend code, Lambda functions, and configuration files needed to redeploy the application.
+
+### Data Backup
+
+Data is automatically backed up by AWS DynamoDB's continuous backup feature. Additionally:
+
+1. **Export to CSV**: Users can export summons data from the Dashboard at any time
+2. **DynamoDB Exports**: The account owner can use AWS Console to export full table backups to S3
+
+### Disaster Recovery
+
+If the application needs to be redeployed to a new AWS account:
+
+1. Download the code ZIP from GitHub
+2. Create new AWS and Google Cloud accounts (see `FOR_ARTHUR_ACCOUNT_SETUP.md`)
+3. Follow the "Getting Started" section above to redeploy
+4. Import any backed-up data using DynamoDB import tools
+
+---
+
+## Handoff Documentation
+
+This repository includes additional documentation for project handoff:
+
+| Document | Purpose |
+|----------|---------|
+| `FOR_ARTHUR_ACCOUNT_SETUP.md` | Account setup guide for the non-technical client |
+| `CLIENT_USER_MANUAL.md` | End-user manual for Arthur, Jackie, and Jelly |
+| `TRD.md` | Complete Technical Requirements Document |
+| `CLAUDE.md` | AI Assistant context and coding guidelines |
+| `CONTRIBUTING.md` | Guidelines for contributing to the project |
+| `LICENSE` | Proprietary software license |
+
+---
+
 ## License
 
 Private - Law Office of Arthur L. Miller
@@ -864,5 +936,5 @@ Private - Law Office of Arthur L. Miller
 
 ---
 
-**Last Updated**: November 17, 2025
+**Last Updated**: December 21, 2025
 **Version**: 1.0.0 (MVP)
