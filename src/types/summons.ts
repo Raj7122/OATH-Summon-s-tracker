@@ -32,6 +32,30 @@ export interface DepFileDateAttribution {
   date?: string;     // ISO timestamp of when field was updated
 }
 
+/**
+ * Internal status attribution (tracks who changed the status and when)
+ */
+export interface InternalStatusAttribution {
+  value?: string;    // The internal status value (New, Reviewing, etc.)
+  by?: string;       // User name who changed the status
+  userId?: string;   // User ID for reference
+  date?: string;     // ISO timestamp of when status was changed
+}
+
+/**
+ * A single comment/note with attribution
+ * Used for threaded comments in the notes section
+ */
+export interface NoteComment {
+  id: string;        // Unique ID for the comment (UUID)
+  text: string;      // The comment text
+  by: string;        // User name who wrote the comment
+  userId: string;    // User ID for reference
+  date: string;      // ISO timestamp of when comment was created
+  edited?: boolean;  // True if comment was edited
+  editedDate?: string; // ISO timestamp of last edit
+}
+
 export interface Summons {
   id: string;
   clientID: string;
@@ -54,7 +78,9 @@ export interface Summons {
   video_link: string;
   video_created_date?: string;
   lag_days?: number;
-  notes?: string;
+  notes?: string;  // Legacy field - kept for backward compatibility
+  // Threaded comments with attribution (replaces simple notes field)
+  notes_comments?: NoteComment[];
   // Legacy boolean fields (kept for backward compatibility)
   added_to_calendar: boolean;
   evidence_reviewed: boolean;
@@ -81,6 +107,8 @@ export interface Summons {
   name_on_summons_ocr?: string;
   // TRD v1.8: Client Feedback Updates
   internal_status?: string;
+  // Internal status with attribution (who changed it and when)
+  internal_status_attr?: InternalStatusAttribution;
   offense_level?: string;
   agency_id_number?: string;
   // Change Tracking (for UPDATED badge transparency)
@@ -192,22 +220,25 @@ export type DeadlineFilter = 'critical' | 'approaching' | 'hearing_complete' | '
 
 /**
  * Check if a summons is a new record (created within last 72 hours)
- * Brand new: created within last 72 hours AND createdAt matches updatedAt (never updated)
- * 
+ *
+ * A record is "NEW" if it was discovered/created within the last 72 hours.
+ * This indicates the daily sweep found a new summons from the NYC API.
+ *
  * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
+ *
+ * Note: We only check createdAt, not updatedAt, because the daily sweep runs OCR
+ * immediately after creation which updates updatedAt. Checking createdAt alone
+ * correctly identifies newly discovered summons.
  */
 export function isNewRecord(summons: Summons): boolean {
-  if (!summons.createdAt || !summons.updatedAt) return false;
+  if (!summons.createdAt) return false;
 
   const createdDate = new Date(summons.createdAt);
-  const updatedDate = new Date(summons.updatedAt);
   const now = new Date();
   const hoursSinceCreation = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
 
-  // Brand new: created within last 72 hours AND createdAt matches updatedAt (never updated)
-  const createdTimeStr = createdDate.toISOString().slice(0, 16);
-  const updatedTimeStr = updatedDate.toISOString().slice(0, 16);
-  return hoursSinceCreation <= 72 && createdTimeStr === updatedTimeStr;
+  // NEW: created within last 72 hours (discovered by daily sweep recently)
+  return hoursSinceCreation <= 72;
 }
 
 /**

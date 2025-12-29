@@ -58,7 +58,7 @@ const NYC_API_URL = 'https://data.cityofnewyork.us/resource/jz4z-kudi.json';
 
 // Priority Queue Configuration
 const MAX_OCR_REQUESTS_PER_DAY = 500;
-const OCR_THROTTLE_MS = 5000; // 5 seconds between requests (increased from 2 to avoid NYC server rate limits)
+const OCR_THROTTLE_MS = 2000; // 2 seconds between requests
 const MAX_OCR_FAILURES = 3; // Max retry attempts before giving up
 const GHOST_GRACE_DAYS = 3; // Days before archiving missing records
 
@@ -1127,6 +1127,9 @@ function buildClientNameMap(clients) {
 
 /**
  * Fetch OATH summonses from NYC Open Data API for specific client names
+ * FILTERS:
+ *   - IDLING violations only (charge_1_code_description or charge_2_code_description contains 'IDLING')
+ *   - Hearing date >= 2022-01-01 (per TRD requirements)
  */
 async function fetchNYCDataForClients(clients) {
   const allSummonses = [];
@@ -1152,13 +1155,25 @@ async function fetchNYCDataForClients(clients) {
   });
 
   console.log(`Searching for ${searchTerms.size} unique client name patterns...`);
+  console.log('FILTERS: IDLING violations only, hearing_date >= 2022-01-01');
 
   for (const searchTerm of searchTerms) {
     try {
       const url = new URL(NYC_API_URL);
       url.searchParams.append('$limit', 500);
       const escapedTerm = searchTerm.replace(/'/g, "''");
-      url.searchParams.append('$where', `upper(respondent_last_name) like '%${escapedTerm}%'`);
+
+      // CRITICAL FILTERS:
+      // 1. Match client name in respondent_last_name
+      // 2. IDLING violations only (check both charge fields)
+      // 3. Hearing date >= 2022-01-01
+      const whereClause = [
+        `upper(respondent_last_name) like '%${escapedTerm}%'`,
+        `(upper(charge_1_code_description) like '%IDLING%' OR upper(charge_2_code_description) like '%IDLING%')`,
+        `hearing_date >= '2022-01-01T00:00:00'`
+      ].join(' AND ');
+
+      url.searchParams.append('$where', whereClause);
 
       const response = await fetch(url.toString(), { headers });
 
@@ -1176,7 +1191,7 @@ async function fetchNYCDataForClients(clients) {
         }
       }
 
-      console.log(`  Found ${data.length} for "${searchTerm}"`);
+      console.log(`  Found ${data.length} IDLING (2022+) for "${searchTerm}"`);
     } catch (error) {
       console.error(`Error querying for "${searchTerm}":`, error.message);
     }
@@ -1412,12 +1427,9 @@ async function updateSyncStatus(updates) {
     expressionAttributeValues[attrValue] = value;
   });
 
-  // Add updatedAt and __typename (required by Amplify GraphQL)
+  // Add updatedAt
   updateExpressions.push('updatedAt = :updatedAt');
   expressionAttributeValues[':updatedAt'] = new Date().toISOString();
-  updateExpressions.push('#typename = :typename');
-  expressionAttributeNames['#typename'] = '__typename';
-  expressionAttributeValues[':typename'] = 'SyncStatus';
 
   const params = {
     TableName: SYNC_STATUS_TABLE,
@@ -1439,7 +1451,6 @@ async function updateSyncStatus(updates) {
         TableName: SYNC_STATUS_TABLE,
         Item: {
           id: 'GLOBAL',
-          __typename: 'SyncStatus',
           ...updates,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -1473,7 +1484,6 @@ async function getOrResetDailyOCRCounter() {
         TableName: SYNC_STATUS_TABLE,
         Item: {
           id: 'GLOBAL',
-          __typename: 'SyncStatus',
           ocr_processed_today: 0,
           ocr_processing_date: today,
           createdAt: new Date().toISOString(),

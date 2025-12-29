@@ -88,12 +88,14 @@ export const getSummons = /* GraphQL */ `
       video_created_date
       lag_days
       notes
+      notes_comments
       added_to_calendar
       evidence_reviewed
       evidence_requested
       evidence_requested_date
       evidence_received
       internal_status
+      internal_status_attr
       offense_level
       agency_id_number
       last_change_summary
@@ -152,12 +154,14 @@ export const listSummons = /* GraphQL */ `
         video_created_date
         lag_days
         notes
+        notes_comments
         added_to_calendar
         evidence_reviewed
         evidence_requested
         evidence_requested_date
         evidence_received
         internal_status
+        internal_status_attr
         offense_level
         agency_id_number
         last_change_summary
@@ -295,12 +299,14 @@ export const summonsByClientIDAndHearing_date = /* GraphQL */ `
         video_created_date
         lag_days
         notes
+        notes_comments
         added_to_calendar
         evidence_reviewed
         evidence_requested
         evidence_requested_date
         evidence_received
         internal_status
+        internal_status_attr
         offense_level
         agency_id_number
         last_change_summary
@@ -370,12 +376,14 @@ export const summonsBySummonsNumber = /* GraphQL */ `
         video_created_date
         lag_days
         notes
+        notes_comments
         added_to_calendar
         evidence_reviewed
         evidence_requested
         evidence_requested_date
         evidence_received
         internal_status
+        internal_status_attr
         offense_level
         agency_id_number
         last_change_summary
@@ -445,12 +453,14 @@ export const summonsByOcrStatus = /* GraphQL */ `
         video_created_date
         lag_days
         notes
+        notes_comments
         added_to_calendar
         evidence_reviewed
         evidence_requested
         evidence_requested_date
         evidence_received
         internal_status
+        internal_status_attr
         offense_level
         agency_id_number
         last_change_summary
