@@ -80,7 +80,8 @@ import PersonIcon from '@mui/icons-material/Person';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 
 // Import shared types
-import { Summons, getStatusColor, ActivityLogEntry, AttributionData, DepFileDateAttribution, NoteComment, InternalStatusAttribution } from '../types/summons';
+import { Summons, getStatusColor, ActivityLogEntry, AttributionData, DepFileDateAttribution, NoteComment, InternalStatusAttribution, Attachment } from '../types/summons';
+import FileUploadSection from './FileUploadSection';
 import { isNewRecord, isUpdatedRecord } from '../types/summons';
 import { useAuth } from '../contexts/AuthContext';
 import { v4 as uuidv4 } from 'uuid';
@@ -285,6 +286,10 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   const [evidenceRequestedAttr, setEvidenceRequestedAttr] = useState<AttributionData>({ completed: false });
   const [evidenceReceivedAttr, setEvidenceReceivedAttr] = useState<AttributionData>({ completed: false });
   const [evidenceRequestedDate, setEvidenceRequestedDate] = useState<string | null>(null);
+  const [evidenceReceivedDate, setEvidenceReceivedDate] = useState<string | null>(null);
+
+  // File attachments
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   // DEP File Date with attribution
   const [depFileDateAttr, setDepFileDateAttr] = useState<DepFileDateAttribution>({});
@@ -330,8 +335,23 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       setEvidenceRequestedAttr(getAttrFromSummons(summons.evidence_requested_attr, summons.evidence_requested || false));
       setEvidenceReceivedAttr(getAttrFromSummons(summons.evidence_received_attr, summons.evidence_received || false));
       setEvidenceRequestedDate(summons.evidence_requested_date || null);
+      setEvidenceReceivedDate(summons.evidence_received_date || null);
       // DEP File Date
       setDepFileDateAttr(summons.dep_file_date_attr || {});
+      // Load attachments (parse if JSON string, or use as array)
+      let loadedAttachments: Attachment[] = [];
+      if (summons.attachments) {
+        if (typeof summons.attachments === 'string') {
+          try {
+            loadedAttachments = JSON.parse(summons.attachments);
+          } catch {
+            loadedAttachments = [];
+          }
+        } else if (Array.isArray(summons.attachments)) {
+          loadedAttachments = summons.attachments;
+        }
+      }
+      setAttachments(loadedAttachments);
     }
   }, [summons]);
   
@@ -368,6 +388,11 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
         break;
       case 'evidence_received':
         setEvidenceReceivedAttr(newAttr);
+        // Auto-set evidence_received_date when checking
+        if (checked && !evidenceReceivedDate) {
+          setEvidenceReceivedDate(now);
+          onUpdate(summons.id, 'evidence_received_date', now);
+        }
         break;
     }
 
@@ -482,6 +507,25 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     const dateValue = date?.toISOString() || null;
     setEvidenceRequestedDate(dateValue);
     onUpdate(summons.id, 'evidence_requested_date', dateValue);
+  };
+
+  /**
+   * Handle evidence received date change
+   */
+  const handleReceivedDateChange = (date: dayjs.Dayjs | null) => {
+    const dateValue = date?.toISOString() || null;
+    setEvidenceReceivedDate(dateValue);
+    onUpdate(summons.id, 'evidence_received_date', dateValue);
+  };
+
+  /**
+   * Handle attachments change (upload/delete)
+   * AWSJSON fields require JSON string, not raw array
+   */
+  const handleAttachmentsChange = (newAttachments: Attachment[]) => {
+    setAttachments(newAttachments);
+    // Serialize to JSON string for AWSJSON field type
+    onUpdate(summons.id, 'attachments', JSON.stringify(newAttachments));
   };
   
   return (
@@ -767,6 +811,22 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                     )}
                   </Box>
 
+                  {/* Evidence Received Date Picker */}
+                  {evidenceReceivedAttr.completed && (
+                    <Box sx={{ ml: 4, mb: 1 }}>
+                      <LocalizationProvider dateAdapter={AdapterDayjs}>
+                        <DatePicker
+                          label="Received Date"
+                          value={evidenceReceivedDate ? dayjs(evidenceReceivedDate) : null}
+                          onChange={handleReceivedDateChange}
+                          slotProps={{
+                            textField: { size: 'small', fullWidth: true },
+                          }}
+                        />
+                      </LocalizationProvider>
+                    </Box>
+                  )}
+
                   {/* Evidence Reviewed */}
                   <Box>
                     <FormControlLabel
@@ -906,6 +966,17 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                     </Button>
                   </Tooltip>
                 </Box>
+
+                {/* Uploaded Evidence Files */}
+                <Divider sx={{ my: 2 }} />
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  Uploaded Evidence Files
+                </Typography>
+                <FileUploadSection
+                  summonsId={summons.id}
+                  attachments={attachments}
+                  onAttachmentsChange={handleAttachmentsChange}
+                />
               </CardContent>
             </Card>
             

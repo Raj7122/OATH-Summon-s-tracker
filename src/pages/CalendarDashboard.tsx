@@ -488,12 +488,22 @@ const CalendarDashboard: React.FC = () => {
       console.log(`Successfully updated ${field}`);
 
       // Update local state optimistically
+      // For AWSJSON fields like attachments, parse back to array for local state
+      let localValue = value;
+      if (field === 'attachments' && typeof value === 'string') {
+        try {
+          localValue = JSON.parse(value);
+        } catch {
+          localValue = [];
+        }
+      }
+
       setSummonses((prev) =>
         prev.map((s) => {
           if (s.id === id) {
             return {
               ...s,
-              [field]: value,
+              [field]: localValue,
               updatedAt: new Date().toISOString(),
             };
           }

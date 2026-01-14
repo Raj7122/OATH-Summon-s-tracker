@@ -70,6 +70,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const handleSignIn = async (username: string, password: string) => {
     try {
+      // Sign out any existing user first to avoid "already signed in" error
+      try {
+        await signOut();
+      } catch {
+        // Ignore errors - there may not be a user to sign out
+      }
+
       const signInResult = await signIn({ username, password });
 
       // Check if password change is required

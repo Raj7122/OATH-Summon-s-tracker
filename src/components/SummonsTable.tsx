@@ -64,6 +64,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import FiberNewIcon from '@mui/icons-material/FiberNew';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 
 const client = generateClient();
 
@@ -101,6 +102,9 @@ interface Summons {
   evidence_requested: boolean;
   evidence_requested_date?: string;
   evidence_received: boolean;
+  evidence_received_date?: string;
+  // File attachments (AWSJSON array)
+  attachments?: Array<{ id: string; key: string; type: string; name: string; size: number; uploadedBy: string; uploadedById: string; uploadedAt: string }>;
   license_plate_ocr?: string;
   id_number?: string;
   vehicle_type_ocr?: string;
@@ -545,6 +549,23 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     const isNew = isNewRecord(summons);
     const isUpdated = isUpdatedRecord(summons);
 
+    // Check if summons has attachments
+    // AWSJSON fields may be stored as JSON strings, so parse before checking length
+    let parsedAttachments: Array<unknown> = [];
+    if (summons.attachments) {
+      if (typeof summons.attachments === 'string') {
+        try {
+          parsedAttachments = JSON.parse(summons.attachments);
+        } catch {
+          parsedAttachments = [];
+        }
+      } else if (Array.isArray(summons.attachments)) {
+        parsedAttachments = summons.attachments;
+      }
+    }
+    const hasAttachments = parsedAttachments.length > 0;
+    const attachmentCount = parsedAttachments.length;
+
     // Build tooltip content for UPDATED badge
     const changeTooltip = summons.last_change_summary
       ? `Change Detected: ${summons.last_change_summary} (${formatChangeDate(summons.last_change_at)})`
@@ -552,6 +573,19 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
 
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        {/* Attachment Indicator */}
+        {hasAttachments && (
+          <Tooltip title={`${attachmentCount} file${attachmentCount > 1 ? 's' : ''} attached`} arrow placement="top">
+            <AttachFileIcon
+              sx={{
+                fontSize: 16,
+                color: 'text.secondary',
+                transform: 'rotate(45deg)',
+              }}
+            />
+          </Tooltip>
+        )}
+
         {/* Activity Badge - NEW */}
         {isNew && (
           <Chip

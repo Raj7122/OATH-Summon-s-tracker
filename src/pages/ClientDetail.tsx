@@ -47,6 +47,7 @@ import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import GavelIcon from '@mui/icons-material/Gavel';
 import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { generateClient } from 'aws-amplify/api';
 
 import { getClient, listSummons } from '../graphql/queries';
@@ -391,6 +392,23 @@ const ClientDetail: React.FC = () => {
         const isNew = isNewRecord(summons);
         const isUpdated = isUpdatedRecord(summons);
 
+        // Check if summons has attachments
+        // AWSJSON fields may be stored as JSON strings, so parse before checking length
+        let parsedAttachments: Array<unknown> = [];
+        if (summons.attachments) {
+          if (typeof summons.attachments === 'string') {
+            try {
+              parsedAttachments = JSON.parse(summons.attachments);
+            } catch {
+              parsedAttachments = [];
+            }
+          } else if (Array.isArray(summons.attachments)) {
+            parsedAttachments = summons.attachments;
+          }
+        }
+        const hasAttachments = parsedAttachments.length > 0;
+        const attachmentCount = parsedAttachments.length;
+
         // Build tooltip content for UPDATED badge
         const changeTooltip = summons.last_change_summary
           ? `${summons.last_change_summary} (${formatChangeDate(summons.last_change_at)})`
@@ -398,6 +416,19 @@ const ClientDetail: React.FC = () => {
 
         return (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            {/* Attachment Indicator */}
+            {hasAttachments && (
+              <Tooltip title={`${attachmentCount} file${attachmentCount > 1 ? 's' : ''} attached`} arrow placement="top">
+                <AttachFileIcon
+                  sx={{
+                    fontSize: 14,
+                    color: 'text.secondary',
+                    transform: 'rotate(45deg)',
+                  }}
+                />
+              </Tooltip>
+            )}
+
             {/* NEW badge */}
             {isNew && (
               <Chip

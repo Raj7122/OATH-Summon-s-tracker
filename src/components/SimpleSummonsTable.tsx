@@ -53,6 +53,7 @@ import UpdateIcon from '@mui/icons-material/Update';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import SearchIcon from '@mui/icons-material/Search';
 import CloseIcon from '@mui/icons-material/Close';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import SummonsDetailModal from './SummonsDetailModal';
 import { dataGridPremiumStyles } from '../theme';
 
@@ -180,14 +181,44 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
     const summons = params.row as Summons;
     const isNew = isNewRecord(summons);
     const isUpdated = isUpdatedRecord(summons);
-    
+
+    // Check if summons has attachments
+    // AWSJSON fields may be stored as JSON strings, so parse before checking length
+    let parsedAttachments: Array<unknown> = [];
+    if (summons.attachments) {
+      if (typeof summons.attachments === 'string') {
+        try {
+          parsedAttachments = JSON.parse(summons.attachments);
+        } catch {
+          parsedAttachments = [];
+        }
+      } else if (Array.isArray(summons.attachments)) {
+        parsedAttachments = summons.attachments;
+      }
+    }
+    const hasAttachments = parsedAttachments.length > 0;
+    const attachmentCount = parsedAttachments.length;
+
     // Build tooltip content for UPDATED badge
     const changeTooltip = summons.last_change_summary
       ? `Change: ${summons.last_change_summary}`
       : 'Record was recently updated';
-    
+
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+        {/* Attachment Indicator */}
+        {hasAttachments && (
+          <Tooltip title={`${attachmentCount} file${attachmentCount > 1 ? 's' : ''} attached`} arrow placement="top">
+            <AttachFileIcon
+              sx={{
+                fontSize: 14,
+                color: 'text.secondary',
+                transform: 'rotate(45deg)',
+              }}
+            />
+          </Tooltip>
+        )}
+
         {/* Activity Badge - NEW */}
         {isNew && (
           <Chip
