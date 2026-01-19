@@ -60,6 +60,11 @@ type Summons @model @auth(rules: [{ allow: private }]) {
   evidence_requested: Boolean @default(value: "false")
   evidence_requested_date: AWSDateTime
   evidence_received: Boolean @default(value: "false")
+  evidence_received_date: AWSDateTime
+
+  # File attachments stored as AWSJSON array
+  # Structure: [{ id, key, type, name, uploadedBy, uploadedById, uploadedAt, size }]
+  attachments: AWSJSON
 
   # TRD v1.8: Client Feedback Updates
   internal_status: String @default(value: "New")

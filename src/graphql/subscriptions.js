@@ -112,6 +112,8 @@ export const onCreateSummons = /* GraphQL */ `
       evidence_requested
       evidence_requested_date
       evidence_received
+      evidence_received_date
+      attachments
       internal_status
       internal_status_attr
       offense_level
@@ -187,6 +189,8 @@ export const onUpdateSummons = /* GraphQL */ `
       evidence_requested
       evidence_requested_date
       evidence_received
+      evidence_received_date
+      attachments
       internal_status
       internal_status_attr
       offense_level
@@ -262,6 +266,8 @@ export const onDeleteSummons = /* GraphQL */ `
       evidence_requested
       evidence_requested_date
       evidence_received
+      evidence_received_date
+      attachments
       internal_status
       internal_status_attr
       offense_level
