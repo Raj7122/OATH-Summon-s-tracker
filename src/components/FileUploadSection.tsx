@@ -55,6 +55,8 @@ interface FileUploadSectionProps {
   summonsId: string;
   attachments: Attachment[];
   onAttachmentsChange: (attachments: Attachment[]) => void;
+  /** Callback when evidence file is successfully uploaded (for audit trail logging) */
+  onEvidenceUploaded?: (attachment: Attachment) => void;
   disabled?: boolean;
 }
 
@@ -119,6 +121,7 @@ export const FileUploadSection: React.FC<FileUploadSectionProps> = ({
   summonsId,
   attachments,
   onAttachmentsChange,
+  onEvidenceUploaded,
   disabled = false,
 }) => {
   const [selectedType, setSelectedType] = useState<AttachmentType>('summons_pdf');
@@ -165,6 +168,8 @@ export const FileUploadSection: React.FC<FileUploadSectionProps> = ({
     const attachment = await uploadFile(summonsId, file, selectedType);
     if (attachment) {
       onAttachmentsChange([...attachments, attachment]);
+      // Trigger callback for audit trail logging
+      onEvidenceUploaded?.(attachment);
     }
 
     // Reset input and progress after short delay

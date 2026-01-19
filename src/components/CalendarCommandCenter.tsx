@@ -27,6 +27,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import TodayIcon from '@mui/icons-material/Today';
 import ClearIcon from '@mui/icons-material/Clear';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { horizonColors } from '../theme';
 
 // Import shared types
@@ -44,8 +45,9 @@ const NYC_TIMEZONE = 'America/New_York';
  * - approaching: 8-30 days
  * - future: > 30 days
  * - new: New records (createdAt within 72 hours)
+ * - has_evidence: Summonses with file attachments
  */
-type HorizonFilter = 'critical' | 'approaching' | 'future' | 'new' | null;
+type HorizonFilter = 'critical' | 'approaching' | 'future' | 'new' | 'has_evidence' | null;
 
 /**
  * Horizon stats from parent (CalendarDashboard)
@@ -56,6 +58,7 @@ interface HorizonStats {
   approachingCount: number;
   futureCount: number;
   newCount: number;
+  hasEvidenceCount: number;
 }
 
 /**
@@ -73,7 +76,7 @@ interface CalendarCommandCenterProps {
   /** Horizon stats (record counts) from parent */
   horizonStats?: HorizonStats;
   /** Callback when a Horizon filter chip is clicked */
-  onHorizonFilterClick?: (filter: 'critical' | 'approaching' | 'future' | 'new') => void;
+  onHorizonFilterClick?: (filter: 'critical' | 'approaching' | 'future' | 'new' | 'has_evidence') => void;
 }
 
 /**
@@ -465,6 +468,32 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
                 },
                 ...(horizonFilter === 'new' && {
                   boxShadow: `0 4px 14px ${alpha(horizonColors.new, 0.4)}`,
+                  transform: 'translateY(-1px)',
+                }),
+              }}
+            />
+          )}
+          {/* 📎 Has Evidence: Summonses with file attachments */}
+          {horizonStats.hasEvidenceCount > 0 && (
+            <Chip
+              icon={<AttachFileIcon sx={{ fontSize: 16, transform: 'rotate(45deg)' }} />}
+              label={`${horizonStats.hasEvidenceCount} Evidence`}
+              color="secondary"
+              size="small"
+              onClick={() => onHorizonFilterClick('has_evidence')}
+              variant={horizonFilter === 'has_evidence' ? 'filled' : 'outlined'}
+              sx={{
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                borderRadius: 2,
+                px: 0.5,
+                '&:hover': {
+                  transform: 'translateY(-2px)',
+                  boxShadow: '0 4px 12px rgba(156, 39, 176, 0.35)',
+                },
+                ...(horizonFilter === 'has_evidence' && {
+                  boxShadow: '0 4px 14px rgba(156, 39, 176, 0.4)',
                   transform: 'translateY(-1px)',
                 }),
               }}

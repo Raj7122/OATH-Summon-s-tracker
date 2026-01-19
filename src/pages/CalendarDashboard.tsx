@@ -222,8 +222,8 @@ const CalendarDashboard: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<Dayjs | null>(null);
   const [activityFilter, setActivityFilter] = useState<'all' | 'updated' | 'new'>('all');
   // Horizon System filter for header chip clicks (Critical/Approaching/Future)
-  // Also supports 'new' for NEW badge filter
-  const [horizonFilter, setHorizonFilter] = useState<'critical' | 'approaching' | 'future' | 'new' | null>(null);
+  // Also supports 'new' for NEW badge filter and 'has_evidence' for evidence filter
+  const [horizonFilter, setHorizonFilter] = useState<'critical' | 'approaching' | 'future' | 'new' | 'has_evidence' | null>(null);
 
   // OVERRIDE C: Archive toggle removed from main dashboard.
   // The main dashboard is for active triage ONLY - always show 2022+ records.
@@ -393,6 +393,22 @@ const CalendarDashboard: React.FC = () => {
       });
     } else if (horizonFilter === 'new') {
       filtered = filtered.filter(isNewRecord);
+    } else if (horizonFilter === 'has_evidence') {
+      // Has Evidence: Summonses with file attachments
+      filtered = filtered.filter((s) => {
+        if (!s.attachments) return false;
+        let parsed: unknown[] = [];
+        if (typeof s.attachments === 'string') {
+          try {
+            parsed = JSON.parse(s.attachments);
+          } catch {
+            return false;
+          }
+        } else if (Array.isArray(s.attachments)) {
+          parsed = s.attachments;
+        }
+        return parsed.length > 0;
+      });
     }
 
     // Then apply date filter
@@ -411,9 +427,9 @@ const CalendarDashboard: React.FC = () => {
 
   /**
    * Handle Horizon System chip click (toggle behavior)
-   * Filters: critical (Red), approaching (Orange), future (Green), new
+   * Filters: critical (Red), approaching (Orange), future (Green), new, has_evidence (Purple)
    */
-  const handleHorizonFilterClick = useCallback((filter: 'critical' | 'approaching' | 'future' | 'new') => {
+  const handleHorizonFilterClick = useCallback((filter: 'critical' | 'approaching' | 'future' | 'new' | 'has_evidence') => {
     // Toggle: if clicking the same filter, clear it; otherwise set it
     setHorizonFilter((prev) => (prev === filter ? null : filter));
     // Clear date selection when using horizon filter for better UX
@@ -604,6 +620,22 @@ const CalendarDashboard: React.FC = () => {
     const newCount = globallyFilteredSummonses.filter(isNewRecord).length;
     const updatedCount = globallyFilteredSummonses.filter(isUpdatedRecord).length;
 
+    // Has Evidence: Summonses with file attachments
+    const hasEvidenceCount = globallyFilteredSummonses.filter((s) => {
+      if (!s.attachments) return false;
+      let parsed: unknown[] = [];
+      if (typeof s.attachments === 'string') {
+        try {
+          parsed = JSON.parse(s.attachments);
+        } catch {
+          return false;
+        }
+      } else if (Array.isArray(s.attachments)) {
+        parsed = s.attachments;
+      }
+      return parsed.length > 0;
+    }).length;
+
     // Count of Pre-2022 records (for archive indicator)
     const archivedCount = summonses.filter((s) => !isActiveEra(s) && isIdlingViolation(s)).length;
 
@@ -613,6 +645,7 @@ const CalendarDashboard: React.FC = () => {
       futureCount,
       newCount,
       updatedCount,
+      hasEvidenceCount,
       total: globallyFilteredSummonses.length,
       archivedCount,
     };
@@ -1021,6 +1054,7 @@ const CalendarDashboard: React.FC = () => {
                   approachingCount: stats.approachingCount,
                   futureCount: stats.futureCount,
                   newCount: stats.newCount,
+                  hasEvidenceCount: stats.hasEvidenceCount,
                 }}
                 onHorizonFilterClick={handleHorizonFilterClick}
               />

@@ -78,6 +78,7 @@ import AddCircleIcon from '@mui/icons-material/AddCircle';
 import WarningIcon from '@mui/icons-material/Warning';
 import PersonIcon from '@mui/icons-material/Person';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 
 // Import shared types
 import { Summons, getStatusColor, ActivityLogEntry, AttributionData, DepFileDateAttribution, NoteComment, InternalStatusAttribution, Attachment } from '../types/summons';
@@ -127,6 +128,8 @@ function getActivityColor(type: ActivityLogEntry['type']): string {
       return '#607d8b'; // Blue-gray - document scan
     case 'ARCHIVED':
       return '#757575'; // Gray - archived/closed
+    case 'EVIDENCE_UPLOADED':
+      return '#9c27b0'; // Purple - evidence file uploaded
     default:
       return '#9e9e9e'; // Gray - unknown
   }
@@ -156,6 +159,8 @@ function getActivityIcon(type: ActivityLogEntry['type']): React.ReactNode {
       return <DocumentScannerIcon sx={iconSx} />;
     case 'ARCHIVED':
       return <HistoryIcon sx={iconSx} />;
+    case 'EVIDENCE_UPLOADED':
+      return <AttachFileIcon sx={{ ...iconSx, color: '#9C27B0' }} />; // Purple
     default:
       return <UpdateIcon sx={iconSx} />;
   }
@@ -184,6 +189,8 @@ function formatActivityType(type: ActivityLogEntry['type']): string {
       return 'Scanned';
     case 'ARCHIVED':
       return 'Archived';
+    case 'EVIDENCE_UPLOADED':
+      return 'Evidence';
     default:
       return type;
   }
@@ -527,7 +534,48 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     // Serialize to JSON string for AWSJSON field type
     onUpdate(summons.id, 'attachments', JSON.stringify(newAttachments));
   };
-  
+
+  /**
+   * Handle evidence file upload for audit trail logging
+   * Creates an EVIDENCE_UPLOADED activity log entry when a file is uploaded
+   */
+  const handleEvidenceUploaded = (attachment: Attachment) => {
+    // Get attachment type label for the log entry
+    const typeLabels: Record<string, string> = {
+      'summons_pdf': 'Summons PDF',
+      'client_statement': 'Client Statement',
+      'evidence_package': 'Evidence Package',
+    };
+    const typeLabel = typeLabels[attachment.type] || attachment.type;
+
+    // Create activity log entry
+    const activityEntry: ActivityLogEntry = {
+      date: new Date().toISOString(),
+      type: 'EVIDENCE_UPLOADED',
+      description: `${currentUser.name} uploaded: ${attachment.name}`,
+      old_value: null,
+      new_value: `${typeLabel}: ${attachment.name}`,
+    };
+
+    // Get existing activity log (parse if JSON string)
+    let existingLog: ActivityLogEntry[] = [];
+    if (summons.activity_log) {
+      if (typeof summons.activity_log === 'string') {
+        try {
+          existingLog = JSON.parse(summons.activity_log);
+        } catch {
+          existingLog = [];
+        }
+      } else if (Array.isArray(summons.activity_log)) {
+        existingLog = summons.activity_log;
+      }
+    }
+
+    // Append the new entry and save
+    const updatedLog = [...existingLog, activityEntry];
+    onUpdate(summons.id, 'activity_log', JSON.stringify(updatedLog));
+  };
+
   return (
     <Dialog
       open={open}
@@ -976,6 +1024,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   summonsId={summons.id}
                   attachments={attachments}
                   onAttachmentsChange={handleAttachmentsChange}
+                  onEvidenceUploaded={handleEvidenceUploaded}
                 />
               </CardContent>
             </Card>

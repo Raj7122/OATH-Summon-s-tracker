@@ -43,6 +43,26 @@ export interface InternalStatusAttribution {
 }
 
 /**
+ * File attachment type categories for evidence uploads
+ */
+export type AttachmentType = 'summons_pdf' | 'client_statement' | 'evidence_package';
+
+/**
+ * Attachment metadata stored in AWSJSON field
+ * All authenticated users can view/download attachments
+ */
+export interface Attachment {
+  id: string;           // UUID for the attachment
+  key: string;          // S3 object key (path in bucket)
+  type: AttachmentType; // Category of file
+  name: string;         // Original filename
+  size: number;         // File size in bytes
+  uploadedBy: string;   // User display name who uploaded
+  uploadedById: string; // Cognito user ID
+  uploadedAt: string;   // ISO timestamp of upload
+}
+
+/**
  * A single comment/note with attribution
  * Used for threaded comments in the notes section
  */
@@ -87,6 +107,9 @@ export interface Summons {
   evidence_requested: boolean;
   evidence_requested_date?: string;
   evidence_received: boolean;
+  evidence_received_date?: string;
+  // File attachments (AWSJSON array)
+  attachments?: Attachment[];
   // New attribution-enabled evidence tracking fields
   evidence_reviewed_attr?: AttributionData;
   added_to_calendar_attr?: AttributionData;
@@ -147,10 +170,11 @@ export interface Summons {
  * - AMENDMENT: Violation code/description changed
  * - OCR_COMPLETE: Document scan completed
  * - ARCHIVED: Record archived (missing from API or case closed)
+ * - EVIDENCE_UPLOADED: User uploaded evidence file
  */
 export interface ActivityLogEntry {
   date: string;
-  type: 'CREATED' | 'STATUS_CHANGE' | 'RESCHEDULE' | 'RESULT_CHANGE' | 'AMOUNT_CHANGE' | 'PAYMENT' | 'AMENDMENT' | 'OCR_COMPLETE' | 'ARCHIVED';
+  type: 'CREATED' | 'STATUS_CHANGE' | 'RESCHEDULE' | 'RESULT_CHANGE' | 'AMOUNT_CHANGE' | 'PAYMENT' | 'AMENDMENT' | 'OCR_COMPLETE' | 'ARCHIVED' | 'EVIDENCE_UPLOADED';
   description: string;
   old_value: string | null;
   new_value: string | null;
