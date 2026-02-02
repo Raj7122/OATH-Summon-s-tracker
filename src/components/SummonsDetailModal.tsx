@@ -1351,9 +1351,22 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       </DialogContent>
       
       <DialogActions sx={{ px: 3, py: 2, borderTop: 1, borderColor: 'divider' }}>
-        <Typography variant="caption" color="text.secondary" sx={{ mr: 'auto' }}>
-          Last Updated: {summons.updatedAt ? dayjs.utc(summons.updatedAt).tz(NYC_TIMEZONE).format('MMM D, YYYY h:mm A') : 'Unknown'}
-        </Typography>
+        <Tooltip
+          title={summons.last_change_summary || 'No change details recorded'}
+          arrow
+          placement="top"
+        >
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ mr: 'auto', cursor: summons.last_change_at ? 'help' : 'default' }}
+          >
+            {summons.last_change_at
+              ? `Last Changed: ${dayjs.utc(summons.last_change_at).tz(NYC_TIMEZONE).format('MMM D, YYYY h:mm A')}`
+              : `Created: ${summons.createdAt ? dayjs.utc(summons.createdAt).tz(NYC_TIMEZONE).format('MMM D, YYYY h:mm A') : 'Unknown'}`
+            }
+          </Typography>
+        </Tooltip>
         <Button
           onClick={handleCartToggle}
           variant={inCart ? 'contained' : 'outlined'}
