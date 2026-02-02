@@ -243,12 +243,12 @@ export type ActivityFilter = 'all' | 'updated' | 'new';
 export type DeadlineFilter = 'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending' | null;
 
 /**
- * Check if a summons is a new record (created within last 72 hours)
+ * Check if a summons is a new record (created within last 1 week / 168 hours)
  *
- * A record is "NEW" if it was discovered/created within the last 72 hours.
+ * A record is "NEW" if it was discovered/created within the last 168 hours (1 week).
  * This indicates the daily sweep found a new summons from the NYC API.
  *
- * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
+ * TRD v1.9: 168-hour (1 week) window ensures Arthur sees new records for a full week.
  *
  * Note: We only check createdAt, not updatedAt, because the daily sweep runs OCR
  * immediately after creation which updates updatedAt. Checking createdAt alone
@@ -261,8 +261,8 @@ export function isNewRecord(summons: Summons): boolean {
   const now = new Date();
   const hoursSinceCreation = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
 
-  // NEW: created within last 72 hours (discovered by daily sweep recently)
-  return hoursSinceCreation <= 72;
+  // NEW: created within last 168 hours / 1 week (discovered by daily sweep recently)
+  return hoursSinceCreation <= 168;
 }
 
 /**
@@ -271,7 +271,7 @@ export function isNewRecord(summons: Summons): boolean {
  * Uses last_change_at (set by daily sweep when NYC API changes detected) instead of
  * updatedAt (which updates on any change including user notes/checkboxes).
  *
- * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
+ * TRD v1.9: 168-hour (1 week) window ensures Arthur sees updates for a full week.
  */
 export function isUpdatedRecord(summons: Summons): boolean {
   // Use last_change_at which is only set by the daily sweep when API changes are detected
@@ -285,12 +285,12 @@ export function isUpdatedRecord(summons: Summons): boolean {
   const now = new Date();
   const hoursSinceChange = (now.getTime() - lastChangeDate.getTime()) / (1000 * 60 * 60);
 
-  // Show UPDATED badge if daily sweep detected changes within last 72 hours
-  return hoursSinceChange <= 72;
+  // Show UPDATED badge if daily sweep detected changes within last 168 hours (1 week)
+  return hoursSinceChange <= 168;
 }
 
 /**
- * Check if a summons is "fresh" (new or updated in last 72 hours)
+ * Check if a summons is "fresh" (new or updated in last 1 week / 168 hours)
  */
 export function isFreshSummons(summons: Summons): boolean {
   return isNewRecord(summons) || isUpdatedRecord(summons);

@@ -1192,12 +1192,12 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   title="Case History"
                 />
 
-                {/* Activity Log Timeline - Only show entries older than 72 hours */}
+                {/* Activity Log Timeline - Only show entries older than 1 week (168 hours) */}
                 {(() => {
-                  // Filter activity log to only show entries older than 72 hours
+                  // Filter activity log to only show entries older than 1 week (168 hours)
                   // This ensures the UPDATED chip expires before showing in history
                   const now = new Date();
-                  const seventyTwoHoursAgo = new Date(now.getTime() - 72 * 60 * 60 * 1000);
+                  const oneWeekAgo = new Date(now.getTime() - 168 * 60 * 60 * 1000);
 
                   // Parse activity_log if it's a JSON string, otherwise use as array
                   let activityLog: ActivityLogEntry[] = [];
@@ -1214,8 +1214,8 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   }
 
                   const filteredLog = activityLog
-                    // Only show entries older than 72 hours
-                    .filter((entry) => new Date(entry.date) < seventyTwoHoursAgo)
+                    // Only show entries older than 1 week (168 hours)
+                    .filter((entry) => new Date(entry.date) < oneWeekAgo)
                     // Filter out duplicate entries (same date, type, and description)
                     .filter((entry, index, self) =>
                       index === self.findIndex((e) =>
@@ -1236,7 +1236,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   if (filteredLog.length === 0) {
                     return (
                       <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                        No historical changes to display. Recent changes (within 72 hours) are shown via the UPDATED badge.
+                        No historical changes to display. Recent changes (within 1 week) are shown via the UPDATED badge.
                       </Typography>
                     );
                   }

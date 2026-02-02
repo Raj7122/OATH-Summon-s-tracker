@@ -137,9 +137,9 @@ function getBusinessDays(startDate: Date, endDate: Date): number {
 type ActivityFilter = 'updated' | 'new' | null;
 
 /**
- * Check if a summons is a new record (created within last 72 hours)
+ * Check if a summons is a new record (created within last 1 week / 168 hours)
  *
- * A record is "NEW" if it was discovered/created within the last 72 hours.
+ * A record is "NEW" if it was discovered/created within the last 168 hours (1 week).
  * This indicates the daily sweep found a new summons from the NYC API.
  *
  * Note: We only check createdAt, not updatedAt, because the daily sweep
@@ -152,8 +152,8 @@ function isNewRecord(summons: Summons): boolean {
   const now = new Date();
   const hoursSinceCreation = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
 
-  // NEW: created within last 72 hours (discovered by daily sweep recently)
-  return hoursSinceCreation <= 72;
+  // NEW: created within last 168 hours / 1 week (discovered by daily sweep recently)
+  return hoursSinceCreation <= 168;
 }
 
 /**
@@ -171,8 +171,8 @@ function isUpdatedRecord(summons: Summons): boolean {
   const now = new Date();
   const hoursSinceChange = (now.getTime() - lastChangeDate.getTime()) / (1000 * 60 * 60);
 
-  // Show UPDATED badge if daily sweep detected changes within last 72 hours
-  return hoursSinceChange <= 72;
+  // Show UPDATED badge if daily sweep detected changes within last 168 hours (1 week)
+  return hoursSinceChange <= 168;
 }
 
 /**
@@ -640,7 +640,7 @@ const Dashboard = () => {
           </Box>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Complete history of all changes detected by the daily sweep from NYC Open Data.
-            This ledger persists beyond the 72-hour UPDATED badge window.
+            This ledger persists beyond the 1-week UPDATED badge window.
           </Typography>
 
           {/* Audit Trail Type Filter */}

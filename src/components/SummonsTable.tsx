@@ -420,33 +420,33 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   };
 
   /**
-   * Check if a summons is "fresh" (updated in last 72 hours)
+   * Check if a summons is "fresh" (updated in last 1 week / 168 hours)
    *
    * Calculates time difference between now and updatedAt timestamp.
-   * Used for row highlighting per the "72-Hour Freshness Rule".
-   * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
+   * Used for row highlighting per the "1 Week Freshness Rule".
+   * TRD v1.9: 168-hour (1 week) window ensures Arthur sees updates for a full week.
    *
    * @param {Summons} summons - Summons record to check
-   * @returns {boolean} True if updated within last 72 hours, false otherwise
+   * @returns {boolean} True if updated within last 168 hours, false otherwise
    */
   const isFreshSummons = (summons: Summons): boolean => {
     if (!summons.updatedAt) return false;
     const updatedDate = new Date(summons.updatedAt);
     const now = new Date();
     const diffHours = (now.getTime() - updatedDate.getTime()) / (1000 * 60 * 60);
-    return diffHours < 72; // 72 hours = 3 days to cover weekends
+    return diffHours < 168; // 168 hours = 1 week
   };
 
   /**
-   * Check if a summons is a brand new record (created within last 72 hours)
+   * Check if a summons is a brand new record (created within last 1 week / 168 hours)
    *
-   * A record is "NEW" if it was discovered/created within the last 72 hours.
+   * A record is "NEW" if it was discovered/created within the last 168 hours (1 week).
    * This indicates the daily sweep found a new summons from the NYC API.
    *
    * Note: We only check createdAt, not updatedAt, because the daily sweep
    * updates last_metadata_sync on every run which changes updatedAt.
    *
-   * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
+   * TRD v1.9: 168-hour (1 week) window ensures Arthur sees new records for a full week.
    *
    * @param {Summons} summons - Summons record to check
    * @returns {boolean} True if brand new, false otherwise
@@ -457,9 +457,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     const createdDate = new Date(summons.createdAt);
     const now = new Date();
 
-    // Check if created within 72 hours (TRD v1.9: cover weekends)
+    // Check if created within 168 hours / 1 week
     const diffHours = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
-    return diffHours < 72;
+    return diffHours < 168;
   };
 
   /**
@@ -470,7 +470,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
    *
    * Must not be a new record (new records get NEW badge, not UPDATED).
    *
-   * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
+   * TRD v1.9: 168-hour (1 week) window ensures Arthur sees updates for a full week.
    *
    * @param {Summons} summons - Summons record to check
    * @returns {boolean} True if recently updated, false otherwise
@@ -485,9 +485,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     const lastChangeDate = new Date(summons.last_change_at);
     const now = new Date();
 
-    // Check if daily sweep detected changes within last 72 hours (TRD v1.9: cover weekends)
+    // Check if daily sweep detected changes within last 168 hours (1 week)
     const diffHours = (now.getTime() - lastChangeDate.getTime()) / (1000 * 60 * 60);
-    return diffHours < 72;
+    return diffHours < 168;
   };
 
   /**
@@ -1049,7 +1049,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
             cursor: 'pointer',
           },
           '& .fresh-row': {
-            backgroundColor: '#FFFDE7', // Pale "Attention Yellow" for 72-hour freshness (TRD v1.9)
+            backgroundColor: '#FFFDE7', // Pale "Attention Yellow" for 1-week freshness (TRD v1.9)
           },
           // Enhanced horizontal scrollbar visibility (works in Chrome, Safari, Edge, Firefox)
           '& .MuiDataGrid-virtualScroller': {
