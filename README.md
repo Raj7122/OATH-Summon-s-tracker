@@ -42,6 +42,7 @@ See [Getting Started](#getting-started) below for full setup instructions includ
 - ✅ Notes field for internal case documentation
 - ✅ Manual calendar handoff tracking
 - ✅ CSV export functionality
+- ✅ Invoice generation (PDF and DOCX) with summons cart
 - ✅ Automated OCR using Google Gemini AI
 - ✅ Web scraping for video evidence metadata
 - ✅ Responsive design for mobile access
@@ -740,7 +741,8 @@ This will deploy both the backend (if not already deployed) and the frontend to 
 │   │   ├── Login.tsx             # Authentication page
 │   │   ├── Dashboard.tsx         # Main summons dashboard
 │   │   ├── Clients.tsx           # Client management CRUD
-│   │   └── Account.tsx           # User account settings
+│   │   ├── Account.tsx           # User account settings
+│   │   └── InvoiceBuilder.tsx    # Invoice generation page
 │   ├── components/
 │   │   ├── Layout.tsx            # App shell
 │   │   ├── Header.tsx            # Navigation bar
@@ -750,7 +752,14 @@ This will deploy both the backend (if not already deployed) and the frontend to 
 │   ├── lib/
 │   │   └── amplifyClient.ts      # Amplify configuration
 │   ├── contexts/
-│   │   └── AuthContext.tsx       # Authentication state
+│   │   ├── AuthContext.tsx       # Authentication state
+│   │   └── InvoiceContext.tsx    # Invoice cart state
+│   ├── constants/
+│   │   └── invoiceDefaults.ts    # Invoice template defaults
+│   ├── utils/
+│   │   └── invoiceGenerator.ts   # PDF/DOCX generation
+│   ├── types/
+│   │   └── invoice.ts            # Invoice TypeScript types
 │   ├── theme.ts                  # MUI theme
 │   ├── App.tsx                   # Main app component
 │   └── main.tsx                  # Entry point
