@@ -24,6 +24,7 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import EventIcon from '@mui/icons-material/Event';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 
 /**
  * Summons data interface
@@ -69,6 +70,8 @@ interface Summons {
   last_change_summary?: string;
   last_change_at?: string;
   updatedAt?: string;
+  // File attachments
+  attachments?: string | unknown[];
 }
 
 /**
@@ -81,8 +84,8 @@ interface Summons {
  */
 interface DashboardSummaryProps {
   summonses: Summons[];
-  activeFilter: 'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending' | null;
-  onFilterClick: (filter: 'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending') => void;
+  activeFilter: 'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending' | 'has_evidence' | null;
+  onFilterClick: (filter: 'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending' | 'has_evidence') => void;
 }
 
 /**
@@ -211,6 +214,39 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
     return summonses.filter((summons) => {
       return summons.evidence_requested === true && summons.evidence_received === false;
     });
+  }, [summonses]);
+
+  /**
+   * Calculate Summonses with Evidence (file attachments)
+   *
+   * Filters summonses that have at least one file attachment uploaded.
+   * Sorted by hearing date (soonest first) to prioritize upcoming hearings.
+   * Used to populate the "Has Evidence" card.
+   *
+   * @returns {Summons[]} Array of summonses with file attachments, sorted by hearing date
+   */
+  const hasEvidence = useMemo(() => {
+    const filtered = summonses.filter((summons) => {
+      if (!summons.attachments) return false;
+      let parsed: unknown[] = [];
+      if (typeof summons.attachments === 'string') {
+        try {
+          parsed = JSON.parse(summons.attachments);
+        } catch {
+          return false;
+        }
+      } else if (Array.isArray(summons.attachments)) {
+        parsed = summons.attachments;
+      }
+      return parsed.length > 0;
+    });
+    // Sort by hearing date (soonest first)
+    filtered.sort((a, b) => {
+      if (!a.hearing_date) return 1;
+      if (!b.hearing_date) return -1;
+      return new Date(a.hearing_date).getTime() - new Date(b.hearing_date).getTime();
+    });
+    return filtered;
   }, [summonses]);
 
   /**
@@ -445,6 +481,58 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
                   {hearingComplete.length > 3 && (
                     <Typography variant="caption" color="text.secondary">
                       +{hearingComplete.length - 3} more
+                    </Typography>
+                  )}
+                </Box>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Has Evidence Card (Purple Accent) - Clickable Quick Filter */}
+        <Grid item xs={12} sm={6} md={3}>
+          <Card
+            onClick={() => onFilterClick('has_evidence')}
+            sx={{
+              borderLeft: 6,
+              borderColor: 'secondary.main',
+              boxShadow: activeFilter === 'has_evidence' ? 6 : 3,
+              backgroundColor: activeFilter === 'has_evidence' ? theme.palette.action.selected : 'background.paper',
+              cursor: 'pointer',
+              '&:hover': {
+                boxShadow: 8,
+                transform: 'translateY(-2px)',
+              },
+              transition: 'all 0.3s ease',
+            }}
+          >
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <AttachFileIcon sx={{ color: 'secondary.main', mr: 1, fontSize: 28, transform: 'rotate(45deg)' }} />
+                <Typography variant="h6" component="div" color="secondary.main">
+                  Has Evidence
+                </Typography>
+              </Box>
+              <Typography variant="h3" component="div" sx={{ fontWeight: 'bold', color: 'secondary.main' }}>
+                {hasEvidence.length}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Summonses with file attachments
+              </Typography>
+              {hasEvidence.length > 0 && (
+                <Box sx={{ mt: 2 }}>
+                  {hasEvidence.slice(0, 3).map((summons) => (
+                    <Chip
+                      key={summons.id}
+                      label={`${summons.respondent_name} - ${summons.hearing_date ? new Date(summons.hearing_date).toLocaleDateString() : 'No date'}`}
+                      size="small"
+                      color="secondary"
+                      sx={{ mt: 0.5, mr: 0.5 }}
+                    />
+                  ))}
+                  {hasEvidence.length > 3 && (
+                    <Typography variant="caption" color="text.secondary">
+                      +{hasEvidence.length - 3} more
                     </Typography>
                   )}
                 </Box>

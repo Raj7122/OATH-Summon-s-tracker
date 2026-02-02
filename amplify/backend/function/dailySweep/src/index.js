@@ -270,10 +270,8 @@ async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime) {
     return { action: 'skipped', reason: 'no respondent name' };
   }
 
-  // Match to client
-  const normalizedName = normalizeCompanyName(respondentFullName);
-  const noSpaceName = normalizedName.replace(/\s/g, '');
-  let matchedClient = clientNameMap.get(normalizedName) || clientNameMap.get(noSpaceName);
+  // Match to client using multiple strategies
+  let matchedClient = matchRespondentToClient(respondentFirstName, respondentLastName, clientNameMap);
 
   if (!matchedClient) {
     return { action: 'skipped', reason: 'no client match' };
@@ -1093,6 +1091,67 @@ function normalizeCompanyName(name) {
     .replace(/\s+/g, ' ')
     .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '')
     .trim();
+}
+
+/**
+ * Match respondent name to a client using multiple strategies
+ *
+ * MATCHING STRATEGIES (in order of priority):
+ * 1. Direct match: Full name (first + last) normalized
+ * 2. LLC Split fix: If first_name is a single character (e.g., "C" from "LLC"),
+ *    try matching with just last_name (handles NYC API's quirky name splitting)
+ * 3. Partial word match: Check if normalized respondent name starts with any client name
+ *    (handles cases like "SPRAGUE OPERATING" matching "SPRAGUE OPERATING RESOURCES")
+ *
+ * @param {string} firstName - Respondent first name from API
+ * @param {string} lastName - Respondent last name from API
+ * @param {Map} clientNameMap - Map of normalized names to client objects
+ * @returns {Object|null} Matched client or null
+ */
+function matchRespondentToClient(firstName, lastName, clientNameMap) {
+  const fullName = `${firstName} ${lastName}`.trim();
+
+  if (!fullName) return null;
+
+  // Strategy 1: Direct match with full name
+  const normalizedFull = normalizeCompanyName(fullName);
+  const noSpaceFull = normalizedFull.replace(/\s/g, '');
+
+  let match = clientNameMap.get(normalizedFull) || clientNameMap.get(noSpaceFull);
+  if (match) return match;
+
+  // Strategy 2: LLC Split fix - if first name is a single character (like "C" from "LLC"),
+  // the API may have split "COMPANY LLC" into first="C" last="COMPANY LL"
+  // Try matching with just the last name
+  if (firstName && firstName.length === 1 && lastName) {
+    const normalizedLast = normalizeCompanyName(lastName);
+    const noSpaceLast = normalizedLast.replace(/\s/g, '');
+
+    match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
+    if (match) {
+      console.log(`  LLC Split Match: "${fullName}" → "${match.name}" (using last_name only)`);
+      return match;
+    }
+  }
+
+  // Strategy 3: Partial word match - check if any client name starts with or
+  // is contained in the respondent name (handles truncated/variant names)
+  // This catches "SPRAGUE OPERATING" matching client AKA "SPRAGUE OPERATING RESOURCES"
+  for (const [clientNormName, client] of clientNameMap.entries()) {
+    // Check if respondent name starts with client name (respondent is more specific)
+    if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) {
+      console.log(`  Partial Match (respondent contains client): "${fullName}" → "${client.name}"`);
+      return client;
+    }
+    // Check if client name starts with respondent name (client is more specific)
+    // But only if respondent name is substantial (at least 10 chars after normalization)
+    if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) {
+      console.log(`  Partial Match (client contains respondent): "${fullName}" → "${client.name}"`);
+      return client;
+    }
+  }
+
+  return null;
 }
 
 /**

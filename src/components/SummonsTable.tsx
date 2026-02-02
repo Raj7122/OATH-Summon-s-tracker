@@ -58,6 +58,7 @@ import {
   Select,
   MenuItem,
   Tooltip,
+  IconButton,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -65,6 +66,10 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import FiberNewIcon from '@mui/icons-material/FiberNew';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
+import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
+import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
+import { useInvoice } from '../contexts/InvoiceContext';
+import { SummonsForInvoice } from '../types/invoice';
 
 const client = generateClient();
 
@@ -162,6 +167,7 @@ interface SummonsTableProps {
 const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { addToCart, removeFromCart, isInCart } = useInvoice();
 
   const [notesDialog, setNotesDialog] = useState<{ open: boolean; summons: Summons | null }>({
     open: false,
@@ -672,8 +678,75 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     );
   };
 
+  /**
+   * Toggle summons in/out of invoice cart
+   *
+   * @param {Summons} summons - The summons to add or remove from cart
+   */
+  const handleCartToggle = (summons: Summons) => {
+    if (isInCart(summons.id)) {
+      removeFromCart(summons.id);
+    } else {
+      // Map Summons to SummonsForInvoice
+      const summonsForInvoice: SummonsForInvoice = {
+        id: summons.id,
+        summons_number: summons.summons_number,
+        respondent_name: summons.respondent_name,
+        clientID: summons.clientID,
+        violation_date: summons.violation_date,
+        hearing_date: summons.hearing_date,
+        hearing_result: summons.hearing_result || null,
+        status: summons.status,
+        amount_due: summons.amount_due,
+      };
+      addToCart(summonsForInvoice);
+    }
+  };
+
+  /**
+   * Render Add to Invoice button cell
+   *
+   * Shows a shopping cart icon that toggles between "Add to Invoice" and "In Cart" states.
+   * Uses filled icon and different color when item is already in cart.
+   *
+   * @param {GridRenderCellParams} params - MUI DataGrid cell parameters
+   * @returns {JSX.Element} IconButton with cart icon and tooltip
+   */
+  const renderInvoiceCartCell = (params: GridRenderCellParams) => {
+    const summons = params.row as Summons;
+    const inCart = isInCart(summons.id);
+
+    return (
+      <Tooltip title={inCart ? 'Remove from Invoice' : 'Add to Invoice'} arrow>
+        <IconButton
+          size="small"
+          onClick={() => handleCartToggle(summons)}
+          sx={{
+            color: inCart ? 'success.main' : 'action.active',
+            '&:hover': {
+              color: inCart ? 'success.dark' : 'primary.main',
+              backgroundColor: inCart ? 'success.light' : 'action.hover',
+            },
+          }}
+        >
+          {inCart ? <ShoppingCartIcon /> : <AddShoppingCartIcon />}
+        </IconButton>
+      </Tooltip>
+    );
+  };
+
   // Define columns - "Actionable 7" visible by default (UX Improvement #3)
   const columns: GridColDef[] = [
+    // Invoice Cart column - first for easy access
+    {
+      field: 'invoice_cart',
+      headerName: 'Invoice',
+      width: 70,
+      sortable: false,
+      filterable: false,
+      disableColumnMenu: true,
+      renderCell: renderInvoiceCartCell,
+    },
     {
       field: 'respondent_name',
       headerName: 'Client',
@@ -1037,6 +1110,17 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
           />
         </DialogContent>
         <DialogActions>
+          {notesDialog.summons && (
+            <Button
+              onClick={() => handleCartToggle(notesDialog.summons!)}
+              variant={isInCart(notesDialog.summons.id) ? 'contained' : 'outlined'}
+              color={isInCart(notesDialog.summons.id) ? 'success' : 'primary'}
+              startIcon={isInCart(notesDialog.summons.id) ? <ShoppingCartIcon /> : <AddShoppingCartIcon />}
+              sx={{ mr: 'auto' }}
+            >
+              {isInCart(notesDialog.summons.id) ? 'In Invoice Cart' : 'Add to Invoice'}
+            </Button>
+          )}
           <Button onClick={() => setNotesDialog({ open: false, summons: null })}>
             Close
           </Button>
@@ -1117,11 +1201,25 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
           />
         </Box>
 
+        {/* Add to Invoice Button */}
+        {mobileDrawer.summons && (
+          <Button
+            fullWidth
+            variant={isInCart(mobileDrawer.summons.id) ? 'contained' : 'outlined'}
+            color={isInCart(mobileDrawer.summons.id) ? 'success' : 'primary'}
+            onClick={() => handleCartToggle(mobileDrawer.summons!)}
+            startIcon={isInCart(mobileDrawer.summons.id) ? <ShoppingCartIcon /> : <AddShoppingCartIcon />}
+            sx={{ mt: 3 }}
+          >
+            {isInCart(mobileDrawer.summons.id) ? 'In Invoice Cart' : 'Add to Invoice'}
+          </Button>
+        )}
+
         <Button
           fullWidth
           variant="contained"
           onClick={() => setMobileDrawer({ open: false, summons: null })}
-          sx={{ mt: 3 }}
+          sx={{ mt: 2 }}
         >
           Done
         </Button>

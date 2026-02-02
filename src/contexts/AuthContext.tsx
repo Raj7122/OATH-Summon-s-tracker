@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { fetchAuthSession, signIn, signOut, getCurrentUser, AuthUser, confirmSignIn, fetchUserAttributes } from 'aws-amplify/auth';
+import { fetchAuthSession, signIn, signOut, getCurrentUser, AuthUser, confirmSignIn, fetchUserAttributes, resetPassword, confirmResetPassword } from 'aws-amplify/auth';
 
 /**
  * Extended user info including display name from Cognito attributes
@@ -17,6 +17,8 @@ interface AuthContextType {
   signIn: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   completeNewPassword: (newPassword: string) => Promise<void>;
+  forgotPassword: (username: string) => Promise<void>;
+  forgotPasswordSubmit: (username: string, code: string, newPassword: string) => Promise<void>;
   isAuthenticated: boolean;
   requiresPasswordChange: boolean;
 }
@@ -119,6 +121,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const handleForgotPassword = async (username: string) => {
+    try {
+      await resetPassword({ username });
+    } catch (error) {
+      console.error('Error initiating password reset:', error);
+      throw error;
+    }
+  };
+
+  const handleForgotPasswordSubmit = async (username: string, code: string, newPassword: string) => {
+    try {
+      await confirmResetPassword({ username, confirmationCode: code, newPassword });
+    } catch (error) {
+      console.error('Error confirming password reset:', error);
+      throw error;
+    }
+  };
+
   const value: AuthContextType = {
     user,
     userInfo,
@@ -126,6 +146,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signIn: handleSignIn,
     signOut: handleSignOut,
     completeNewPassword: handleCompleteNewPassword,
+    forgotPassword: handleForgotPassword,
+    forgotPasswordSubmit: handleForgotPasswordSubmit,
     isAuthenticated: !!user,
     requiresPasswordChange,
   };

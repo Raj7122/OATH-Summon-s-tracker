@@ -28,11 +28,6 @@ const dynamodb = new AWS.DynamoDB.DocumentClient();
 const SUMMONS_TABLE = process.env.SUMMONS_TABLE || 'Summons-dev';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Retry configuration for NYC PDF server (often rate-limits or times out)
-const MAX_FETCH_RETRIES = 3;
-const INITIAL_RETRY_DELAY_MS = 1000; // Start with 1 second
-const MAX_RETRY_DELAY_MS = 10000; // Cap at 10 seconds
-
 // Initialize Google Gemini AI
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
@@ -207,8 +202,7 @@ exports.handler = async (event) => {
  */
 async function scrapeVideoPage(videoUrl) {
   try {
-    // Use retry logic for video page fetch as well
-    const response = await fetchWithRetry(videoUrl);
+    const response = await fetch(videoUrl);
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -245,73 +239,6 @@ async function scrapeVideoPage(videoUrl) {
 }
 
 /**
- * Fetch with retry and exponential backoff
- * Handles connection resets and rate limiting from NYC PDF server
- *
- * @param {string} url - URL to fetch
- * @param {Object} options - Fetch options
- * @param {number} maxRetries - Maximum number of retries
- * @returns {Promise<Response>} Fetch response
- */
-async function fetchWithRetry(url, options = {}, maxRetries = MAX_FETCH_RETRIES) {
-  let lastError;
-  let delay = INITIAL_RETRY_DELAY_MS;
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      // Add timeout to prevent hanging
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-
-      const response = await fetch(url, {
-        ...options,
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        return response;
-      }
-
-      // Non-retryable HTTP error (4xx)
-      if (response.status >= 400 && response.status < 500) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      // Server error (5xx) - retryable
-      lastError = new Error(`HTTP ${response.status}: ${response.statusText}`);
-      console.log(`Fetch attempt ${attempt}/${maxRetries} failed with ${response.status}, retrying in ${delay}ms...`);
-    } catch (error) {
-      lastError = error;
-
-      // Check if this is a retryable error
-      const isRetryable =
-        error.code === 'ECONNRESET' ||
-        error.code === 'ETIMEDOUT' ||
-        error.code === 'ENOTFOUND' ||
-        error.code === 'ECONNREFUSED' ||
-        error.type === 'system' ||
-        error.name === 'AbortError' ||
-        error.message.includes('socket hang up') ||
-        error.message.includes('network');
-
-      if (!isRetryable || attempt === maxRetries) {
-        throw lastError;
-      }
-
-      console.log(`Fetch attempt ${attempt}/${maxRetries} failed: ${error.message}, retrying in ${delay}ms...`);
-    }
-
-    // Wait before retry with exponential backoff
-    await new Promise(resolve => setTimeout(resolve, delay));
-    delay = Math.min(delay * 2, MAX_RETRY_DELAY_MS); // Exponential backoff capped at max
-  }
-
-  throw lastError;
-}
-
-/**
  * Extract structured data from PDF using Google Gemini API
  *
  * @param {string} pdfUrl - URL of the PDF summons
@@ -319,8 +246,8 @@ async function fetchWithRetry(url, options = {}, maxRetries = MAX_FETCH_RETRIES)
  */
 async function extractPDFData(pdfUrl) {
   try {
-    // Fetch the PDF as a buffer with retry logic
-    const response = await fetchWithRetry(pdfUrl);
+    // Fetch the PDF as a buffer
+    const response = await fetch(pdfUrl);
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -331,10 +258,9 @@ async function extractPDFData(pdfUrl) {
     // Convert PDF buffer to base64 for Gemini API
     const pdfBase64 = pdfBuffer.toString('base64');
 
-    // Initialize Gemini model for OCR
-    // Using gemini-2.5-flash - best accuracy, no rate limit issues on this account
+    // Initialize Gemini model (using Gemini 2.0 Flash Lite for better OCR and lower cost)
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash'
+      model: 'gemini-2.0-flash-lite'
     });
 
     // Prompt for structured extraction (from TRD FR-09)

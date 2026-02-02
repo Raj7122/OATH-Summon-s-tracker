@@ -79,6 +79,12 @@ import WarningIcon from '@mui/icons-material/Warning';
 import PersonIcon from '@mui/icons-material/Person';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
+import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
+import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
+
+// Import invoice context
+import { useInvoice } from '../contexts/InvoiceContext';
+import { SummonsForInvoice } from '../types/invoice';
 
 // Import shared types
 import { Summons, getStatusColor, ActivityLogEntry, AttributionData, DepFileDateAttribution, NoteComment, InternalStatusAttribution, Attachment } from '../types/summons';
@@ -274,6 +280,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const { userInfo } = useAuth();
+  const { addToCart, removeFromCart, isInCart } = useInvoice();
 
   // Get current user info (with fallback for safety)
   const currentUser = {
@@ -363,6 +370,32 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   }, [summons]);
   
   if (!summons) return null;
+
+  // Check if this summons is in the invoice cart
+  const inCart = isInCart(summons.id);
+
+  /**
+   * Toggle summons in/out of invoice cart
+   */
+  const handleCartToggle = () => {
+    if (inCart) {
+      removeFromCart(summons.id);
+    } else {
+      // Map Summons to SummonsForInvoice
+      const summonsForInvoice: SummonsForInvoice = {
+        id: summons.id,
+        summons_number: summons.summons_number,
+        respondent_name: summons.respondent_name,
+        clientID: summons.clientID,
+        violation_date: summons.violation_date,
+        hearing_date: summons.hearing_date,
+        hearing_result: summons.hearing_result || null,
+        status: summons.status,
+        amount_due: summons.amount_due,
+      };
+      addToCart(summonsForInvoice);
+    }
+  };
   
   /**
    * Handle checkbox changes for evidence tracking with attribution
@@ -1321,6 +1354,15 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
         <Typography variant="caption" color="text.secondary" sx={{ mr: 'auto' }}>
           Last Updated: {summons.updatedAt ? dayjs.utc(summons.updatedAt).tz(NYC_TIMEZONE).format('MMM D, YYYY h:mm A') : 'Unknown'}
         </Typography>
+        <Button
+          onClick={handleCartToggle}
+          variant={inCart ? 'contained' : 'outlined'}
+          color={inCart ? 'success' : 'primary'}
+          startIcon={inCart ? <ShoppingCartIcon /> : <AddShoppingCartIcon />}
+          sx={{ mr: 1 }}
+        >
+          {inCart ? 'In Invoice Cart' : 'Add to Invoice'}
+        </Button>
         <Button onClick={onClose} variant="contained">
           Close
         </Button>
