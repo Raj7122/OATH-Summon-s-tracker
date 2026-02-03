@@ -81,6 +81,7 @@ import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
+import ReceiptIcon from '@mui/icons-material/Receipt';
 
 // Import invoice context
 import { useInvoice } from '../contexts/InvoiceContext';
@@ -92,6 +93,7 @@ import FileUploadSection from './FileUploadSection';
 import { isNewRecord, isUpdatedRecord } from '../types/summons';
 import { useAuth } from '../contexts/AuthContext';
 import { v4 as uuidv4 } from 'uuid';
+import { isInvoiced as isInvoicedLocally, getInvoiceDate as getInvoiceDateLocally } from '../utils/invoiceTracking';
 
 /**
  * Props for SummonsDetailModal component
@@ -656,6 +658,18 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                 sx={{ fontWeight: 'bold', fontSize: '0.7rem' }}
               />
             )}
+            {/* Check both DB value and localStorage fallback for invoiced status */}
+            {(summons.is_invoiced || isInvoicedLocally(summons.id)) && (
+              <Tooltip title={`Invoiced on ${dayjs(summons.invoice_date || getInvoiceDateLocally(summons.id)).format('MMM D, YYYY h:mm A')}`}>
+                <Chip
+                  label="INVOICED"
+                  icon={<ReceiptIcon />}
+                  color="success"
+                  size="small"
+                  sx={{ fontWeight: 'bold', fontSize: '0.7rem' }}
+                />
+              </Tooltip>
+            )}
           </Box>
           <Typography variant="subtitle1" color="text.secondary">
             {summons.respondent_name}
@@ -821,9 +835,23 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                 {(summons.penalty_imposed ?? 0) > 0 && (
                   <InfoRow label="Penalty Imposed" value={`$${summons.penalty_imposed?.toFixed(2)}`} />
                 )}
+                {/* Check both DB value and localStorage fallback for invoiced status */}
+                {(summons.is_invoiced || isInvoicedLocally(summons.id)) && (
+                  <InfoRow
+                    label="Invoiced"
+                    value={
+                      <Chip
+                        label={dayjs(summons.invoice_date || getInvoiceDateLocally(summons.id)).format('MMM D, YYYY')}
+                        size="small"
+                        color="success"
+                        variant="outlined"
+                      />
+                    }
+                  />
+                )}
               </CardContent>
             </Card>
-            
+
             {/* Evidence Tracking with Attribution */}
             <Card variant="outlined" sx={{ mb: 2 }}>
               <CardContent>

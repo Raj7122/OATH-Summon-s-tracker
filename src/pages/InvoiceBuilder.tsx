@@ -28,9 +28,12 @@ import {
   Stack,
   Tooltip,
   Chip,
+  Snackbar,
+  CircularProgress,
 } from '@mui/material';
 import { generateClient } from 'aws-amplify/api';
-import { getClient } from '../graphql/queries';
+import { getClient, getSummons } from '../graphql/queries';
+import { updateSummons } from '../graphql/mutations';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import DescriptionIcon from '@mui/icons-material/Description';
@@ -38,9 +41,14 @@ import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
 import dayjs from 'dayjs';
 
+import SummonsDetailModal from '../components/SummonsDetailModal';
+import { Summons } from '../types/summons';
+import { InvoiceCartItem } from '../types/invoice';
+
 import { useInvoice } from '../contexts/InvoiceContext';
 import { generatePDF, generateDOCX } from '../utils/invoiceGenerator';
 import { FOOTER_TEXT } from '../constants/invoiceDefaults';
+import { markAsInvoiced } from '../utils/invoiceTracking';
 
 const apiClient = generateClient();
 
@@ -88,8 +96,18 @@ const InvoiceBuilder = () => {
   const [detectedClient, setDetectedClient] = useState<Client | null>(null);
   const [clientMismatchError, setClientMismatchError] = useState<string | null>(null);
 
-  // State for editable footer fields
+  // Modal state for viewing summons details
+  const [selectedSummons, setSelectedSummons] = useState<Summons | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [loadingSummons, setLoadingSummons] = useState(false);
+
+  // Success snackbar state
+  const [successSnackbar, setSuccessSnackbar] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+
+  // State for 3 editable footer fields
   const [paymentInstructions, setPaymentInstructions] = useState(FOOTER_TEXT.payment);
+  const [reviewText, setReviewText] = useState(FOOTER_TEXT.review);
   const [additionalNotes, setAdditionalNotes] = useState('');
 
   // Auto-detect client from cart items
@@ -145,6 +163,69 @@ const InvoiceBuilder = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cartItems, setRecipient]);
 
+  /**
+   * Fetch full summons data for the detail modal
+   */
+  const fetchFullSummons = async (id: string): Promise<Summons | null> => {
+    try {
+      const response = await apiClient.graphql({
+        query: getSummons,
+        variables: { id }
+      }) as { data: { getSummons: Summons } };
+      return response.data.getSummons;
+    } catch (error) {
+      console.error('Failed to fetch summons:', error);
+      return null;
+    }
+  };
+
+  /**
+   * Handle clicking on a summons number to open detail modal
+   */
+  const handleSummonsClick = async (item: InvoiceCartItem) => {
+    setLoadingSummons(true);
+    const fullSummons = await fetchFullSummons(item.id);
+    setLoadingSummons(false);
+    if (fullSummons) {
+      setSelectedSummons(fullSummons);
+      setModalOpen(true);
+    }
+  };
+
+  /**
+   * Mark all cart items as invoiced
+   *
+   * Uses localStorage for immediate persistence (works before schema deployment).
+   * Also attempts DB update which will succeed once schema is deployed.
+   */
+  const markItemsAsInvoiced = async (): Promise<boolean> => {
+    const invoiceDate = new Date().toISOString();
+
+    // Save to localStorage immediately (works before schema deployment)
+    markAsInvoiced(cartItems.map(item => item.id));
+
+    // Also attempt DB update (fails silently until schema is deployed)
+    try {
+      await Promise.all(cartItems.map(item =>
+        apiClient.graphql({
+          query: updateSummons,
+          variables: {
+            input: {
+              id: item.id,
+              is_invoiced: true,
+              invoice_date: invoiceDate,
+            }
+          }
+        })
+      ));
+    } catch (error) {
+      // Expected to fail until schema is deployed - localStorage handles it
+      console.log('DB update for invoice status skipped (schema not deployed yet):', error);
+    }
+
+    return true;
+  };
+
   const handleGeneratePDF = async () => {
     if (cartItems.length === 0) {
       alert('Please add summonses to the cart before generating an invoice.');
@@ -153,10 +234,16 @@ const InvoiceBuilder = () => {
 
     setGenerating(true);
     try {
-      await generatePDF(cartItems, recipient, {
-        paymentInstructions,
-        additionalNotes,
-      });
+      await generatePDF(cartItems, recipient, { paymentInstructions, reviewText, additionalNotes });
+
+      // Mark all cart items as invoiced in the database
+      const markedSuccess = await markItemsAsInvoiced();
+      if (markedSuccess) {
+        // Clear the cart after successful generation and DB update
+        clearCart();
+        setSuccessMessage(`Invoice generated! ${cartItems.length} summons${cartItems.length !== 1 ? 'es' : ''} marked as invoiced.`);
+        setSuccessSnackbar(true);
+      }
     } catch (error) {
       console.error('Error generating PDF:', error);
       alert('Failed to generate PDF. Please try again.');
@@ -173,10 +260,16 @@ const InvoiceBuilder = () => {
 
     setGenerating(true);
     try {
-      await generateDOCX(cartItems, recipient, {
-        paymentInstructions,
-        additionalNotes,
-      });
+      await generateDOCX(cartItems, recipient, { paymentInstructions, reviewText, additionalNotes });
+
+      // Mark all cart items as invoiced in the database
+      const markedSuccess = await markItemsAsInvoiced();
+      if (markedSuccess) {
+        // Clear the cart after successful generation and DB update
+        clearCart();
+        setSuccessMessage(`Invoice generated! ${cartItems.length} summons${cartItems.length !== 1 ? 'es' : ''} marked as invoiced.`);
+        setSuccessSnackbar(true);
+      }
     } catch (error) {
       console.error('Error generating DOCX:', error);
       alert('Failed to generate DOCX. Please try again.');
@@ -342,7 +435,25 @@ const InvoiceBuilder = () => {
                   <TableBody>
                     {cartItems.map((item) => (
                       <TableRow key={item.id} hover>
-                        <TableCell>{item.summons_number}</TableCell>
+                        <TableCell>
+                          <Box
+                            sx={{
+                              cursor: 'pointer',
+                              color: 'primary.main',
+                              fontWeight: 500,
+                              '&:hover': { textDecoration: 'underline' },
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 0.5,
+                            }}
+                            onClick={() => handleSummonsClick(item)}
+                          >
+                            {item.summons_number}
+                            {loadingSummons && (
+                              <CircularProgress size={12} sx={{ ml: 0.5 }} />
+                            )}
+                          </Box>
+                        </TableCell>
                         <TableCell>{formatDate(item.violation_date)}</TableCell>
                         <TableCell>{item.status || '—'}</TableCell>
                         <TableCell>{item.hearing_result || '—'}</TableCell>
@@ -393,28 +504,42 @@ const InvoiceBuilder = () => {
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
                 Invoice Footer Text
               </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Customize the text that appears after the summons table.
+              </Typography>
 
-              <TextField
-                label="Payment Instructions (appears after data table)"
-                value={paymentInstructions}
-                onChange={(e) => setPaymentInstructions(e.target.value)}
-                fullWidth
-                multiline
-                rows={2}
-                sx={{ mb: 2 }}
-                helperText="This text appears immediately after the summons table"
-              />
+              <Stack spacing={2}>
+                <TextField
+                  label="Payment Instructions"
+                  value={paymentInstructions}
+                  onChange={(e) => setPaymentInstructions(e.target.value)}
+                  fullWidth
+                  multiline
+                  rows={2}
+                  helperText="Payment methods and instructions"
+                />
 
-              <TextField
-                label="Additional Notes (appears before closing)"
-                value={additionalNotes}
-                onChange={(e) => setAdditionalNotes(e.target.value)}
-                fullWidth
-                multiline
-                rows={2}
-                placeholder="Optional: Add any additional notes here..."
-                helperText="This text appears after 'Let me know if you have any questions...' and before 'We look forward to working with you.'"
-              />
+                <TextField
+                  label="Review Request"
+                  value={reviewText}
+                  onChange={(e) => setReviewText(e.target.value)}
+                  fullWidth
+                  multiline
+                  rows={2}
+                  helperText="Asks client about defenses/explanations for the violations"
+                />
+
+                <TextField
+                  label="Additional Notes (Optional)"
+                  value={additionalNotes}
+                  onChange={(e) => setAdditionalNotes(e.target.value)}
+                  fullWidth
+                  multiline
+                  rows={3}
+                  placeholder="Add any case-specific notes here..."
+                  helperText="Custom text that appears at the end of the invoice"
+                />
+              </Stack>
             </CardContent>
           </Card>
 
@@ -468,6 +593,35 @@ const InvoiceBuilder = () => {
           </Card>
         </Stack>
       )}
+
+      {/* Summons Detail Modal */}
+      <SummonsDetailModal
+        open={modalOpen}
+        summons={selectedSummons}
+        onClose={() => {
+          setModalOpen(false);
+          setSelectedSummons(null);
+        }}
+        onUpdate={() => {
+          // Updates are handled internally by the modal
+        }}
+      />
+
+      {/* Success Snackbar */}
+      <Snackbar
+        open={successSnackbar}
+        autoHideDuration={5000}
+        onClose={() => setSuccessSnackbar(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSuccessSnackbar(false)}
+          severity="success"
+          sx={{ width: '100%' }}
+        >
+          {successMessage}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

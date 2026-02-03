@@ -149,6 +149,9 @@ export interface Summons {
   is_archived?: boolean;
   archived_at?: string;
   archived_reason?: string;
+  // Invoice Tracking
+  is_invoiced?: boolean;
+  invoice_date?: string;
   // Activity Log (Summons Lifecycle Audit)
   activity_log?: ActivityLogEntry[];
   // Timestamps

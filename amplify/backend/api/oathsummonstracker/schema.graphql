@@ -108,6 +108,10 @@ type Summons @model @auth(rules: [{ allow: private }]) {
   archived_at: AWSDateTime
   archived_reason: String
 
+  # Invoice Tracking
+  is_invoiced: Boolean @default(value: "false")
+  invoice_date: AWSDateTime
+
   # Activity Log (Summons Lifecycle Audit)
   # Stores history of all changes detected during daily sweeps
   # Structure: [{ date, type, description, old_value, new_value }]

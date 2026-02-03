@@ -57,6 +57,7 @@ import SummonsDetailModal from '../components/SummonsDetailModal';
 import ExportConfigurationModal from '../components/ExportConfigurationModal';
 import { useCSVExport } from '../hooks/useCSVExport';
 import { ExportConfig } from '../lib/csvExport';
+import { isInvoiced as isInvoicedLocally, getInvoiceDate as getInvoiceDateLocally } from '../utils/invoiceTracking';
 
 const apiClient = generateClient();
 
@@ -572,13 +573,26 @@ const ClientDetail: React.FC = () => {
       width: 80,
       align: 'center',
       headerAlign: 'center',
-      renderCell: (params) => (
-        params.value ? (
-          <ReceiptLongIcon sx={{ color: 'success.main', fontSize: 18 }} />
-        ) : (
+      renderCell: (params) => {
+        // Check both DB value and localStorage fallback
+        const summonsId = params.row.id;
+        const invoiced = params.value || isInvoicedLocally(summonsId);
+        if (invoiced) {
+          // Get invoice date from DB or localStorage
+          const invoiceDate = params.row.invoice_date || getInvoiceDateLocally(summonsId);
+          const formattedDate = invoiceDate
+            ? dayjs(invoiceDate).format('MMM D, YYYY')
+            : 'Date unknown';
+          return (
+            <Tooltip title={`Invoiced: ${formattedDate}`} arrow placement="top">
+              <ReceiptLongIcon sx={{ color: 'success.main', fontSize: 18 }} />
+            </Tooltip>
+          );
+        }
+        return (
           <Box sx={{ width: 16, height: 16, borderRadius: '50%', border: '1.5px solid', borderColor: 'grey.300' }} />
-        )
-      ),
+        );
+      },
     },
   ], []);
 

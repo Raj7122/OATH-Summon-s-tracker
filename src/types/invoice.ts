@@ -83,8 +83,10 @@ export type InvoiceContextType = InvoiceContextState & InvoiceContextActions;
 
 /**
  * Options for invoice generation (editable footer fields)
+ * Only 3 fields are user-editable; other footer text uses hardcoded defaults
  */
 export interface InvoiceOptions {
   paymentInstructions: string;
+  reviewText: string;
   additionalNotes: string;
 }

@@ -227,37 +227,43 @@ export const generatePDF = async (
   const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
   yPos = finalY + 15;
 
-  // Footer text - use passed payment instructions
+  // Footer text - 3 editable fields from options, rest hardcoded from FOOTER_TEXT
   doc.setFontSize(10);
   doc.setFont('helvetica', 'italic');
+
+  // 1. Payment Instructions (editable)
   const paymentText = doc.splitTextToSize(options.paymentInstructions, pageWidth - 2 * margin);
   doc.text(paymentText, margin, yPos);
   yPos += paymentText.length * 5 + 5;
 
-  doc.text(doc.splitTextToSize(FOOTER_TEXT.review, pageWidth - 2 * margin), margin, yPos);
-  yPos += 15;
+  // 2. Review Text (editable)
+  const reviewText = doc.splitTextToSize(options.reviewText, pageWidth - 2 * margin);
+  doc.text(reviewText, margin, yPos);
+  yPos += reviewText.length * 5 + 10;
 
-  doc.text(doc.splitTextToSize(FOOTER_TEXT.overdue, pageWidth - 2 * margin), margin, yPos);
+  // 3. Overdue Section (hardcoded)
+  const overdueText = doc.splitTextToSize(FOOTER_TEXT.overdue, pageWidth - 2 * margin);
+  doc.text(overdueText, margin, yPos);
+  yPos += overdueText.length * 5 + 5;
+
+  // Payment link (hardcoded)
+  doc.setTextColor(0, 0, 255);
+  doc.textWithLink(FOOTER_TEXT.cityPayUrl, margin, yPos, { url: FOOTER_TEXT.cityPayUrl });
+  doc.setTextColor(0, 0, 0);
   yPos += 10;
 
-  // Single payment link (not per-summons)
-  doc.setTextColor(0, 0, 255);
-  const paymentUrl = FOOTER_TEXT.cityPayUrl;
-  doc.textWithLink(paymentUrl, margin, yPos, { url: paymentUrl });
-  yPos += 5;
-  doc.setTextColor(0, 0, 0);
-  yPos += 5;
-
+  // 4. Questions Text (hardcoded)
   doc.text(FOOTER_TEXT.questions, margin, yPos);
   yPos += 8;
 
-  // Additional notes (if provided)
+  // 5. Additional notes (editable, if provided)
   if (options.additionalNotes) {
     const additionalText = doc.splitTextToSize(options.additionalNotes, pageWidth - 2 * margin);
     doc.text(additionalText, margin, yPos);
     yPos += additionalText.length * 5 + 5;
   }
 
+  // 6. Closing Text (hardcoded)
   doc.text(FOOTER_TEXT.closing, margin, yPos);
 
   // Save the PDF
@@ -455,19 +461,21 @@ export const generateDOCX = async (
           }),
           new Paragraph({ children: [] }), // Spacer
 
-          // Footer - use passed payment instructions
+          // Footer - 3 editable fields from options, rest hardcoded from FOOTER_TEXT
+          // 1. Payment Instructions (editable)
           new Paragraph({
             children: [new TextRun({ text: options.paymentInstructions, italics: true, size: 20 })],
           }),
           new Paragraph({ children: [] }),
+          // 2. Review Text (editable)
           new Paragraph({
-            children: [new TextRun({ text: FOOTER_TEXT.review, italics: true, size: 20 })],
+            children: [new TextRun({ text: options.reviewText, italics: true, size: 20 })],
           }),
           new Paragraph({ children: [] }),
+          // 3. Overdue Section (hardcoded)
           new Paragraph({
             children: [new TextRun({ text: FOOTER_TEXT.overdue, italics: true, size: 20 })],
           }),
-          // Single payment link (not per-summons)
           new Paragraph({
             children: [
               new ExternalHyperlink({
@@ -483,10 +491,11 @@ export const generateDOCX = async (
             ],
           }),
           new Paragraph({ children: [] }),
+          // 4. Questions Text (hardcoded)
           new Paragraph({
             children: [new TextRun({ text: FOOTER_TEXT.questions, italics: true, size: 20 })],
           }),
-          // Additional notes (if provided)
+          // 5. Additional notes (editable, if provided)
           ...(options.additionalNotes
             ? [
                 new Paragraph({
@@ -494,6 +503,7 @@ export const generateDOCX = async (
                 }),
               ]
             : []),
+          // 6. Closing Text (hardcoded)
           new Paragraph({
             children: [new TextRun({ text: FOOTER_TEXT.closing, italics: true, size: 20 })],
           }),
