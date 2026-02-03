@@ -6,7 +6,7 @@ A private, automated web application for the Law Office of Arthur L. Miller to t
 
 This system replaces the firm's manual process of downloading and filtering public spreadsheets. It automatically finds, tracks, and persists all NYC OATH "IDLING" violation summonses relevant to the firm's clients, providing a centralized dashboard for case management.
 
-**Target MVP Date**: December 18, 2025
+
 
 ## Quick Start
 
