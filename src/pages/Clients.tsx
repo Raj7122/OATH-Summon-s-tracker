@@ -180,6 +180,9 @@ const Clients = () => {
               pagination: {
                 paginationModel: { pageSize: 25 },
               },
+              sorting: {
+                sortModel: [{ field: 'name', sort: 'asc' }],
+              },
             }}
             slots={{
               toolbar: GridToolbar,

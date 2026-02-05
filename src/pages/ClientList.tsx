@@ -282,23 +282,10 @@ const ClientList: React.FC = () => {
   }, [clientsWithStats, searchTerm]);
 
   /**
-   * Sort clients: critical cases first, then by active case count
+   * Sort clients alphabetically by company name
    */
   const sortedClients = useMemo(() => {
-    return [...filteredClients].sort((a, b) => {
-      // Critical cases first
-      if (a.criticalCount > 0 && b.criticalCount === 0) return -1;
-      if (b.criticalCount > 0 && a.criticalCount === 0) return 1;
-
-      // Then by critical count
-      if (a.criticalCount !== b.criticalCount) return b.criticalCount - a.criticalCount;
-
-      // Then by active case count
-      if (a.activeCaseCount !== b.activeCaseCount) return b.activeCaseCount - a.activeCaseCount;
-
-      // Finally alphabetically
-      return a.name.localeCompare(b.name);
-    });
+    return [...filteredClients].sort((a, b) => a.name.localeCompare(b.name));
   }, [filteredClients]);
 
   // Calculate totals for summary
@@ -851,6 +838,7 @@ const ClientList: React.FC = () => {
             pageSizeOptions={[10, 25, 50, 100]}
             initialState={{
               pagination: { paginationModel: { pageSize: 25 } },
+              sorting: { sortModel: [{ field: 'name', sort: 'asc' }] },
             }}
             disableRowSelectionOnClick
             autoHeight
