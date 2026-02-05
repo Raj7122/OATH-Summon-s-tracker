@@ -1094,14 +1094,59 @@ function normalizeCompanyName(name) {
 }
 
 /**
+ * SUFFIX FRAGMENTS - Common business suffixes and their truncation fragments
+ *
+ * NYC Open Data API sometimes splits company names in unexpected ways, putting
+ * the tail end of "LLC", "INC", "CORP" etc. into the first_name field.
+ *
+ * Example: "CERCONE EXTERIOR RESTORATION CORP" becomes:
+ *   first_name: "ORP"  (the tail of "CORP")
+ *   last_name: "CERCONE EXTERIOR RESTORATION C"
+ *
+ * This array contains both full suffixes and their common truncation fragments.
+ */
+const SUFFIX_FRAGMENTS = [
+  // Full suffixes (lowercase for comparison)
+  'llc', 'inc', 'corp', 'co', 'ltd',
+  // Fragments from CORP truncation
+  'orp', 'rp', 'p',
+  // Fragments from INC truncation
+  'nc', 'c',
+  // Fragments from LLC truncation
+  'lc', 'l',
+  // Fragments from LTD truncation
+  'td', 'd',
+];
+
+/**
+ * Check if a firstName looks like a truncated business suffix fragment
+ *
+ * Returns true if:
+ * - firstName is a known suffix fragment (e.g., "ORP", "C", "LLC")
+ * - firstName is very short (3 chars or less) - likely a split artifact
+ *
+ * @param {string} firstName - The first_name from NYC API
+ * @returns {boolean} True if this looks like a suffix fragment
+ */
+function looksLikeSuffixFragment(firstName) {
+  if (!firstName) return false;
+  const lower = firstName.toLowerCase().trim();
+  // Check if it's a known suffix fragment OR very short (likely split artifact)
+  return SUFFIX_FRAGMENTS.includes(lower) || lower.length <= 3;
+}
+
+/**
  * Match respondent name to a client using multiple strategies
  *
  * MATCHING STRATEGIES (in order of priority):
  * 1. Direct match: Full name (first + last) normalized
- * 2. LLC Split fix: If first_name is a single character (e.g., "C" from "LLC"),
- *    try matching with just last_name (handles NYC API's quirky name splitting)
+ * 2. Suffix Fragment fix: If first_name looks like a truncated business suffix
+ *    (e.g., "ORP" from "CORP", "C" from "INC"), try matching with just last_name
+ *    (handles NYC API's quirky name splitting for company names)
  * 3. Partial word match: Check if normalized respondent name starts with any client name
  *    (handles cases like "SPRAGUE OPERATING" matching "SPRAGUE OPERATING RESOURCES")
+ * 4. Fallback lastName-only match: If no match found and lastName alone is substantial,
+ *    try matching with just lastName (catches partial company names like "CERCONE")
  *
  * @param {string} firstName - Respondent first name from API
  * @param {string} lastName - Respondent last name from API
@@ -1120,16 +1165,18 @@ function matchRespondentToClient(firstName, lastName, clientNameMap) {
   let match = clientNameMap.get(normalizedFull) || clientNameMap.get(noSpaceFull);
   if (match) return match;
 
-  // Strategy 2: LLC Split fix - if first name is a single character (like "C" from "LLC"),
-  // the API may have split "COMPANY LLC" into first="C" last="COMPANY LL"
-  // Try matching with just the last name
-  if (firstName && firstName.length === 1 && lastName) {
+  // Strategy 2: Suffix Fragment fix - detect if firstName looks like a truncated
+  // business suffix (e.g., "ORP" from "CORP", "C" from "INC", "LC" from "LLC")
+  // NYC API sometimes splits "CERCONE EXTERIOR RESTORATION CORP" into:
+  //   first_name: "ORP", last_name: "CERCONE EXTERIOR RESTORATION C"
+  // Try matching with just the last name in these cases
+  if (firstName && looksLikeSuffixFragment(firstName) && lastName) {
     const normalizedLast = normalizeCompanyName(lastName);
     const noSpaceLast = normalizedLast.replace(/\s/g, '');
 
     match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
     if (match) {
-      console.log(`  LLC Split Match: "${fullName}" → "${match.name}" (using last_name only)`);
+      console.log(`  Suffix Fragment Match: "${fullName}" → "${match.name}" (firstName "${firstName}" looks like suffix fragment)`);
       return match;
     }
   }
@@ -1148,6 +1195,35 @@ function matchRespondentToClient(firstName, lastName, clientNameMap) {
     if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) {
       console.log(`  Partial Match (client contains respondent): "${fullName}" → "${client.name}"`);
       return client;
+    }
+  }
+
+  // Strategy 4: Fallback lastName-only match - if lastName alone is substantial,
+  // try matching it directly. This catches cases like:
+  //   first_name: "", last_name: "CERCONE" (partial company name only)
+  // The lastName must be at least 5 chars to avoid false positives
+  if (lastName && lastName.length >= 5) {
+    const normalizedLast = normalizeCompanyName(lastName);
+    const noSpaceLast = normalizedLast.replace(/\s/g, '');
+
+    match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
+    if (match) {
+      console.log(`  Fallback lastName Match: "${fullName}" → "${match.name}" (using lastName "${lastName}" only)`);
+      return match;
+    }
+
+    // Also check partial matches with lastName only
+    for (const [clientNormName, client] of clientNameMap.entries()) {
+      // Check if lastName starts with client name (rare but possible)
+      if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) {
+        console.log(`  Fallback Partial Match (lastName contains client): "${lastName}" → "${client.name}"`);
+        return client;
+      }
+      // Check if any client name starts with lastName
+      if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) {
+        console.log(`  Fallback Partial Match (client contains lastName): "${lastName}" → "${client.name}"`);
+        return client;
+      }
     }
   }
 
@@ -1440,6 +1516,14 @@ function calculateChangesWithActivityLog(existingRecord, incomingData) {
     activityEntries,
   };
 }
+
+// Export internal functions for testing
+exports._testExports = {
+  normalizeCompanyName,
+  looksLikeSuffixFragment,
+  matchRespondentToClient,
+  buildClientNameMap,
+};
 
 /**
  * Generate a UUID

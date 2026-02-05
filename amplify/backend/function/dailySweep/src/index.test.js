@@ -1640,4 +1640,91 @@ describe('Daily Sweep Lambda Function', () => {
       expect(body.phase1.newRecordsCreated).toBeGreaterThanOrEqual(0);
     });
   });
+
+  /**
+   * Production Function Tests - Using ACTUAL exported functions from index.js
+   * These tests verify the real production code, not local copies
+   */
+  describe('Production Matching Functions (Real Exports)', () => {
+    const {
+      normalizeCompanyName,
+      looksLikeSuffixFragment,
+      matchRespondentToClient,
+      buildClientNameMap,
+    } = require('./index')._testExports;
+
+    describe('Summons 000954886N - Real Production Test', () => {
+      // This is the EXACT pattern from summons 000954886N that the client reported missing
+      const API_RESPONSE = {
+        respondent_first_name: 'ORP',
+        respondent_last_name: 'CERCONE EXTERIOR RESTORATION C',
+        ticket_number: '000954886N',
+      };
+
+      test('should match 000954886N pattern WITH explicit AKA', () => {
+        const client = {
+          id: 'cercone-1',
+          name: 'Cercone Exterior Restoration Corp',
+          akas: ['CERCONE', 'CERCONE EXTERIOR RESTORATION C'],
+        };
+
+        const clientNameMap = buildClientNameMap([client]);
+        const match = matchRespondentToClient(
+          API_RESPONSE.respondent_first_name,
+          API_RESPONSE.respondent_last_name,
+          clientNameMap
+        );
+
+        expect(match).not.toBeNull();
+        expect(match.id).toBe('cercone-1');
+      });
+
+      test('should match 000954886N pattern WITHOUT explicit AKA (via partial matching)', () => {
+        // This is the critical test - does it match WITHOUT the AKA?
+        const client = {
+          id: 'cercone-1',
+          name: 'Cercone Exterior Restoration Corp',
+          akas: [], // NO AKAs!
+        };
+
+        const clientNameMap = buildClientNameMap([client]);
+
+        // Debug: Log what's in the map
+        console.log('Client name map entries:');
+        for (const [key] of clientNameMap.entries()) {
+          console.log(`  - "${key}"`);
+        }
+
+        const firstName = API_RESPONSE.respondent_first_name;
+        const lastName = API_RESPONSE.respondent_last_name;
+
+        // Debug: Log the normalized values
+        console.log(`firstName: "${firstName}"`);
+        console.log(`lastName: "${lastName}"`);
+        console.log(`normalizedLast: "${normalizeCompanyName(lastName)}"`);
+        console.log(`looksLikeSuffixFragment("${firstName}"): ${looksLikeSuffixFragment(firstName)}`);
+
+        const match = matchRespondentToClient(firstName, lastName, clientNameMap);
+
+        // THIS MUST PASS for the matching to work without explicit AKA
+        expect(match).not.toBeNull();
+        expect(match.id).toBe('cercone-1');
+      });
+
+      test('normalizeCompanyName correctly handles lastName with trailing letter', () => {
+        // "CERCONE EXTERIOR RESTORATION C" should normalize to "cercone exterior restoration c"
+        // (the trailing "C" is NOT a recognized suffix, so it stays)
+        const result = normalizeCompanyName('CERCONE EXTERIOR RESTORATION C');
+        expect(result).toBe('cercone exterior restoration c');
+      });
+
+      test('client name normalizes to match prefix of lastName', () => {
+        const clientNorm = normalizeCompanyName('Cercone Exterior Restoration Corp');
+        const lastNameNorm = normalizeCompanyName('CERCONE EXTERIOR RESTORATION C');
+
+        // The lastName should START WITH the client name
+        expect(lastNameNorm.startsWith(clientNorm)).toBe(true);
+      });
+    });
+  });
 });
