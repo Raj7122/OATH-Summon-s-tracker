@@ -30,6 +30,11 @@ import {
   Chip,
   Snackbar,
   CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
 } from '@mui/material';
 import { generateClient } from 'aws-amplify/api';
 import { getClient, getSummons } from '../graphql/queries';
@@ -42,6 +47,7 @@ import ClearAllIcon from '@mui/icons-material/ClearAll';
 import dayjs from 'dayjs';
 
 import SummonsDetailModal from '../components/SummonsDetailModal';
+import InvoicePreview from '../components/InvoicePreview';
 import { Summons } from '../types/summons';
 import { InvoiceCartItem } from '../types/invoice';
 
@@ -104,6 +110,9 @@ const InvoiceBuilder = () => {
   // Success snackbar state
   const [successSnackbar, setSuccessSnackbar] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+
+  // Post-generation dialog state (asks user to keep or clear cart)
+  const [successDialogOpen, setSuccessDialogOpen] = useState(false);
 
   // State for 3 editable footer fields
   const [paymentInstructions, setPaymentInstructions] = useState(FOOTER_TEXT.payment);
@@ -237,13 +246,11 @@ const InvoiceBuilder = () => {
       await generatePDF(cartItems, recipient, { paymentInstructions, reviewText, additionalNotes });
 
       // Mark all cart items as invoiced in the database
-      const markedSuccess = await markItemsAsInvoiced();
-      if (markedSuccess) {
-        // Clear the cart after successful generation and DB update
-        clearCart();
-        setSuccessMessage(`Invoice generated! ${cartItems.length} summons${cartItems.length !== 1 ? 'es' : ''} marked as invoiced.`);
-        setSuccessSnackbar(true);
-      }
+      await markItemsAsInvoiced();
+
+      // Show dialog asking user to keep or clear cart (instead of clearing immediately)
+      setSuccessMessage(`Invoice generated! ${cartItems.length} summons${cartItems.length !== 1 ? 'es' : ''} marked as invoiced.`);
+      setSuccessDialogOpen(true);
     } catch (error) {
       console.error('Error generating PDF:', error);
       alert('Failed to generate PDF. Please try again.');
@@ -263,13 +270,11 @@ const InvoiceBuilder = () => {
       await generateDOCX(cartItems, recipient, { paymentInstructions, reviewText, additionalNotes });
 
       // Mark all cart items as invoiced in the database
-      const markedSuccess = await markItemsAsInvoiced();
-      if (markedSuccess) {
-        // Clear the cart after successful generation and DB update
-        clearCart();
-        setSuccessMessage(`Invoice generated! ${cartItems.length} summons${cartItems.length !== 1 ? 'es' : ''} marked as invoiced.`);
-        setSuccessSnackbar(true);
-      }
+      await markItemsAsInvoiced();
+
+      // Show dialog asking user to keep or clear cart (instead of clearing immediately)
+      setSuccessMessage(`Invoice generated! ${cartItems.length} summons${cartItems.length !== 1 ? 'es' : ''} marked as invoiced.`);
+      setSuccessDialogOpen(true);
     } catch (error) {
       console.error('Error generating DOCX:', error);
       alert('Failed to generate DOCX. Please try again.');
@@ -283,6 +288,18 @@ const InvoiceBuilder = () => {
     if (window.confirm('Clear all items from the invoice cart? This will also reset the recipient information.')) {
       clearCart();
     }
+  };
+
+  // Post-generation dialog handlers
+  const handleSuccessDialogClear = () => {
+    clearCart();
+    setSuccessDialogOpen(false);
+    setSuccessSnackbar(true);
+  };
+
+  const handleSuccessDialogKeep = () => {
+    setSuccessDialogOpen(false);
+    setSuccessSnackbar(true);
   };
 
   const handleLegalFeeChange = (summonsId: string, value: string) => {
@@ -304,7 +321,7 @@ const InvoiceBuilder = () => {
   };
 
   return (
-    <Box sx={{ p: 3, maxWidth: 1400, mx: 'auto' }}>
+    <Box sx={{ p: 3, maxWidth: 1600, mx: 'auto' }}>
       {/* Page Header */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
         <ShoppingCartIcon sx={{ fontSize: 32, color: 'primary.main' }} />
@@ -339,259 +356,286 @@ const InvoiceBuilder = () => {
           Your invoice cart is empty. Add summonses from the Dashboard by clicking the shopping cart icon on each row.
         </Alert>
       ) : (
-        <Stack spacing={3}>
-          {/* Recipient Form Section */}
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                  Invoice Recipient
-                </Typography>
-                {detectedClient && (
-                  <Chip
-                    label={`Client: ${detectedClient.name}`}
-                    size="small"
-                    color="primary"
-                    variant="outlined"
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' },
+            gap: 3,
+          }}
+        >
+          {/* Left panel: editor */}
+          <Stack spacing={3}>
+            {/* Recipient Form Section */}
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                    Invoice Recipient
+                  </Typography>
+                  {detectedClient && (
+                    <Chip
+                      label={`Client: ${detectedClient.name}`}
+                      size="small"
+                      color="primary"
+                      variant="outlined"
+                    />
+                  )}
+                </Box>
+
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+                    gap: 2,
+                    mt: 2,
+                  }}
+                >
+                  <TextField
+                    label="Company Name"
+                    value={recipient.companyName}
+                    onChange={(e) => updateRecipientField('companyName', e.target.value)}
+                    fullWidth
                   />
-                )}
-              </Box>
+                  <TextField
+                    label="Attention"
+                    value={recipient.attention}
+                    onChange={(e) => updateRecipientField('attention', e.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    label="Address"
+                    value={recipient.address}
+                    onChange={(e) => updateRecipientField('address', e.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    label="City, State, ZIP"
+                    value={recipient.cityStateZip}
+                    onChange={(e) => updateRecipientField('cityStateZip', e.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    label="Email"
+                    type="email"
+                    value={recipient.email}
+                    onChange={(e) => updateRecipientField('email', e.target.value)}
+                    fullWidth
+                    sx={{ gridColumn: { sm: 'span 2' } }}
+                  />
+                </Box>
+              </CardContent>
+            </Card>
 
-              <Box
-                sx={{
-                  display: 'grid',
-                  gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
-                  gap: 2,
-                  mt: 2,
-                }}
-              >
-                <TextField
-                  label="Company Name"
-                  value={recipient.companyName}
-                  onChange={(e) => updateRecipientField('companyName', e.target.value)}
-                  fullWidth
-                />
-                <TextField
-                  label="Attention"
-                  value={recipient.attention}
-                  onChange={(e) => updateRecipientField('attention', e.target.value)}
-                  fullWidth
-                />
-                <TextField
-                  label="Address"
-                  value={recipient.address}
-                  onChange={(e) => updateRecipientField('address', e.target.value)}
-                  fullWidth
-                />
-                <TextField
-                  label="City, State, ZIP"
-                  value={recipient.cityStateZip}
-                  onChange={(e) => updateRecipientField('cityStateZip', e.target.value)}
-                  fullWidth
-                />
-                <TextField
-                  label="Email"
-                  type="email"
-                  value={recipient.email}
-                  onChange={(e) => updateRecipientField('email', e.target.value)}
-                  fullWidth
-                  sx={{ gridColumn: { sm: 'span 2' } }}
-                />
-              </Box>
-            </CardContent>
-          </Card>
-
-          {/* Cart Items Table */}
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                  Cart Items
-                </Typography>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  size="small"
-                  startIcon={<ClearAllIcon />}
-                  onClick={handleClearCart}
-                >
-                  Clear Cart
-                </Button>
-              </Box>
-              <TableContainer component={Paper} variant="outlined">
-                <Table size="small">
-                  <TableHead>
-                    <TableRow sx={{ bgcolor: 'grey.100' }}>
-                      <TableCell sx={{ fontWeight: 600 }}>Summons #</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Violation Date</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Hearing Status</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Results</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Hearing Date</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }} align="right">Fine Due</TableCell>
-                      <TableCell sx={{ fontWeight: 600, minWidth: 100 }} align="right">Legal Fee</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }} align="center">Remove</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {cartItems.map((item) => (
-                      <TableRow key={item.id} hover>
-                        <TableCell>
-                          <Box
-                            sx={{
-                              cursor: 'pointer',
-                              color: 'primary.main',
-                              fontWeight: 500,
-                              '&:hover': { textDecoration: 'underline' },
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 0.5,
-                            }}
-                            onClick={() => handleSummonsClick(item)}
-                          >
-                            {item.summons_number}
-                            {loadingSummons && (
-                              <CircularProgress size={12} sx={{ ml: 0.5 }} />
-                            )}
-                          </Box>
-                        </TableCell>
-                        <TableCell>{formatDate(item.violation_date)}</TableCell>
-                        <TableCell>{item.status || '—'}</TableCell>
-                        <TableCell>{item.hearing_result || '—'}</TableCell>
-                        <TableCell>{formatDate(item.hearing_date)}</TableCell>
-                        <TableCell align="right">
-                          <TextField
-                            type="number"
-                            value={item.amount_due ?? ''}
-                            onChange={(e) => handleAmountDueChange(item.id, e.target.value)}
-                            size="small"
-                            inputProps={{ min: 0, step: 50, style: { textAlign: 'right' } }}
-                            sx={{ width: 110 }}
-                            placeholder="0.00"
-                          />
-                        </TableCell>
-                        <TableCell align="right">
-                          <TextField
-                            type="number"
-                            value={item.legal_fee}
-                            onChange={(e) => handleLegalFeeChange(item.id, e.target.value)}
-                            size="small"
-                            inputProps={{ min: 0, step: 25, style: { textAlign: 'right' } }}
-                            sx={{ width: 100 }}
-                          />
-                        </TableCell>
-                        <TableCell align="center">
-                          <Tooltip title="Remove from cart">
-                            <IconButton
-                              size="small"
-                              color="error"
-                              onClick={() => removeFromCart(item.id)}
-                            >
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </TableCell>
+            {/* Cart Items Table */}
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                    Cart Items
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    size="small"
+                    startIcon={<ClearAllIcon />}
+                    onClick={handleClearCart}
+                  >
+                    Clear Cart
+                  </Button>
+                </Box>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: 'grey.100' }}>
+                        <TableCell sx={{ fontWeight: 600 }}>Summons #</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Violation Date</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Hearing Status</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Results</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Hearing Date</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }} align="right">Fine Due</TableCell>
+                        <TableCell sx={{ fontWeight: 600, minWidth: 100 }} align="right">Legal Fee</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }} align="center">Remove</TableCell>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </CardContent>
-          </Card>
+                    </TableHead>
+                    <TableBody>
+                      {cartItems.map((item) => (
+                        <TableRow key={item.id} hover>
+                          <TableCell>
+                            <Box
+                              sx={{
+                                cursor: 'pointer',
+                                color: 'primary.main',
+                                fontWeight: 500,
+                                '&:hover': { textDecoration: 'underline' },
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 0.5,
+                              }}
+                              onClick={() => handleSummonsClick(item)}
+                            >
+                              {item.summons_number}
+                              {loadingSummons && (
+                                <CircularProgress size={12} sx={{ ml: 0.5 }} />
+                              )}
+                            </Box>
+                          </TableCell>
+                          <TableCell>{formatDate(item.violation_date)}</TableCell>
+                          <TableCell>{item.status || '—'}</TableCell>
+                          <TableCell>{item.hearing_result || '—'}</TableCell>
+                          <TableCell>{formatDate(item.hearing_date)}</TableCell>
+                          <TableCell align="right">
+                            <TextField
+                              type="number"
+                              value={item.amount_due ?? ''}
+                              onChange={(e) => handleAmountDueChange(item.id, e.target.value)}
+                              size="small"
+                              inputProps={{ min: 0, step: 50, style: { textAlign: 'right' } }}
+                              sx={{ width: 110 }}
+                              placeholder="0.00"
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            <TextField
+                              type="number"
+                              value={item.legal_fee}
+                              onChange={(e) => handleLegalFeeChange(item.id, e.target.value)}
+                              size="small"
+                              inputProps={{ min: 0, step: 25, style: { textAlign: 'right' } }}
+                              sx={{ width: 100 }}
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <Tooltip title="Remove from cart">
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => removeFromCart(item.id)}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </CardContent>
+            </Card>
 
-          {/* Invoice Footer Text Section */}
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Invoice Footer Text
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Customize the text that appears after the summons table.
-              </Typography>
+            {/* Invoice Footer Text Section */}
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+                  Invoice Footer Text
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Customize the text that appears after the summons table.
+                </Typography>
 
-              <Stack spacing={2}>
-                <TextField
-                  label="Payment Instructions"
-                  value={paymentInstructions}
-                  onChange={(e) => setPaymentInstructions(e.target.value)}
-                  fullWidth
-                  multiline
-                  rows={2}
-                  helperText="Payment methods and instructions"
-                />
+                <Stack spacing={2}>
+                  <TextField
+                    label="Payment Instructions"
+                    value={paymentInstructions}
+                    onChange={(e) => setPaymentInstructions(e.target.value)}
+                    fullWidth
+                    multiline
+                    rows={2}
+                    helperText="Payment methods and instructions"
+                  />
 
-                <TextField
-                  label="Review Request"
-                  value={reviewText}
-                  onChange={(e) => setReviewText(e.target.value)}
-                  fullWidth
-                  multiline
-                  rows={2}
-                  helperText="Asks client about defenses/explanations for the violations"
-                />
+                  <TextField
+                    label="Review Request"
+                    value={reviewText}
+                    onChange={(e) => setReviewText(e.target.value)}
+                    fullWidth
+                    multiline
+                    rows={2}
+                    helperText="Asks client about defenses/explanations for the violations"
+                  />
 
-                <TextField
-                  label="Additional Notes (Optional)"
-                  value={additionalNotes}
-                  onChange={(e) => setAdditionalNotes(e.target.value)}
-                  fullWidth
-                  multiline
-                  rows={3}
-                  placeholder="Add any case-specific notes here..."
-                  helperText="Custom text that appears at the end of the invoice"
-                />
-              </Stack>
-            </CardContent>
-          </Card>
+                  <TextField
+                    label="Additional Notes (Optional)"
+                    value={additionalNotes}
+                    onChange={(e) => setAdditionalNotes(e.target.value)}
+                    fullWidth
+                    multiline
+                    rows={3}
+                    placeholder="Add any case-specific notes here..."
+                    helperText="Custom text that appears at the end of the invoice"
+                  />
+                </Stack>
+              </CardContent>
+            </Card>
 
-          {/* Totals Section */}
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Invoice Summary
-              </Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mt: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography variant="body1">Total Fines Due:</Typography>
-                  <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                    {formatCurrency(getTotalFinesDue())}
-                  </Typography>
+            {/* Totals Section */}
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+                  Invoice Summary
+                </Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mt: 2 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="body1">Total Fines Due:</Typography>
+                    <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                      {formatCurrency(getTotalFinesDue())}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="body1">Total Legal Fees:</Typography>
+                    <Typography variant="h5" sx={{ fontWeight: 700, color: 'primary.main' }}>
+                      {formatCurrency(getTotalLegalFees())}
+                    </Typography>
+                  </Box>
                 </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography variant="body1">Total Legal Fees:</Typography>
-                  <Typography variant="h5" sx={{ fontWeight: 700, color: 'primary.main' }}>
-                    {formatCurrency(getTotalLegalFees())}
-                  </Typography>
+
+                <Divider sx={{ my: 3 }} />
+
+                {/* Action Buttons */}
+                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    size="large"
+                    startIcon={<PictureAsPdfIcon />}
+                    onClick={handleGeneratePDF}
+                    disabled={generating || cartItems.length === 0 || !!clientMismatchError}
+                  >
+                    Generate PDF
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    size="large"
+                    startIcon={<DescriptionIcon />}
+                    onClick={handleGenerateDOCX}
+                    disabled={generating || cartItems.length === 0 || !!clientMismatchError}
+                  >
+                    Generate DOCX
+                  </Button>
                 </Box>
-              </Box>
+              </CardContent>
+            </Card>
+          </Stack>
 
-              <Divider sx={{ my: 3 }} />
-
-              {/* Action Buttons */}
-              <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  size="large"
-                  startIcon={<PictureAsPdfIcon />}
-                  onClick={handleGeneratePDF}
-                  disabled={generating || cartItems.length === 0 || !!clientMismatchError}
-                >
-                  Generate PDF
-                </Button>
-                <Button
-                  variant="outlined"
-                  color="primary"
-                  size="large"
-                  startIcon={<DescriptionIcon />}
-                  onClick={handleGenerateDOCX}
-                  disabled={generating || cartItems.length === 0 || !!clientMismatchError}
-                >
-                  Generate DOCX
-                </Button>
-              </Box>
-            </CardContent>
-          </Card>
-        </Stack>
+          {/* Right panel: sticky live preview */}
+          <Box sx={{ position: 'sticky', top: 16, alignSelf: 'start' }}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+                  Preview
+                </Typography>
+                <InvoicePreview
+                  cartItems={cartItems}
+                  recipient={recipient}
+                  paymentInstructions={paymentInstructions}
+                  reviewText={reviewText}
+                  additionalNotes={additionalNotes}
+                />
+              </CardContent>
+            </Card>
+          </Box>
+        </Box>
       )}
 
       {/* Summons Detail Modal */}
@@ -606,6 +650,27 @@ const InvoiceBuilder = () => {
           // Updates are handled internally by the modal
         }}
       />
+
+      {/* Post-Generation Dialog — asks user to keep or clear cart */}
+      <Dialog
+        open={successDialogOpen}
+        onClose={handleSuccessDialogKeep}
+      >
+        <DialogTitle>Invoice Generated</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {successMessage} Would you like to keep the cart items for regeneration, or clear the cart?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleSuccessDialogKeep}>
+            Keep Cart
+          </Button>
+          <Button onClick={handleSuccessDialogClear} color="error" variant="contained">
+            Clear Cart
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Success Snackbar */}
       <Snackbar
