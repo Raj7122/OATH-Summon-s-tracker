@@ -478,7 +478,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     setNewComment('');
 
     // Persist to backend
-    onUpdate(summons.id, 'notes_comments', updatedComments);
+    onUpdate(summons.id, 'notes_comments', JSON.stringify(updatedComments));
   };
 
   /**
@@ -487,7 +487,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   const handleDeleteComment = (commentId: string) => {
     const updatedComments = comments.filter(c => c.id !== commentId);
     setComments(updatedComments);
-    onUpdate(summons.id, 'notes_comments', updatedComments);
+    onUpdate(summons.id, 'notes_comments', JSON.stringify(updatedComments));
   };
 
   /**
@@ -497,8 +497,9 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   const calculateDelayDays = (): number | null => {
     if (!depFileDateAttr.value || !summons.violation_date) return null;
 
-    const violationDate = dayjs(summons.violation_date);
-    const depFileDate = dayjs(depFileDateAttr.value);
+    // Use dayjs.utc() to avoid timezone shift on date-only fields stored as UTC midnight
+    const violationDate = dayjs.utc(summons.violation_date);
+    const depFileDate = dayjs.utc(depFileDateAttr.value);
 
     return depFileDate.diff(violationDate, 'day');
   };
