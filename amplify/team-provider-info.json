@@ -21,7 +21,7 @@
       "function": {
         "dailySweep": {
           "deploymentBucketName": "amplify-oathsummonstracker-dev-0fcf6-deployment",
-          "s3Key": "amplify-builds/dailySweep-6250697063437542324a-build.zip"
+          "s3Key": "amplify-builds/dailySweep-3838574e674352364c68-build.zip"
         },
         "dataExtractor": {
           "deploymentBucketName": "amplify-oathsummonstracker-dev-0fcf6-deployment",

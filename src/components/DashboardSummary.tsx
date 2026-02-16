@@ -25,6 +25,10 @@ import EventIcon from '@mui/icons-material/Event';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
+import dayjs from 'dayjs';
+import utcPlugin from 'dayjs/plugin/utc';
+
+dayjs.extend(utcPlugin);
 
 /**
  * Summons data interface
@@ -316,7 +320,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
                       {criticalDeadlines.slice(0, 3).map((summons) => (
                         <Chip
                           key={summons.id}
-                          label={`${summons.respondent_name} - ${new Date(summons.hearing_date).toLocaleDateString()}`}
+                          label={`${summons.respondent_name} - ${dayjs.utc(summons.hearing_date).format('M/D/YYYY')}`}
                           size="small"
                           color="error"
                           sx={{ mt: 0.5, mr: 0.5 }}
@@ -368,7 +372,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
                       {approachingDeadlines.slice(0, 3).map((summons) => (
                         <Chip
                           key={summons.id}
-                          label={`${summons.respondent_name} - ${new Date(summons.hearing_date).toLocaleDateString()}`}
+                          label={`${summons.respondent_name} - ${dayjs.utc(summons.hearing_date).format('M/D/YYYY')}`}
                           size="small"
                           color="warning"
                           sx={{ mt: 0.5, mr: 0.5 }}
@@ -524,7 +528,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ summonses, activeFi
                   {hasEvidence.slice(0, 3).map((summons) => (
                     <Chip
                       key={summons.id}
-                      label={`${summons.respondent_name} - ${summons.hearing_date ? new Date(summons.hearing_date).toLocaleDateString() : 'No date'}`}
+                      label={`${summons.respondent_name} - ${summons.hearing_date ? dayjs.utc(summons.hearing_date).format('M/D/YYYY') : 'No date'}`}
                       size="small"
                       color="secondary"
                       sx={{ mt: 0.5, mr: 0.5 }}

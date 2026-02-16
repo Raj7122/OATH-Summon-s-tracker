@@ -26,11 +26,15 @@ import {
   FOOTER_TEXT,
 } from '../constants/invoiceDefaults';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+
+dayjs.extend(utc);
 
 // Helper to format dates as M/DD/YY
 const formatDate = (dateString: string | null): string => {
   if (!dateString) return '';
-  const date = dayjs(dateString);
+  // Use dayjs.utc() to avoid timezone shift on date-only fields stored as UTC midnight
+  const date = dayjs.utc(dateString);
   return date.isValid() ? date.format('M/DD/YY') : '';
 };
 
@@ -231,15 +235,19 @@ export const generatePDF = async (
   doc.setFontSize(10);
   doc.setFont('helvetica', 'italic');
 
-  // 1. Payment Instructions (editable)
-  const paymentText = doc.splitTextToSize(options.paymentInstructions, pageWidth - 2 * margin);
-  doc.text(paymentText, margin, yPos);
-  yPos += paymentText.length * 5 + 5;
+  // 1. Payment Instructions (editable, conditional to avoid gap when empty)
+  if (options.paymentInstructions.trim()) {
+    const paymentText = doc.splitTextToSize(options.paymentInstructions, pageWidth - 2 * margin);
+    doc.text(paymentText, margin, yPos);
+    yPos += paymentText.length * 5 + 5;
+  }
 
-  // 2. Review Text (editable)
-  const reviewText = doc.splitTextToSize(options.reviewText, pageWidth - 2 * margin);
-  doc.text(reviewText, margin, yPos);
-  yPos += reviewText.length * 5 + 10;
+  // 2. Review Text (editable, conditional to avoid gap when empty)
+  if (options.reviewText.trim()) {
+    const reviewText = doc.splitTextToSize(options.reviewText, pageWidth - 2 * margin);
+    doc.text(reviewText, margin, yPos);
+    yPos += reviewText.length * 5 + 10;
+  }
 
   // 3. Overdue Section (hardcoded)
   const overdueText = doc.splitTextToSize(FOOTER_TEXT.overdue, pageWidth - 2 * margin);
@@ -462,16 +470,24 @@ export const generateDOCX = async (
           new Paragraph({ children: [] }), // Spacer
 
           // Footer - 3 editable fields from options, rest hardcoded from FOOTER_TEXT
-          // 1. Payment Instructions (editable)
-          new Paragraph({
-            children: [new TextRun({ text: options.paymentInstructions, italics: true, size: 20 })],
-          }),
-          new Paragraph({ children: [] }),
-          // 2. Review Text (editable)
-          new Paragraph({
-            children: [new TextRun({ text: options.reviewText, italics: true, size: 20 })],
-          }),
-          new Paragraph({ children: [] }),
+          // 1. Payment Instructions (editable, conditional to avoid gap when empty)
+          ...(options.paymentInstructions.trim()
+            ? [
+                new Paragraph({
+                  children: [new TextRun({ text: options.paymentInstructions, italics: true, size: 20 })],
+                }),
+                new Paragraph({ children: [] }),
+              ]
+            : []),
+          // 2. Review Text (editable, conditional to avoid gap when empty)
+          ...(options.reviewText.trim()
+            ? [
+                new Paragraph({
+                  children: [new TextRun({ text: options.reviewText, italics: true, size: 20 })],
+                }),
+                new Paragraph({ children: [] }),
+              ]
+            : []),
           // 3. Overdue Section (hardcoded)
           new Paragraph({
             children: [new TextRun({ text: FOOTER_TEXT.overdue, italics: true, size: 20 })],

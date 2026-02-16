@@ -48,6 +48,8 @@ import GavelIcon from '@mui/icons-material/Gavel';
 import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
+import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
+import RemoveShoppingCartIcon from '@mui/icons-material/RemoveShoppingCart';
 import { generateClient } from 'aws-amplify/api';
 
 import { getClient, listSummons } from '../graphql/queries';
@@ -58,6 +60,8 @@ import ExportConfigurationModal from '../components/ExportConfigurationModal';
 import { useCSVExport } from '../hooks/useCSVExport';
 import { ExportConfig } from '../lib/csvExport';
 import { isInvoiced as isInvoicedLocally, getInvoiceDate as getInvoiceDateLocally } from '../utils/invoiceTracking';
+import { useInvoice } from '../contexts/InvoiceContext';
+import { SummonsForInvoice } from '../types/invoice';
 
 const apiClient = generateClient();
 
@@ -102,6 +106,9 @@ function formatChangeDate(dateString: string | undefined): string {
 const ClientDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+
+  // Invoice Cart
+  const { addToCart, removeFromCart, isInCart } = useInvoice();
 
   // Core State
   const [client, setClient] = useState<Client | null>(null);
@@ -594,7 +601,64 @@ const ClientDetail: React.FC = () => {
         );
       },
     },
-  ], []);
+    {
+      field: 'cart',
+      headerName: 'Cart',
+      width: 60,
+      align: 'center',
+      headerAlign: 'center',
+      sortable: false,
+      filterable: false,
+      disableColumnMenu: true,
+      renderCell: (params) => {
+        const summons = params.row as Summons;
+        const inCart = isInCart(summons.id);
+
+        const handleCartClick = (e: React.MouseEvent) => {
+          // Stop propagation so row click (detail modal) doesn't fire
+          e.stopPropagation();
+
+          if (inCart) {
+            removeFromCart(summons.id);
+          } else {
+            const item: SummonsForInvoice = {
+              id: summons.id,
+              summons_number: summons.summons_number,
+              respondent_name: summons.respondent_name || null,
+              clientID: summons.clientID,
+              violation_date: summons.violation_date || null,
+              hearing_date: summons.hearing_date || null,
+              hearing_result: summons.hearing_result || null,
+              status: summons.status || null,
+              amount_due: summons.amount_due ?? null,
+            };
+            addToCart(item);
+          }
+        };
+
+        return (
+          <Tooltip title={inCart ? 'Remove from invoice cart' : 'Add to invoice cart'} arrow placement="top">
+            <IconButton
+              size="small"
+              onClick={handleCartClick}
+              sx={{
+                color: inCart ? 'primary.main' : 'text.disabled',
+                '&:hover': {
+                  color: inCart ? 'error.main' : 'primary.main',
+                },
+              }}
+            >
+              {inCart ? (
+                <RemoveShoppingCartIcon sx={{ fontSize: 18 }} />
+              ) : (
+                <AddShoppingCartIcon sx={{ fontSize: 18 }} />
+              )}
+            </IconButton>
+          </Tooltip>
+        );
+      },
+    },
+  ], [isInCart, addToCart, removeFromCart]);
 
   /**
    * Handle row click to open detail modal

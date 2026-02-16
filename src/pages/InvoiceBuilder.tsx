@@ -45,6 +45,9 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+
+dayjs.extend(utc);
 
 import SummonsDetailModal from '../components/SummonsDetailModal';
 import InvoicePreview from '../components/InvoicePreview';
@@ -71,7 +74,8 @@ interface Client {
  */
 const formatDate = (dateString: string | null): string => {
   if (!dateString) return '—';
-  const date = dayjs(dateString);
+  // Use dayjs.utc() to avoid timezone shift on date-only fields stored as UTC midnight
+  const date = dayjs.utc(dateString);
   return date.isValid() ? date.format('M/DD/YY') : '—';
 };
 

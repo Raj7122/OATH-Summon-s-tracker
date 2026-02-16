@@ -119,6 +119,8 @@ export const getSummons = /* GraphQL */ `
       is_archived
       archived_at
       archived_reason
+      is_invoiced
+      invoice_date
       activity_log
       createdAt
       updatedAt
@@ -187,6 +189,8 @@ export const listSummons = /* GraphQL */ `
         is_archived
         archived_at
         archived_reason
+        is_invoiced
+        invoice_date
         activity_log
         createdAt
         updatedAt
@@ -334,6 +338,8 @@ export const summonsByClientIDAndHearing_date = /* GraphQL */ `
         is_archived
         archived_at
         archived_reason
+        is_invoiced
+        invoice_date
         activity_log
         createdAt
         updatedAt
@@ -413,6 +419,8 @@ export const summonsBySummonsNumber = /* GraphQL */ `
         is_archived
         archived_at
         archived_reason
+        is_invoiced
+        invoice_date
         activity_log
         createdAt
         updatedAt
@@ -492,6 +500,8 @@ export const summonsByOcrStatus = /* GraphQL */ `
         is_archived
         archived_at
         archived_reason
+        is_invoiced
+        invoice_date
         activity_log
         createdAt
         updatedAt

@@ -20,6 +20,7 @@ import { useMemo } from 'react';
 import dayjs, { Dayjs } from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
+import isoWeek from 'dayjs/plugin/isoWeek';
 import { Box, Typography, Paper, Card, CardContent, Chip, Button, alpha } from '@mui/material';
 import { DateCalendar } from '@mui/x-date-pickers/DateCalendar';
 import { PickersDay, PickersDayProps } from '@mui/x-date-pickers/PickersDay';
@@ -28,6 +29,7 @@ import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import TodayIcon from '@mui/icons-material/Today';
 import ClearIcon from '@mui/icons-material/Clear';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
+import DateRangeIcon from '@mui/icons-material/DateRange';
 import { horizonColors } from '../theme';
 
 // Import shared types
@@ -36,6 +38,7 @@ import { Summons } from '../types/summons';
 // Configure dayjs
 dayjs.extend(utc);
 dayjs.extend(timezone);
+dayjs.extend(isoWeek);
 
 const NYC_TIMEZONE = 'America/New_York';
 
@@ -77,6 +80,12 @@ interface CalendarCommandCenterProps {
   horizonStats?: HorizonStats;
   /** Callback when a Horizon filter chip is clicked */
   onHorizonFilterClick?: (filter: 'critical' | 'approaching' | 'future' | 'new' | 'has_evidence') => void;
+  /** Whether week selection mode is active */
+  weekMode?: boolean;
+  /** Toggle week mode on/off */
+  onWeekModeToggle?: () => void;
+  /** Currently selected week range (Mon-Sun) */
+  selectedWeek?: { start: Dayjs; end: Dayjs } | null;
 }
 
 /**
@@ -99,6 +108,8 @@ interface ServerDayProps extends PickersDayProps<Dayjs> {
   highlightedDays: Map<string, HorizonUrgency>;
   /** Active horizon filter (for dimming non-matching dates) */
   activeHorizonFilter?: HorizonFilter;
+  /** Selected week range for week-band highlighting (YYYY-MM-DD strings) */
+  selectedWeekRange?: { start: string; end: string } | null;
 }
 
 /**
@@ -114,7 +125,7 @@ interface ServerDayProps extends PickersDayProps<Dayjs> {
  * - Non-matching dates are dimmed (0.3 opacity)
  */
 function ServerDay(props: ServerDayProps) {
-  const { highlightedDays, activeHorizonFilter, day, outsideCurrentMonth, ...other } = props;
+  const { highlightedDays, activeHorizonFilter, selectedWeekRange, day, outsideCurrentMonth, ...other } = props;
 
   const dateKey = day.format('YYYY-MM-DD');
   const urgency = highlightedDays.get(dateKey);
@@ -139,6 +150,12 @@ function ServerDay(props: ServerDayProps) {
     urgency &&
     urgency !== activeHorizonFilter;
 
+  // Week-band highlighting: check if this day falls within the selected week range
+  const isInSelectedWeek = selectedWeekRange && !outsideCurrentMonth &&
+    dateKey >= selectedWeekRange.start && dateKey <= selectedWeekRange.end;
+  const isWeekStart = selectedWeekRange && dateKey === selectedWeekRange.start;
+  const isWeekEnd = selectedWeekRange && dateKey === selectedWeekRange.end;
+
   return (
     <Box
       sx={{
@@ -149,6 +166,14 @@ function ServerDay(props: ServerDayProps) {
         opacity: isDimmed ? 0.3 : 1,
         transition: 'all 0.25s ease-in-out',
         transform: isDimmed ? 'scale(0.95)' : 'scale(1)',
+        // Week band background
+        ...(isInSelectedWeek && {
+          backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.10),
+          borderTopLeftRadius: isWeekStart ? 16 : 0,
+          borderBottomLeftRadius: isWeekStart ? 16 : 0,
+          borderTopRightRadius: isWeekEnd ? 16 : 0,
+          borderBottomRightRadius: isWeekEnd ? 16 : 0,
+        }),
       }}
     >
       <PickersDay
@@ -167,6 +192,10 @@ function ServerDay(props: ServerDayProps) {
             borderRadius: '50%',
             backgroundColor: alpha(dotColor || '#000', 0.08),
             boxShadow: `0 0 8px ${alpha(dotColor || '#000', 0.3)}`,
+          }),
+          // Bold the week start/end days in the band
+          ...(isInSelectedWeek && {
+            fontWeight: 700,
           }),
           '&:hover': {
             transform: 'scale(1.1)',
@@ -210,6 +239,9 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
   horizonFilter,
   horizonStats,
   onHorizonFilterClick,
+  weekMode,
+  onWeekModeToggle,
+  selectedWeek,
 }) => {
   const now = dayjs().tz(NYC_TIMEZONE);
 
@@ -299,6 +331,31 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
       return status.includes('DEFAULT') || status.includes('VIOLATION') || status.includes('JUDGMENT');
     }).length;
   }, [selectedDateSummonses]);
+
+  /**
+   * Compute selectedWeekRange as YYYY-MM-DD strings for ServerDay
+   */
+  const selectedWeekRange = useMemo(() => {
+    if (!selectedWeek) return null;
+    return {
+      start: selectedWeek.start.format('YYYY-MM-DD'),
+      end: selectedWeek.end.format('YYYY-MM-DD'),
+    };
+  }, [selectedWeek]);
+
+  /**
+   * Get summonses for the selected week (for Day Breakdown panel)
+   */
+  const selectedWeekSummonses = useMemo(() => {
+    if (!selectedWeek) return [];
+    const weekStartStr = selectedWeek.start.format('YYYY-MM-DD');
+    const weekEndStr = selectedWeek.end.format('YYYY-MM-DD');
+    return summonses.filter((s) => {
+      if (!s.hearing_date) return false;
+      const key = dayjs.utc(s.hearing_date).format('YYYY-MM-DD');
+      return key >= weekStartStr && key <= weekEndStr;
+    });
+  }, [summonses, selectedWeek]);
 
   /**
    * Get total upcoming hearings count for the "no date selected" message
@@ -525,6 +582,7 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
               day: (ownerState) => ({
                 highlightedDays,
                 activeHorizonFilter: horizonFilter,
+                selectedWeekRange,
                 ...ownerState,
               }),
             }}
@@ -665,12 +723,36 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
         >
           Today
         </Button>
+        {onWeekModeToggle && (
+          <Button
+            variant={weekMode ? 'contained' : 'outlined'}
+            size="small"
+            startIcon={<DateRangeIcon />}
+            onClick={onWeekModeToggle}
+            sx={{
+              flex: 1,
+              borderRadius: 2.5,
+              py: 1,
+              fontWeight: 600,
+              borderWidth: 1.5,
+              boxShadow: weekMode ? '0 2px 8px rgba(25, 118, 210, 0.35)' : 'none',
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                borderWidth: 1.5,
+                transform: 'translateY(-1px)',
+                boxShadow: '0 4px 12px rgba(25, 118, 210, 0.2)',
+              },
+            }}
+          >
+            Week
+          </Button>
+        )}
         <Button
           variant="outlined"
           size="small"
           startIcon={<ClearIcon />}
           onClick={handleClearSelection}
-          disabled={!selectedDate}
+          disabled={!selectedDate && !selectedWeek}
           sx={{
             flex: 1,
             borderRadius: 2.5,
@@ -689,24 +771,100 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
         </Button>
       </Box>
       
-      {/* Day Breakdown Panel */}
+      {/* Day / Week Breakdown Panel */}
       <Card
         elevation={0}
         sx={{
           mt: 'auto',
           borderRadius: 3,
-          backgroundColor: selectedDate
+          backgroundColor: (selectedDate || selectedWeek)
             ? (theme) => alpha(theme.palette.primary.main, 0.04)
             : 'transparent',
-          border: selectedDate ? '1.5px solid' : '1.5px dashed',
-          borderColor: selectedDate
+          border: (selectedDate || selectedWeek) ? '1.5px solid' : '1.5px dashed',
+          borderColor: (selectedDate || selectedWeek)
             ? (theme) => alpha(theme.palette.primary.main, 0.3)
             : (theme) => alpha(theme.palette.grey[400], 0.5),
           transition: 'all 0.3s ease',
         }}
       >
         <CardContent sx={{ py: 2, px: 2.5, '&:last-child': { pb: 2 } }}>
-          {selectedDate ? (
+          {selectedWeek ? (
+            /* Week Breakdown */
+            <>
+              <Typography
+                variant="subtitle1"
+                sx={{
+                  color: 'primary.main',
+                  fontWeight: 700,
+                  mb: 1.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                }}
+              >
+                <DateRangeIcon sx={{ fontSize: 18 }} />
+                Week of {selectedWeek.start.format('MMM D')} – {selectedWeek.end.format('MMM D, YYYY')}
+              </Typography>
+
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  <Box component="span" sx={{ fontWeight: 700, color: 'primary.main' }}>
+                    {selectedWeekSummonses.length}
+                  </Box>{' '}
+                  Hearing{selectedWeekSummonses.length !== 1 ? 's' : ''} Scheduled
+                </Typography>
+                {selectedWeekSummonses.length === 0 && (
+                  <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                    No hearings this week
+                  </Typography>
+                )}
+              </Box>
+
+              {/* Preview of unique clients this week */}
+              {selectedWeekSummonses.length > 0 && (
+                <Box sx={{ mt: 1.5, display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+                  {/* Deduplicate by respondent_name */}
+                  {[...new Set(selectedWeekSummonses.map((s) => s.respondent_name).filter(Boolean))]
+                    .slice(0, 3)
+                    .map((name) => (
+                      <Chip
+                        key={name}
+                        label={name}
+                        size="small"
+                        variant="outlined"
+                        sx={{
+                          fontSize: '0.7rem',
+                          height: 24,
+                          fontWeight: 500,
+                          borderRadius: 1.5,
+                          borderColor: (theme) => alpha(theme.palette.primary.main, 0.3),
+                          transition: 'all 0.2s ease',
+                          '&:hover': {
+                            backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.08),
+                          },
+                        }}
+                      />
+                    ))}
+                  {[...new Set(selectedWeekSummonses.map((s) => s.respondent_name).filter(Boolean))].length > 3 && (
+                    <Chip
+                      label={`+${[...new Set(selectedWeekSummonses.map((s) => s.respondent_name).filter(Boolean))].length - 3} more`}
+                      size="small"
+                      sx={{
+                        fontSize: '0.7rem',
+                        height: 24,
+                        fontWeight: 500,
+                        fontStyle: 'italic',
+                        borderRadius: 1.5,
+                        backgroundColor: (theme) => alpha(theme.palette.grey[500], 0.08),
+                        color: 'text.secondary',
+                      }}
+                    />
+                  )}
+                </Box>
+              )}
+            </>
+          ) : selectedDate ? (
+            /* Single Day Breakdown */
             <>
               <Typography
                 variant="subtitle1"
@@ -820,7 +978,7 @@ const CalendarCommandCenter: React.FC<CalendarCommandCenterProps> = ({
           ) : (
             <Box sx={{ textAlign: 'center', py: 2 }}>
               <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500, mb: 0.5 }}>
-                Select a date to view day breakdown
+                {weekMode ? 'Click a date to select that week' : 'Select a date to view day breakdown'}
               </Typography>
               <Typography variant="caption" color="text.disabled">
                 or view all{' '}

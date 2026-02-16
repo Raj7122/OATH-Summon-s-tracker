@@ -10,6 +10,9 @@
 
 import { Box, Paper, Typography } from '@mui/material';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+
+dayjs.extend(utc);
 import { InvoiceCartItem, InvoiceRecipient } from '../types/invoice';
 import {
   SENDER,
@@ -31,7 +34,8 @@ interface InvoicePreviewProps {
 // Format date as M/DD/YY to match PDF output
 const formatDate = (dateString: string | null): string => {
   if (!dateString) return '';
-  const date = dayjs(dateString);
+  // Use dayjs.utc() to avoid timezone shift on date-only fields stored as UTC midnight
+  const date = dayjs.utc(dateString);
   return date.isValid() ? date.format('M/DD/YY') : '';
 };
 

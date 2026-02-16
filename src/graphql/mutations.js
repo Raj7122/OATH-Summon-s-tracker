@@ -149,6 +149,8 @@ export const createSummons = /* GraphQL */ `
       is_archived
       archived_at
       archived_reason
+      is_invoiced
+      invoice_date
       activity_log
       createdAt
       updatedAt
@@ -229,6 +231,8 @@ export const updateSummons = /* GraphQL */ `
       is_archived
       archived_at
       archived_reason
+      is_invoiced
+      invoice_date
       activity_log
       createdAt
       updatedAt
@@ -309,6 +313,8 @@ export const deleteSummons = /* GraphQL */ `
       is_archived
       archived_at
       archived_reason
+      is_invoiced
+      invoice_date
       activity_log
       createdAt
       updatedAt
