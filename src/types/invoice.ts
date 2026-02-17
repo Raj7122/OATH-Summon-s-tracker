@@ -89,4 +89,6 @@ export interface InvoiceOptions {
   paymentInstructions: string;
   reviewText: string;
   additionalNotes: string;
+  showOverdue: boolean;
+  overdueText: string;
 }

@@ -249,16 +249,18 @@ export const generatePDF = async (
     yPos += reviewText.length * 5 + 10;
   }
 
-  // 3. Overdue Section (hardcoded)
-  const overdueText = doc.splitTextToSize(FOOTER_TEXT.overdue, pageWidth - 2 * margin);
-  doc.text(overdueText, margin, yPos);
-  yPos += overdueText.length * 5 + 5;
+  // 3. Overdue Section (toggleable)
+  if (options.showOverdue) {
+    const overdueText = doc.splitTextToSize(options.overdueText, pageWidth - 2 * margin);
+    doc.text(overdueText, margin, yPos);
+    yPos += overdueText.length * 5 + 5;
 
-  // Payment link (hardcoded)
-  doc.setTextColor(0, 0, 255);
-  doc.textWithLink(FOOTER_TEXT.cityPayUrl, margin, yPos, { url: FOOTER_TEXT.cityPayUrl });
-  doc.setTextColor(0, 0, 0);
-  yPos += 10;
+    // Payment link
+    doc.setTextColor(0, 0, 255);
+    doc.textWithLink(FOOTER_TEXT.cityPayUrl, margin, yPos, { url: FOOTER_TEXT.cityPayUrl });
+    doc.setTextColor(0, 0, 0);
+    yPos += 10;
+  }
 
   // 4. Questions Text (hardcoded)
   doc.text(FOOTER_TEXT.questions, margin, yPos);
@@ -488,25 +490,29 @@ export const generateDOCX = async (
                 new Paragraph({ children: [] }),
               ]
             : []),
-          // 3. Overdue Section (hardcoded)
-          new Paragraph({
-            children: [new TextRun({ text: FOOTER_TEXT.overdue, italics: true, size: 20 })],
-          }),
-          new Paragraph({
-            children: [
-              new ExternalHyperlink({
-                children: [
-                  new TextRun({
-                    text: FOOTER_TEXT.cityPayUrl,
-                    style: 'Hyperlink',
-                    size: 20,
-                  }),
-                ],
-                link: FOOTER_TEXT.cityPayUrl,
-              }),
-            ],
-          }),
-          new Paragraph({ children: [] }),
+          // 3. Overdue Section (toggleable)
+          ...(options.showOverdue
+            ? [
+                new Paragraph({
+                  children: [new TextRun({ text: options.overdueText, italics: true, size: 20 })],
+                }),
+                new Paragraph({
+                  children: [
+                    new ExternalHyperlink({
+                      children: [
+                        new TextRun({
+                          text: FOOTER_TEXT.cityPayUrl,
+                          style: 'Hyperlink',
+                          size: 20,
+                        }),
+                      ],
+                      link: FOOTER_TEXT.cityPayUrl,
+                    }),
+                  ],
+                }),
+                new Paragraph({ children: [] }),
+              ]
+            : []),
           // 4. Questions Text (hardcoded)
           new Paragraph({
             children: [new TextRun({ text: FOOTER_TEXT.questions, italics: true, size: 20 })],

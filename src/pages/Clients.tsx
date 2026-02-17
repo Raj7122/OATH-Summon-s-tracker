@@ -10,6 +10,7 @@ import {
   DialogContent,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import DownloadIcon from '@mui/icons-material/Download';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { DataGrid, GridColDef, GridActionsCellItem, GridToolbar } from '@mui/x-data-grid';
@@ -17,6 +18,7 @@ import { generateClient } from 'aws-amplify/api';
 import { listClients } from '../graphql/queries';
 import { createClient, updateClient, deleteClient } from '../graphql/mutations';
 import ClientForm from '../components/ClientForm';
+import { escapeCSVValue, downloadCSV } from '../lib/csvExport';
 
 const client = generateClient();
 
@@ -119,6 +121,29 @@ const Clients = () => {
     }
   };
 
+  const handleExportClientList = () => {
+    if (clients.length === 0) return;
+
+    const headers = ['Client Name', 'AKAs', 'Contact Name', 'Email', 'Phone', 'Address'];
+    const headerRow = headers.map(escapeCSVValue).join(',');
+
+    const dataRows = clients
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((c) => [
+        escapeCSVValue(c.name || ''),
+        escapeCSVValue((c.akas || []).join('; ')),
+        escapeCSVValue(c.contact_name || ''),
+        escapeCSVValue(c.contact_email1 || ''),
+        escapeCSVValue(c.contact_phone1 || ''),
+        escapeCSVValue(c.contact_address || ''),
+      ].join(','));
+
+    const csv = [headerRow, ...dataRows].join('\n');
+    const date = new Date().toISOString().split('T')[0];
+    downloadCSV(csv, `ClientRoster_${date}.csv`);
+  };
+
   const columns: GridColDef[] = [
     { field: 'name', headerName: 'Client Name', flex: 1, minWidth: 200 },
     {
@@ -161,9 +186,19 @@ const Clients = () => {
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4">Client Management</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={handleAdd}>
-          Add Client
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            startIcon={<DownloadIcon />}
+            onClick={handleExportClientList}
+            disabled={clients.length === 0}
+          >
+            Export Client List
+          </Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={handleAdd}>
+            Add Client
+          </Button>
+        </Box>
       </Box>
 
       {loading ? (

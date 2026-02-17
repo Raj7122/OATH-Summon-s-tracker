@@ -79,3 +79,18 @@ export function markAsInvoiced(summonsIds: string[]): void {
     console.error('Failed to save invoiced records to localStorage:', error);
   }
 }
+
+/**
+ * Remove invoiced status for summonses in localStorage
+ *
+ * @param summonsIds - Array of summons IDs to unmark
+ */
+export function unmarkAsInvoiced(summonsIds: string[]): void {
+  try {
+    const records = getInvoicedRecords();
+    const filtered = records.filter(r => !summonsIds.includes(r.summonsId));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+  } catch (error) {
+    console.error('Failed to update invoiced records in localStorage:', error);
+  }
+}

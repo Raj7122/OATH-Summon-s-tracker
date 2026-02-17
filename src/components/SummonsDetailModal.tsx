@@ -93,7 +93,7 @@ import FileUploadSection from './FileUploadSection';
 import { isNewRecord, isUpdatedRecord } from '../types/summons';
 import { useAuth } from '../contexts/AuthContext';
 import { v4 as uuidv4 } from 'uuid';
-import { isInvoiced as isInvoicedLocally, getInvoiceDate as getInvoiceDateLocally } from '../utils/invoiceTracking';
+import { isInvoiced as isInvoicedLocally, getInvoiceDate as getInvoiceDateLocally, unmarkAsInvoiced } from '../utils/invoiceTracking';
 
 /**
  * Props for SummonsDetailModal component
@@ -661,13 +661,18 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
             )}
             {/* Check both DB value and localStorage fallback for invoiced status */}
             {(summons.is_invoiced || isInvoicedLocally(summons.id)) && (
-              <Tooltip title={`Invoiced on ${dayjs(summons.invoice_date || getInvoiceDateLocally(summons.id)).format('MMM D, YYYY h:mm A')}`}>
+              <Tooltip title={`Invoiced on ${dayjs(summons.invoice_date || getInvoiceDateLocally(summons.id)).format('MMM D, YYYY h:mm A')} — click ✕ to cancel`}>
                 <Chip
                   label="INVOICED"
                   icon={<ReceiptIcon />}
                   color="success"
                   size="small"
                   sx={{ fontWeight: 'bold', fontSize: '0.7rem' }}
+                  onDelete={() => {
+                    onUpdate(summons.id, 'is_invoiced', false);
+                    onUpdate(summons.id, 'invoice_date', null);
+                    unmarkAsInvoiced([summons.id]);
+                  }}
                 />
               </Tooltip>
             )}
@@ -846,6 +851,11 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                         size="small"
                         color="success"
                         variant="outlined"
+                        onDelete={() => {
+                          onUpdate(summons.id, 'is_invoiced', false);
+                          onUpdate(summons.id, 'invoice_date', null);
+                          unmarkAsInvoiced([summons.id]);
+                        }}
                       />
                     }
                   />

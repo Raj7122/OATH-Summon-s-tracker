@@ -31,6 +31,8 @@ import {
   Snackbar,
   CircularProgress,
   Dialog,
+  FormControlLabel,
+  Checkbox,
   DialogTitle,
   DialogContent,
   DialogContentText,
@@ -118,9 +120,11 @@ const InvoiceBuilder = () => {
   // Post-generation dialog state (asks user to keep or clear cart)
   const [successDialogOpen, setSuccessDialogOpen] = useState(false);
 
-  // State for 3 editable footer fields
+  // State for editable footer fields
   const [paymentInstructions, setPaymentInstructions] = useState(FOOTER_TEXT.payment);
   const [reviewText, setReviewText] = useState(FOOTER_TEXT.review);
+  const [showOverdue, setShowOverdue] = useState(true);
+  const [overdueText, setOverdueText] = useState(FOOTER_TEXT.overdue);
   const [additionalNotes, setAdditionalNotes] = useState('');
 
   // Auto-detect client from cart items
@@ -247,7 +251,7 @@ const InvoiceBuilder = () => {
 
     setGenerating(true);
     try {
-      await generatePDF(cartItems, recipient, { paymentInstructions, reviewText, additionalNotes });
+      await generatePDF(cartItems, recipient, { paymentInstructions, reviewText, additionalNotes, showOverdue, overdueText });
 
       // Mark all cart items as invoiced in the database
       await markItemsAsInvoiced();
@@ -271,7 +275,7 @@ const InvoiceBuilder = () => {
 
     setGenerating(true);
     try {
-      await generateDOCX(cartItems, recipient, { paymentInstructions, reviewText, additionalNotes });
+      await generateDOCX(cartItems, recipient, { paymentInstructions, reviewText, additionalNotes, showOverdue, overdueText });
 
       // Mark all cart items as invoiced in the database
       await markItemsAsInvoiced();
@@ -558,6 +562,30 @@ const InvoiceBuilder = () => {
                     helperText="Asks client about defenses/explanations for the violations"
                   />
 
+                  <Box>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={showOverdue}
+                          onChange={(e) => setShowOverdue(e.target.checked)}
+                        />
+                      }
+                      label="Include Overdue Fine Paragraph"
+                    />
+                    {showOverdue && (
+                      <TextField
+                        label="Overdue Fine Text"
+                        value={overdueText}
+                        onChange={(e) => setOverdueText(e.target.value)}
+                        fullWidth
+                        multiline
+                        rows={2}
+                        helperText="Paragraph about overdue fines and CityPay link"
+                        sx={{ mt: 1 }}
+                      />
+                    )}
+                  </Box>
+
                   <TextField
                     label="Additional Notes (Optional)"
                     value={additionalNotes}
@@ -634,6 +662,8 @@ const InvoiceBuilder = () => {
                   recipient={recipient}
                   paymentInstructions={paymentInstructions}
                   reviewText={reviewText}
+                  showOverdue={showOverdue}
+                  overdueText={overdueText}
                   additionalNotes={additionalNotes}
                 />
               </CardContent>

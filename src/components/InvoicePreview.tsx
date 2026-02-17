@@ -28,6 +28,8 @@ interface InvoicePreviewProps {
   recipient: InvoiceRecipient;
   paymentInstructions: string;
   reviewText: string;
+  showOverdue: boolean;
+  overdueText: string;
   additionalNotes: string;
 }
 
@@ -55,6 +57,8 @@ const InvoicePreview = ({
   recipient,
   paymentInstructions,
   reviewText,
+  showOverdue,
+  overdueText,
   additionalNotes,
 }: InvoicePreviewProps) => {
   const invoiceDate = dayjs().format('MMMM D, YYYY');
@@ -257,19 +261,21 @@ const InvoicePreview = ({
           <Box sx={{ mb: 1 }}>{reviewText}</Box>
         )}
 
-        {/* 3. Overdue Section (always shown) */}
-        <Box sx={{ mb: 0.5 }}>{FOOTER_TEXT.overdue}</Box>
-
-        {/* 4. CityPay URL (always shown) */}
-        <Box
-          component="a"
-          href={FOOTER_TEXT.cityPayUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          sx={{ color: 'blue', display: 'block', mb: 1 }}
-        >
-          {FOOTER_TEXT.cityPayUrl}
-        </Box>
+        {/* 3. Overdue Section + CityPay URL (toggleable) */}
+        {showOverdue && (
+          <>
+            <Box sx={{ mb: 0.5 }}>{overdueText}</Box>
+            <Box
+              component="a"
+              href={FOOTER_TEXT.cityPayUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              sx={{ color: 'blue', display: 'block', mb: 1 }}
+            >
+              {FOOTER_TEXT.cityPayUrl}
+            </Box>
+          </>
+        )}
 
         {/* 5. Questions text (always shown) */}
         <Box sx={{ mb: 0.75 }}>{FOOTER_TEXT.questions}</Box>

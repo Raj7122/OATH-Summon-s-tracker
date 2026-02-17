@@ -59,7 +59,7 @@ import SummonsDetailModal from '../components/SummonsDetailModal';
 import ExportConfigurationModal from '../components/ExportConfigurationModal';
 import { useCSVExport } from '../hooks/useCSVExport';
 import { ExportConfig } from '../lib/csvExport';
-import { isInvoiced as isInvoicedLocally, getInvoiceDate as getInvoiceDateLocally } from '../utils/invoiceTracking';
+import { isInvoiced as isInvoicedLocally, getInvoiceDate as getInvoiceDateLocally, unmarkAsInvoiced } from '../utils/invoiceTracking';
 import { useInvoice } from '../contexts/InvoiceContext';
 import { SummonsForInvoice } from '../types/invoice';
 
@@ -591,8 +591,19 @@ const ClientDetail: React.FC = () => {
             ? dayjs(invoiceDate).format('MMM D, YYYY')
             : 'Date unknown';
           return (
-            <Tooltip title={`Invoiced: ${formattedDate}`} arrow placement="top">
-              <ReceiptLongIcon sx={{ color: 'success.main', fontSize: 18 }} />
+            <Tooltip title={`Invoiced: ${formattedDate}. Click to cancel.`} arrow placement="top">
+              <IconButton
+                size="small"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSummonsUpdate(summonsId, 'is_invoiced', false);
+                  handleSummonsUpdate(summonsId, 'invoice_date', null);
+                  unmarkAsInvoiced([summonsId]);
+                }}
+                sx={{ p: 0.5 }}
+              >
+                <ReceiptLongIcon sx={{ color: 'success.main', fontSize: 18 }} />
+              </IconButton>
             </Tooltip>
           );
         }
