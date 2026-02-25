@@ -1088,7 +1088,8 @@ function normalizeCompanyName(name) {
   return name
     .toLowerCase()
     .trim()
-    .replace(/\s+/g, ' ')
+    .replace(/&/g, ' ')                    // normalize ampersand to space (e.g., "J & M" -> "J  M")
+    .replace(/\s+/g, ' ')                  // collapse multiple spaces
     .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '')
     .trim();
 }
@@ -1278,12 +1279,20 @@ async function fetchNYCDataForClients(clients) {
   // Build unique search terms from client names and AKAs
   const searchTerms = new Set();
   clients.forEach(client => {
-    const mainName = client.name.replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '').trim();
+    const mainName = client.name
+      .replace(/&/g, ' ')                          // strip ampersand for API LIKE matching
+      .replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (mainName.length > 3) searchTerms.add(mainName.toUpperCase());
 
     if (client.akas && Array.isArray(client.akas)) {
       client.akas.forEach(aka => {
-        const akaMain = aka.replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '').trim();
+        const akaMain = aka
+          .replace(/&/g, ' ')                      // strip ampersand for API LIKE matching
+          .replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '')
+          .replace(/\s+/g, ' ')
+          .trim();
         if (akaMain.length > 3) searchTerms.add(akaMain.toUpperCase());
       });
     }

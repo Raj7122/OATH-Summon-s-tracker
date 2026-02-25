@@ -61,6 +61,7 @@ describe('Daily Sweep Lambda Function', () => {
       let normalized = name
         .toLowerCase()
         .trim()
+        .replace(/&/g, ' ')                    // normalize ampersand to space
         .replace(/\s+/g, ' ')
         .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '')
         .trim();
@@ -97,6 +98,23 @@ describe('Daily Sweep Lambda Function', () => {
 
     test('should handle company names with special characters', () => {
       expect(normalizeCompanyName('G.C. Warehouse LLC')).toBe('g.c. warehouse');
+    });
+
+    test('should normalize ampersand to space', () => {
+      expect(normalizeCompanyName('J & M Brothers Corp')).toBe('j m brothers');
+    });
+
+    test('should match ampersand name against API name without ampersand', () => {
+      // NYC Open Data stores "J M BROTHERS CORP", client entered "J & M Brothers Corp"
+      const clientNormalized = normalizeCompanyName('J & M Brothers Corp');
+      const apiNormalized = normalizeCompanyName('J M BROTHERS CORP');
+      expect(clientNormalized).toBe(apiNormalized);
+    });
+
+    test('should handle ampersand at various positions', () => {
+      expect(normalizeCompanyName('A & B Trucking LLC')).toBe('a b trucking');
+      expect(normalizeCompanyName('Smith & Sons')).toBe('smith sons');
+      expect(normalizeCompanyName('R&D Corp')).toBe('r d');
     });
   });
 
