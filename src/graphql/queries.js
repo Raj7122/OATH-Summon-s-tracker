@@ -13,6 +13,8 @@ export const getClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      plate_filter_enabled
+      plate_filter_list
       summonses {
         nextToken
         __typename
@@ -40,6 +42,8 @@ export const listClients = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        plate_filter_enabled
+        plate_filter_list
         createdAt
         updatedAt
         __typename

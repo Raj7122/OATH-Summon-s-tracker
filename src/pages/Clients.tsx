@@ -33,6 +33,8 @@ interface Client {
   contact_email1?: string;
   contact_phone2?: string;
   contact_email2?: string;
+  plate_filter_enabled?: boolean;
+  plate_filter_list?: string[];
 }
 
 const Clients = () => {
