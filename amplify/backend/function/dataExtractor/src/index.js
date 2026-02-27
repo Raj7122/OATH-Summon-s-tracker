@@ -260,7 +260,7 @@ async function extractPDFData(pdfUrl) {
 
     // Initialize Gemini model
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.0-flash'
+      model: 'gemini-2.5-flash'
     });
 
     // Prompt for structured extraction (from TRD FR-09)
@@ -268,7 +268,7 @@ async function extractPDFData(pdfUrl) {
     const prompt = `You are an expert legal assistant analyzing a NYC OATH summons PDF for an idling violation. Extract the following fields and return ONLY a valid JSON object with no additional text or formatting:
 
 {
-  "license_plate_ocr": "license plate number",
+  "license_plate_ocr": "The vehicle's license plate number (digits and letters only, no state prefix). IMPORTANT: The plate may NOT be in a dedicated labeled field. Search ALL of these locations: (1) A 'License Plate' or 'Plate No' labeled field near the top, (2) The 'EQUIPMENT / APPARATUS IN VIOLATION' line (e.g., 'NY License Plate # 41168PF'), (3) Inside the 'DESCRIPTION OF VIOLATION' narrative text (e.g., 'License Plate # 41168PF idling'). Return ONLY the alphanumeric plate value (e.g., '41168PF'), not the state.",
   "id_number": "Look for the field labeled 'ID Number:' on the document. Format is YYYY-NNNNN or YYYY-NNNNNN (4-digit year, hyphen, then 5 or 6 digits). Examples: '2025-30846', '2025-030846'. CRITICAL: Only look for 'ID Number:' label - do NOT use any other field.",
   "vehicle_type_ocr": "vehicle type (e.g., truck, van, car)",
   "prior_offense_status": "first offense, repeat offense, or unknown",
