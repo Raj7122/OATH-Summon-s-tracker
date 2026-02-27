@@ -540,9 +540,10 @@ const ClientDetail: React.FC = () => {
       field: 'license_plate',
       headerName: 'Plate',
       width: 100,
+      valueGetter: (params) => params.row.license_plate_ocr || params.row.license_plate || '',
       renderCell: (params) => (
         <Typography variant="body2" color="text.secondary">
-          {params.row.license_plate_ocr || params.row.license_plate || '—'}
+          {params.value || '—'}
         </Typography>
       ),
     },
