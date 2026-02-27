@@ -11,6 +11,8 @@ type Client @model @auth(rules: [{ allow: private }]) {
   contact_email1: String
   contact_phone2: String
   contact_email2: String
+  plate_filter_enabled: Boolean @default(value: "false")
+  plate_filter_list: [String]
   summonses: [Summons] @hasMany(indexName: "byClient", fields: ["id"])
 }
 
@@ -61,6 +63,8 @@ type Summons @model @auth(rules: [{ allow: private }]) {
   evidence_requested_date: AWSDateTime
   evidence_received: Boolean @default(value: "false")
   evidence_received_date: AWSDateTime
+  evidence_reviewed_date: AWSDateTime
+  added_to_calendar_date: AWSDateTime
 
   # File attachments stored as AWSJSON array
   # Structure: [{ id, key, type, name, uploadedBy, uploadedById, uploadedAt, size }]
@@ -71,6 +75,11 @@ type Summons @model @auth(rules: [{ allow: private }]) {
   # Internal status with attribution (who changed it and when)
   # Structure: { value: string, by: string, userId: string, date: string }
   internal_status_attr: AWSJSON
+  evidence_reviewed_attr: AWSJSON
+  added_to_calendar_attr: AWSJSON
+  evidence_requested_attr: AWSJSON
+  evidence_received_attr: AWSJSON
+  dep_file_date_attr: AWSJSON
   offense_level: String
   agency_id_number: String
 

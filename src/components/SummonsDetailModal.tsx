@@ -106,7 +106,7 @@ interface SummonsDetailModalProps {
   /** Callback when modal is closed */
   onClose: () => void;
   /** Callback when data is updated (for refreshing parent) */
-  onUpdate: (id: string, field: string, value: unknown) => void;
+  onUpdate: (id: string, field: string, value: unknown, extraFields?: Record<string, unknown>) => void;
 }
 
 // Internal status options per TRD v1.8
@@ -303,6 +303,8 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   const [evidenceReceivedAttr, setEvidenceReceivedAttr] = useState<AttributionData>({ completed: false });
   const [evidenceRequestedDate, setEvidenceRequestedDate] = useState<string | null>(null);
   const [evidenceReceivedDate, setEvidenceReceivedDate] = useState<string | null>(null);
+  const [evidenceReviewedDate, setEvidenceReviewedDate] = useState<string | null>(null);
+  const [addedToCalendarDate, setAddedToCalendarDate] = useState<string | null>(null);
 
   // File attachments
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -320,6 +322,15 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   ): AttributionData => {
     if (attrField) return attrField;
     return { completed: legacyField };
+  };
+
+  // Helper: parse AWSJSON _attr field (may arrive as JSON string or already-parsed object)
+  const parseAttr = <T,>(raw: unknown, fallback: T): T => {
+    if (!raw) return fallback;
+    if (typeof raw === 'string') {
+      try { return JSON.parse(raw); } catch { return fallback; }
+    }
+    return raw as T;
   };
 
   // Initialize local state when summons changes
@@ -341,19 +352,21 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       setComments(loadedComments);
       setNewComment('');
 
-      // Internal status with attribution
+      // Internal status with attribution (parse AWSJSON string)
       setInternalStatus(summons.internal_status || 'New');
-      setInternalStatusAttr(summons.internal_status_attr || {});
+      setInternalStatusAttr(parseAttr<InternalStatusAttribution>(summons.internal_status_attr, {}));
 
-      // Sync checkbox states with attribution
-      setEvidenceReviewedAttr(getAttrFromSummons(summons.evidence_reviewed_attr, summons.evidence_reviewed || false));
-      setAddedToCalendarAttr(getAttrFromSummons(summons.added_to_calendar_attr, summons.added_to_calendar || false));
-      setEvidenceRequestedAttr(getAttrFromSummons(summons.evidence_requested_attr, summons.evidence_requested || false));
-      setEvidenceReceivedAttr(getAttrFromSummons(summons.evidence_received_attr, summons.evidence_received || false));
+      // Sync checkbox states with attribution (parse AWSJSON strings)
+      setEvidenceReviewedAttr(getAttrFromSummons(parseAttr(summons.evidence_reviewed_attr, undefined), summons.evidence_reviewed || false));
+      setAddedToCalendarAttr(getAttrFromSummons(parseAttr(summons.added_to_calendar_attr, undefined), summons.added_to_calendar || false));
+      setEvidenceRequestedAttr(getAttrFromSummons(parseAttr(summons.evidence_requested_attr, undefined), summons.evidence_requested || false));
+      setEvidenceReceivedAttr(getAttrFromSummons(parseAttr(summons.evidence_received_attr, undefined), summons.evidence_received || false));
       setEvidenceRequestedDate(summons.evidence_requested_date || null);
       setEvidenceReceivedDate(summons.evidence_received_date || null);
-      // DEP File Date
-      setDepFileDateAttr(summons.dep_file_date_attr || {});
+      setEvidenceReviewedDate(summons.evidence_reviewed_date || null);
+      setAddedToCalendarDate(summons.added_to_calendar_date || null);
+      // DEP File Date (parse AWSJSON string)
+      setDepFileDateAttr(parseAttr<DepFileDateAttribution>(summons.dep_file_date_attr, {}));
       // Load attachments (parse if JSON string, or use as array)
       let loadedAttachments: Attachment[] = [];
       if (summons.attachments) {
@@ -412,35 +425,45 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       date: checked ? now : undefined,
     };
 
+    // Build extra fields for a single consolidated mutation
+    const extra: Record<string, unknown> = {
+      [`${field}_attr`]: JSON.stringify(newAttr),
+    };
+
     // Update local state immediately for responsive UI
     switch (field) {
       case 'evidence_reviewed':
         setEvidenceReviewedAttr(newAttr);
+        if (checked && !evidenceReviewedDate) {
+          setEvidenceReviewedDate(now);
+          extra.evidence_reviewed_date = now;
+        }
         break;
       case 'added_to_calendar':
         setAddedToCalendarAttr(newAttr);
+        if (checked && !addedToCalendarDate) {
+          setAddedToCalendarDate(now);
+          extra.added_to_calendar_date = now;
+        }
         break;
       case 'evidence_requested':
         setEvidenceRequestedAttr(newAttr);
-        // Auto-set evidence_requested_date when checking
         if (checked && !evidenceRequestedDate) {
           setEvidenceRequestedDate(now);
-          onUpdate(summons.id, 'evidence_requested_date', now);
+          extra.evidence_requested_date = now;
         }
         break;
       case 'evidence_received':
         setEvidenceReceivedAttr(newAttr);
-        // Auto-set evidence_received_date when checking
         if (checked && !evidenceReceivedDate) {
           setEvidenceReceivedDate(now);
-          onUpdate(summons.id, 'evidence_received_date', now);
+          extra.evidence_received_date = now;
         }
         break;
     }
 
-    // Persist both legacy boolean and new attribution to backend
-    onUpdate(summons.id, field, checked);
-    onUpdate(summons.id, `${field}_attr`, newAttr);
+    // Single consolidated mutation: legacy boolean + attribution + date in one call
+    onUpdate(summons.id, field, checked, extra);
   };
 
   /**
@@ -455,7 +478,8 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       date: now,
     };
     setDepFileDateAttr(newAttr);
-    onUpdate(summons.id, 'dep_file_date_attr', newAttr);
+    // AWSJSON fields require JSON.stringify — raw objects are silently dropped by AppSync
+    onUpdate(summons.id, 'dep_file_date_attr', JSON.stringify(newAttr));
   };
 
   /**
@@ -538,9 +562,10 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     setInternalStatus(value);
     setInternalStatusAttr(newAttr);
 
-    // Persist both legacy field and attribution
-    onUpdate(summons.id, 'internal_status', value);
-    onUpdate(summons.id, 'internal_status_attr', newAttr);
+    // Single consolidated mutation: legacy field + attribution
+    onUpdate(summons.id, 'internal_status', value, {
+      internal_status_attr: JSON.stringify(newAttr),
+    });
   };
   
   /**
@@ -559,6 +584,24 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     const dateValue = date?.toISOString() || null;
     setEvidenceReceivedDate(dateValue);
     onUpdate(summons.id, 'evidence_received_date', dateValue);
+  };
+
+  /**
+   * Handle evidence reviewed date change
+   */
+  const handleReviewedDateChange = (date: dayjs.Dayjs | null) => {
+    const dateValue = date?.toISOString() || null;
+    setEvidenceReviewedDate(dateValue);
+    onUpdate(summons.id, 'evidence_reviewed_date', dateValue);
+  };
+
+  /**
+   * Handle added to calendar date change
+   */
+  const handleCalendarDateChange = (date: dayjs.Dayjs | null) => {
+    const dateValue = date?.toISOString() || null;
+    setAddedToCalendarDate(dateValue);
+    onUpdate(summons.id, 'added_to_calendar_date', dateValue);
   };
 
   /**
@@ -669,8 +712,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   size="small"
                   sx={{ fontWeight: 'bold', fontSize: '0.7rem' }}
                   onDelete={() => {
-                    onUpdate(summons.id, 'is_invoiced', false);
-                    onUpdate(summons.id, 'invoice_date', null);
+                    onUpdate(summons.id, 'is_invoiced', false, { invoice_date: null });
                     unmarkAsInvoiced([summons.id]);
                   }}
                 />
@@ -852,8 +894,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                         color="success"
                         variant="outlined"
                         onDelete={() => {
-                          onUpdate(summons.id, 'is_invoiced', false);
-                          onUpdate(summons.id, 'invoice_date', null);
+                          onUpdate(summons.id, 'is_invoiced', false, { invoice_date: null });
                           unmarkAsInvoiced([summons.id]);
                         }}
                       />
@@ -969,6 +1010,22 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                     )}
                   </Box>
 
+                  {/* Evidence Reviewed Date Picker */}
+                  {evidenceReviewedAttr.completed && (
+                    <Box sx={{ ml: 4, mb: 1 }}>
+                      <LocalizationProvider dateAdapter={AdapterDayjs}>
+                        <DatePicker
+                          label="Reviewed Date"
+                          value={evidenceReviewedDate ? dayjs(evidenceReviewedDate) : null}
+                          onChange={handleReviewedDateChange}
+                          slotProps={{
+                            textField: { size: 'small', fullWidth: true },
+                          }}
+                        />
+                      </LocalizationProvider>
+                    </Box>
+                  )}
+
                   {/* Added to Calendar */}
                   <Box>
                     <FormControlLabel
@@ -990,6 +1047,22 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                       </Box>
                     )}
                   </Box>
+
+                  {/* Added to Calendar Date Picker */}
+                  {addedToCalendarAttr.completed && (
+                    <Box sx={{ ml: 4, mb: 1 }}>
+                      <LocalizationProvider dateAdapter={AdapterDayjs}>
+                        <DatePicker
+                          label="Calendar Date"
+                          value={addedToCalendarDate ? dayjs(addedToCalendarDate) : null}
+                          onChange={handleCalendarDateChange}
+                          slotProps={{
+                            textField: { size: 'small', fullWidth: true },
+                          }}
+                        />
+                      </LocalizationProvider>
+                    </Box>
+                  )}
                 </Box>
 
                 {/* DEP File Creation Date */}

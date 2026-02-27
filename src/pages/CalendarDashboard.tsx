@@ -75,10 +75,14 @@ import SimpleSummonsTable from '../components/SimpleSummonsTable';
 
 // GraphQL
 import { listSummons } from '../graphql/queries';
+import { listClientsWithPlateFilter } from '../graphql/customQueries';
 import { updateSummons } from '../graphql/mutations';
 
 // Types
-import { Summons, isNewRecord, isUpdatedRecord, ActivityLogEntry } from '../types/summons';
+import { Summons, Client, isNewRecord, isUpdatedRecord, ActivityLogEntry } from '../types/summons';
+
+// Plate filtering
+import { applyPlateFilters } from '../lib/plateFilter';
 
 // Theme colors
 import { horizonColors } from '../theme';
@@ -301,7 +305,25 @@ const CalendarDashboard: React.FC = () => {
       }
 
       console.log('Loaded all summonses:', allSummonses.length);
-      setSummonses(allSummonses);
+
+      // Apply plate filtering (graceful degradation if client fetch fails)
+      let finalSummonses = allSummonses;
+      try {
+        let allClients: Client[] = [];
+        let clientNextToken: string | null = null;
+        do {
+          const clientResult = await client.graphql({
+            query: listClientsWithPlateFilter,
+            variables: { limit: 100, nextToken: clientNextToken },
+          }) as { data: { listClients: { items: Client[]; nextToken: string | null } } };
+          allClients = [...allClients, ...clientResult.data.listClients.items];
+          clientNextToken = clientResult.data.listClients.nextToken;
+        } while (clientNextToken);
+        finalSummonses = applyPlateFilters(allSummonses, allClients);
+      } catch (plateError) {
+        console.warn('Plate filter skipped (client fetch failed):', plateError);
+      }
+      setSummonses(finalSummonses);
     } catch (error) {
       console.error('Error loading summonses:', error);
       setSnackbar({
@@ -535,29 +557,17 @@ const CalendarDashboard: React.FC = () => {
 
   /**
    * Handle summons field update via GraphQL mutation
-   * Attribution fields (_attr suffix) fail silently until schema is deployed
    */
-  const handleSummonsUpdate = useCallback(async (id: string, field: string, value: unknown) => {
-    // Check if this is an attribution field (not yet in deployed schema)
-    const isAttributionField = field.endsWith('_attr');
-
+  const handleSummonsUpdate = useCallback(async (id: string, field: string, value: unknown, extraFields?: Record<string, unknown>) => {
     try {
       console.log(`Updating ${field} = ${value} for summons ${id}...`);
 
-      // Build the update input
+      // Build the update input — merge extraFields for consolidated mutations
       const updateInput: Record<string, unknown> = {
         id,
         [field]: value,
+        ...extraFields,
       };
-
-      // If checking "evidence_requested" and it's being set to true,
-      // auto-set the date if not already set
-      if (field === 'evidence_requested' && value === true) {
-        const summons = summonses.find(s => s.id === id);
-        if (summons && !summons.evidence_requested_date) {
-          updateInput.evidence_requested_date = new Date().toISOString();
-        }
-      }
 
       // Execute GraphQL mutation
       await client.graphql({
@@ -586,6 +596,7 @@ const CalendarDashboard: React.FC = () => {
             return {
               ...s,
               [field]: localValue,
+              ...extraFields,
               updatedAt: new Date().toISOString(),
             };
           }
@@ -602,29 +613,12 @@ const CalendarDashboard: React.FC = () => {
         });
       }
     } catch (error) {
-      // Silently fail for attribution fields (schema not deployed yet)
-      if (isAttributionField) {
-        console.log(`Attribution field ${field} not yet in schema - update skipped`);
-        // Still update local state for UI responsiveness
-        setSummonses((prev) =>
-          prev.map((s) => {
-            if (s.id === id) {
-              return {
-                ...s,
-                [field]: value,
-              };
-            }
-            return s;
-          })
-        );
-      } else {
-        console.error('Error updating summons:', error);
-        setSnackbar({
-          open: true,
-          message: `Failed to update ${field}. Please try again.`,
-          severity: 'error',
-        });
-      }
+      console.error('Error updating summons:', error);
+      setSnackbar({
+        open: true,
+        message: `Failed to update ${field}. Please try again.`,
+        severity: 'error',
+      });
     }
   }, [summonses]);
 

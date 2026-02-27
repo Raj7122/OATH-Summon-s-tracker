@@ -46,6 +46,7 @@ import { generateClient } from 'aws-amplify/api';
 
 import { listClients, listSummons } from '../graphql/queries';
 import { Client, Summons, isUpdatedRecord } from '../types/summons';
+import { applyClientPlateFilter } from '../lib/plateFilter';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
@@ -241,11 +242,14 @@ const ClientList: React.FC = () => {
         return false;
       });
 
+      // Apply per-client plate filter before computing stats
+      const plateFilteredSummonses = applyClientPlateFilter(clientSummonses, client);
+
       // Calculate stats (Active Era = 2022+)
-      const activeEraSummonses = clientSummonses.filter(isActiveEra);
+      const activeEraSummonses = plateFilteredSummonses.filter(isActiveEra);
       const activeCases = activeEraSummonses.filter(isOpenCase);
       const criticalCases = activeEraSummonses.filter(isCriticalCase);
-      const recentlyUpdatedCases = clientSummonses.filter(isUpdatedRecord);
+      const recentlyUpdatedCases = plateFilteredSummonses.filter(isUpdatedRecord);
       const totalOpenBalance = activeCases.reduce((sum, s) => sum + (s.amount_due || 0), 0);
 
       return {

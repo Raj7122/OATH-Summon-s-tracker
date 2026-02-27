@@ -23,6 +23,7 @@ import {
   generateFilename,
   downloadCSV,
 } from '../lib/csvExport';
+import { applyClientPlateFilter } from '../lib/plateFilter';
 
 const apiClient = generateClient();
 
@@ -187,6 +188,9 @@ export function useCSVExport(): UseCSVExportResult {
       });
 
       let clientSummonses = filterSummonsesForClient(allSummonses, client);
+
+      // Phase 2b: Apply per-client plate filter
+      clientSummonses = applyClientPlateFilter(clientSummonses, client);
 
       // Phase 3: Apply date range filter
       clientSummonses = filterByDateRange(clientSummonses, config.includeHistorical);

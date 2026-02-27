@@ -17,6 +17,7 @@ import { DataGrid, GridColDef, GridActionsCellItem, GridToolbar } from '@mui/x-d
 import { generateClient } from 'aws-amplify/api';
 import { listClients } from '../graphql/queries';
 import { createClient, updateClient, deleteClient } from '../graphql/mutations';
+import { updateClientPlateFilter } from '../graphql/customQueries';
 import ClientForm from '../components/ClientForm';
 import { escapeCSVValue, downloadCSV } from '../lib/csvExport';
 
@@ -84,9 +85,11 @@ const Clients = () => {
 
   const handleSave = async (clientData: Partial<Client>) => {
     try {
+      let savedClientId: string;
+
       if (editingClient) {
-        // Update existing client - filter out read-only fields
-        const { createdAt, updatedAt, owner, summonses, __typename, ...cleanData } = clientData as any;
+        // Update existing client - filter out read-only and plate filter fields
+        const { createdAt, updatedAt, owner, summonses, __typename, plate_filter_enabled, plate_filter_list, ...cleanData } = clientData as any;
         const result = await client.graphql({
           query: updateClient,
           variables: {
@@ -97,17 +100,36 @@ const Clients = () => {
           },
         });
         console.log('Update result:', result);
+        savedClientId = editingClient.id;
       } else {
-        // Create new client - filter out read-only fields
-        const { createdAt, updatedAt, owner, summonses, __typename, ...cleanData } = clientData as any;
+        // Create new client - filter out read-only and plate filter fields
+        const { createdAt, updatedAt, owner, summonses, __typename, plate_filter_enabled, plate_filter_list, ...cleanData } = clientData as any;
         const result = await client.graphql({
           query: createClient,
           variables: {
             input: cleanData,
           },
-        });
+        }) as any;
         console.log('Create result:', result);
+        savedClientId = result.data.createClient.id;
       }
+
+      // Attempt to save plate filter fields separately (graceful degradation)
+      const { plate_filter_enabled, plate_filter_list } = clientData as any;
+      if (plate_filter_enabled !== undefined || plate_filter_list !== undefined) {
+        try {
+          const plateInput: any = { id: savedClientId };
+          if (plate_filter_enabled !== undefined) plateInput.plate_filter_enabled = plate_filter_enabled;
+          if (plate_filter_list !== undefined) plateInput.plate_filter_list = plate_filter_list;
+          await client.graphql({
+            query: updateClientPlateFilter,
+            variables: { input: plateInput },
+          });
+        } catch (plateErr) {
+          console.warn('Plate filter fields not yet deployed to AppSync — skipping plate filter save:', plateErr);
+        }
+      }
+
       setDialogOpen(false);
       loadClients();
     } catch (error: any) {

@@ -35,6 +35,9 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import FilterAltIcon from '@mui/icons-material/FilterAlt';
 import { generateClient } from 'aws-amplify/api';
 import { listSummons } from '../graphql/queries';
+import { listClientsWithPlateFilter } from '../graphql/customQueries';
+import { Client } from '../types/summons';
+import { applyPlateFilters } from '../lib/plateFilter';
 import SummonsTable from '../components/SummonsTable';
 import DashboardSummary from '../components/DashboardSummary';
 
@@ -305,7 +308,25 @@ const Dashboard = () => {
       }
 
       console.log('Loaded all summonses:', allSummonses.length);
-      setSummonses(allSummonses);
+
+      // Apply plate filtering (graceful degradation if client fetch fails)
+      let finalSummonses = allSummonses;
+      try {
+        let allClients: Client[] = [];
+        let clientNextToken: string | null = null;
+        do {
+          const clientResult = await client.graphql({
+            query: listClientsWithPlateFilter,
+            variables: { limit: 100, nextToken: clientNextToken },
+          }) as { data: { listClients: { items: Client[]; nextToken: string | null } } };
+          allClients = [...allClients, ...clientResult.data.listClients.items];
+          clientNextToken = clientResult.data.listClients.nextToken;
+        } while (clientNextToken);
+        finalSummonses = applyPlateFilters(allSummonses, allClients);
+      } catch (plateError) {
+        console.warn('Plate filter skipped (client fetch failed):', plateError);
+      }
+      setSummonses(finalSummonses);
     } catch (error: unknown) {
       console.error('Error loading summonses:', error);
       // Log detailed error information for debugging

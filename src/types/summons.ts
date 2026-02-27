@@ -108,6 +108,8 @@ export interface Summons {
   evidence_requested_date?: string;
   evidence_received: boolean;
   evidence_received_date?: string;
+  evidence_reviewed_date?: string;
+  added_to_calendar_date?: string;
   // File attachments (AWSJSON array)
   attachments?: Attachment[];
   // New attribution-enabled evidence tracking fields
@@ -196,6 +198,8 @@ export interface Client {
   contact_email1?: string;
   contact_phone2?: string;
   contact_email2?: string;
+  plate_filter_enabled?: boolean;
+  plate_filter_list?: string[];
   createdAt?: string;
   updatedAt?: string;
   __typename?: string;

@@ -85,7 +85,7 @@ interface SimpleSummonsTableProps {
   /** Array of summons to display */
   summonses: Summons[];
   /** Callback when a summons field is updated */
-  onUpdate: (id: string, field: string, value: unknown) => void;
+  onUpdate: (id: string, field: string, value: unknown, extraFields?: Record<string, unknown>) => void;
   /** Optional: pre-selected filter from parent */
   activeFilter?: 'all' | 'updated' | 'new';
   /** Optional: callback when filter changes */
@@ -201,8 +201,8 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
   /**
    * Handle update from modal
    */
-  const handleModalUpdate = (id: string, field: string, value: unknown) => {
-    onUpdate(id, field, value);
+  const handleModalUpdate = (id: string, field: string, value: unknown, extraFields?: Record<string, unknown>) => {
+    onUpdate(id, field, value, extraFields);
   };
   
   /**

@@ -9,6 +9,9 @@ import {
   Stack,
   Tooltip,
   IconButton,
+  FormControlLabel,
+  Switch,
+  Alert,
 } from '@mui/material';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 
@@ -22,6 +25,8 @@ interface Client {
   contact_email1?: string;
   contact_phone2?: string;
   contact_email2?: string;
+  plate_filter_enabled?: boolean;
+  plate_filter_list?: string[];
 }
 
 /**
@@ -100,8 +105,11 @@ const ClientForm: React.FC<ClientFormProps> = ({ client, onSave, onCancel }) => 
     contact_email1: '',
     contact_phone2: '',
     contact_email2: '',
+    plate_filter_enabled: false,
+    plate_filter_list: [],
   });
   const [akaInput, setAkaInput] = useState('');
+  const [plateInput, setPlateInput] = useState('');
   const [suggestedAkas, setSuggestedAkas] = useState<string[]>([]);
 
   useEffect(() => {
@@ -146,6 +154,23 @@ const ClientForm: React.FC<ClientFormProps> = ({ client, onSave, onCancel }) => 
       akas: [...(formData.akas || []), aka],
     });
     // Suggestion will automatically disappear due to useEffect filter
+  };
+
+  const handleAddPlate = () => {
+    const plate = plateInput.trim().toUpperCase();
+    if (plate && !(formData.plate_filter_list || []).includes(plate)) {
+      setFormData({
+        ...formData,
+        plate_filter_list: [...(formData.plate_filter_list || []), plate],
+      });
+      setPlateInput('');
+    }
+  };
+
+  const handleDeletePlate = (index: number) => {
+    const newPlates = [...(formData.plate_filter_list || [])];
+    newPlates.splice(index, 1);
+    setFormData({ ...formData, plate_filter_list: newPlates });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -250,6 +275,68 @@ const ClientForm: React.FC<ClientFormProps> = ({ client, onSave, onCancel }) => 
                   />
                 ))}
               </Stack>
+            </Box>
+          )}
+        </Grid>
+
+        {/* License Plate Filter Section */}
+        <Grid item xs={12}>
+          <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>
+            License Plate Filter
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={formData.plate_filter_enabled || false}
+                onChange={(e) =>
+                  setFormData({ ...formData, plate_filter_enabled: e.target.checked })
+                }
+              />
+            }
+            label="Filter by License Plate"
+          />
+          <Typography variant="caption" display="block" color="text.secondary" sx={{ ml: 4, mt: -0.5 }}>
+            {formData.plate_filter_enabled
+              ? 'Only summonses matching these plates will be shown'
+              : 'Showing all summonses for this client'}
+          </Typography>
+
+          {formData.plate_filter_enabled && (
+            <Box sx={{ mt: 1.5 }}>
+              <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Add a License Plate"
+                  value={plateInput}
+                  onChange={(e) => setPlateInput(e.target.value.toUpperCase())}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddPlate();
+                    }
+                  }}
+                  helperText="Enter plate number and press Enter or click Add"
+                />
+                <Button variant="outlined" onClick={handleAddPlate}>
+                  Add
+                </Button>
+              </Box>
+              <Stack direction="row" spacing={1} flexWrap="wrap" gap={1}>
+                {formData.plate_filter_list?.map((plate, index) => (
+                  <Chip
+                    key={index}
+                    label={plate}
+                    onDelete={() => handleDeletePlate(index)}
+                    sx={{ fontFamily: 'monospace', fontWeight: 500 }}
+                  />
+                ))}
+              </Stack>
+              {(formData.plate_filter_list?.length || 0) > 0 && (
+                <Alert severity="info" sx={{ mt: 1.5 }}>
+                  {formData.plate_filter_list!.length} plate{formData.plate_filter_list!.length !== 1 ? 's' : ''} configured — only summonses matching these plates will appear in the dashboard and exports.
+                </Alert>
+              )}
             </Box>
           )}
         </Grid>

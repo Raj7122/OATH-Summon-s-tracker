@@ -53,8 +53,10 @@ import RemoveShoppingCartIcon from '@mui/icons-material/RemoveShoppingCart';
 import { generateClient } from 'aws-amplify/api';
 
 import { getClient, listSummons } from '../graphql/queries';
+import { getClientWithPlateFilter } from '../graphql/customQueries';
 import { updateSummons } from '../graphql/mutations';
 import { Client, Summons, isNewRecord, isUpdatedRecord } from '../types/summons';
+import { applyClientPlateFilter } from '../lib/plateFilter';
 import SummonsDetailModal from '../components/SummonsDetailModal';
 import ExportConfigurationModal from '../components/ExportConfigurationModal';
 import { useCSVExport } from '../hooks/useCSVExport';
@@ -238,7 +240,25 @@ const ClientDetail: React.FC = () => {
       }
 
       setNextToken(currentToken);
-      setSummonses(allSummonses);
+      // Apply per-client plate filter (graceful degradation if schema not deployed)
+      let plateFiltered = allSummonses;
+      try {
+        const pfResult = await apiClient.graphql({
+          query: getClientWithPlateFilter,
+          variables: { id },
+        }) as { data: { getClient: { id: string; plate_filter_enabled?: boolean; plate_filter_list?: string[] } } };
+        const pfData = pfResult.data.getClient;
+        if (pfData?.plate_filter_enabled) {
+          plateFiltered = applyClientPlateFilter(allSummonses, {
+            ...client,
+            plate_filter_enabled: pfData.plate_filter_enabled,
+            plate_filter_list: pfData.plate_filter_list,
+          });
+        }
+      } catch (plateError) {
+        console.warn('Plate filter skipped (schema not deployed):', plateError);
+      }
+      setSummonses(plateFiltered);
 
     } catch (err) {
       console.error('Error loading summonses:', err);
@@ -322,12 +342,8 @@ const ClientDetail: React.FC = () => {
 
   /**
    * Handle summons update from modal
-   * Attribution fields (_attr suffix) fail silently until schema is deployed
    */
-  const handleSummonsUpdate = useCallback(async (summonsId: string, field: string, value: unknown) => {
-    // Check if this is an attribution field (not yet in deployed schema)
-    const isAttributionField = field.endsWith('_attr');
-
+  const handleSummonsUpdate = useCallback(async (summonsId: string, field: string, value: unknown, extraFields?: Record<string, unknown>) => {
     try {
       await apiClient.graphql({
         query: updateSummons,
@@ -335,25 +351,17 @@ const ClientDetail: React.FC = () => {
           input: {
             id: summonsId,
             [field]: value,
+            ...extraFields,
           },
         },
       });
 
       // Update local state
       setSummonses((prev) =>
-        prev.map((s) => (s.id === summonsId ? { ...s, [field]: value } : s))
+        prev.map((s) => (s.id === summonsId ? { ...s, [field]: value, ...extraFields } : s))
       );
     } catch (err) {
-      // Silently fail for attribution fields (schema not deployed yet)
-      if (isAttributionField) {
-        console.log(`Attribution field ${field} not yet in schema - update skipped`);
-        // Still update local state for UI responsiveness
-        setSummonses((prev) =>
-          prev.map((s) => (s.id === summonsId ? { ...s, [field]: value } : s))
-        );
-      } else {
-        console.error('Error updating summons:', err);
-      }
+      console.error('Error updating summons:', err);
     }
   }, []);
 

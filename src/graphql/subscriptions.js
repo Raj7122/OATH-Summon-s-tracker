@@ -13,6 +13,8 @@ export const onCreateClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      plate_filter_enabled
+      plate_filter_list
       summonses {
         nextToken
         __typename
@@ -35,6 +37,8 @@ export const onUpdateClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      plate_filter_enabled
+      plate_filter_list
       summonses {
         nextToken
         __typename
@@ -57,6 +61,8 @@ export const onDeleteClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      plate_filter_enabled
+      plate_filter_list
       summonses {
         nextToken
         __typename
@@ -82,6 +88,8 @@ export const onCreateSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        plate_filter_enabled
+        plate_filter_list
         createdAt
         updatedAt
         __typename
@@ -113,9 +121,16 @@ export const onCreateSummons = /* GraphQL */ `
       evidence_requested_date
       evidence_received
       evidence_received_date
+      evidence_reviewed_date
+      added_to_calendar_date
       attachments
       internal_status
       internal_status_attr
+      evidence_reviewed_attr
+      added_to_calendar_attr
+      evidence_requested_attr
+      evidence_received_attr
+      dep_file_date_attr
       offense_level
       agency_id_number
       last_change_summary
@@ -161,6 +176,8 @@ export const onUpdateSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        plate_filter_enabled
+        plate_filter_list
         createdAt
         updatedAt
         __typename
@@ -192,9 +209,16 @@ export const onUpdateSummons = /* GraphQL */ `
       evidence_requested_date
       evidence_received
       evidence_received_date
+      evidence_reviewed_date
+      added_to_calendar_date
       attachments
       internal_status
       internal_status_attr
+      evidence_reviewed_attr
+      added_to_calendar_attr
+      evidence_requested_attr
+      evidence_received_attr
+      dep_file_date_attr
       offense_level
       agency_id_number
       last_change_summary
@@ -240,6 +264,8 @@ export const onDeleteSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        plate_filter_enabled
+        plate_filter_list
         createdAt
         updatedAt
         __typename
@@ -271,9 +297,16 @@ export const onDeleteSummons = /* GraphQL */ `
       evidence_requested_date
       evidence_received
       evidence_received_date
+      evidence_reviewed_date
+      added_to_calendar_date
       attachments
       internal_status
       internal_status_attr
+      evidence_reviewed_attr
+      added_to_calendar_attr
+      evidence_requested_attr
+      evidence_received_attr
+      dep_file_date_attr
       offense_level
       agency_id_number
       last_change_summary
