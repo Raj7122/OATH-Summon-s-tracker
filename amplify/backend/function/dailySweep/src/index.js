@@ -65,7 +65,7 @@ const GHOST_GRACE_DAYS = 3; // Days before archiving missing records
 /**
  * Main handler for the daily sweep Lambda function
  */
-exports.handler = async (event) => {
+exports.handler = async (event, context) => {
   console.log('='.repeat(60));
   console.log('DAILY SWEEP - INCREMENTAL SYNC WITH PRIORITY QUEUING v2.0');
   console.log('Started:', new Date().toISOString());
@@ -115,7 +115,7 @@ exports.handler = async (event) => {
     const remainingQuota = MAX_OCR_REQUESTS_PER_DAY - ocrCounter.ocr_processed_today;
     console.log(`Remaining OCR quota for today: ${remainingQuota}`);
 
-    const phase2Results = await executePhase2PriorityOCR(remainingQuota);
+    const phase2Results = await executePhase2PriorityOCR(remainingQuota, context);
     console.log('\nPhase 2 Complete:', phase2Results);
 
     // Update SyncStatus with Phase 2 results
@@ -275,6 +275,21 @@ async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime) {
 
   if (!matchedClient) {
     return { action: 'skipped', reason: 'no client match' };
+  }
+
+  // Plate filter: If client has plate filtering enabled, only accept
+  // summonses whose plate (from violation_details) matches the filter list.
+  // This runs before the DB lookup to reject non-matching plates cheaply.
+  if (matchedClient.plate_filter_enabled && matchedClient.plate_filter_list?.length > 0) {
+    const detailsPlate = extractPlateFromViolationDetails(apiSummons.violation_details || '');
+    if (!detailsPlate) {
+      return { action: 'skipped', reason: 'plate filter active but no plate in details' };
+    }
+    const normalizedPlate = detailsPlate.replace(/[^A-Z0-9]/g, '');
+    const plateList = matchedClient.plate_filter_list.map(p => p.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+    if (!plateList.includes(normalizedPlate)) {
+      return { action: 'skipped', reason: `plate ${detailsPlate} not in filter` };
+    }
   }
 
   // Check if summons already exists
@@ -610,7 +625,7 @@ async function fetchAllActiveSummons() {
  * - Sorts by priority score (lower = higher priority)
  * - Processes up to remaining daily quota with throttling
  */
-async function executePhase2PriorityOCR(remainingQuota = MAX_OCR_REQUESTS_PER_DAY) {
+async function executePhase2PriorityOCR(remainingQuota = MAX_OCR_REQUESTS_PER_DAY, context) {
   const results = {
     pendingRecords: 0,
     recordsProcessed: 0,
@@ -680,6 +695,14 @@ async function executePhase2PriorityOCR(remainingQuota = MAX_OCR_REQUESTS_PER_DA
 
   // Step 4: Process with throttling
   for (let i = 0; i < recordsToProcess.length; i++) {
+    // Timeout guard: stop if < 30 seconds remain to allow cleanup
+    // (sync_in_progress = false, last_successful_sync update)
+    if (context && typeof context.getRemainingTimeInMillis === 'function' && context.getRemainingTimeInMillis() < 30000) {
+      console.log(`TIMEOUT GUARD: ${context.getRemainingTimeInMillis()}ms remaining. Exiting Phase 2 after ${i} records.`);
+      results.gracefulExit = true;
+      break;
+    }
+
     const record = recordsToProcess[i];
     results.recordsProcessed++;
 
@@ -1137,6 +1160,20 @@ function looksLikeSuffixFragment(firstName) {
 }
 
 /**
+ * Extract license plate number from the violation_details API field.
+ * The field often contains text like "LICENSE PLATE # 41168PF" or similar patterns.
+ *
+ * @param {string} violationDetails - Raw violation_details text from NYC API
+ * @returns {string|null} Uppercase plate string or null if not found
+ */
+function extractPlateFromViolationDetails(violationDetails) {
+  if (!violationDetails) return null;
+  // Match patterns like "LICENSE PLATE # ABC1234", "LICENSE PLATE #ABC1234", "LICENSE PLATE ABC1234"
+  const match = violationDetails.match(/LICENSE\s+PLATE\s*#?\s*([A-Z0-9]+)/i);
+  return match ? match[1].toUpperCase() : null;
+}
+
+/**
  * Match respondent name to a client using multiple strategies
  *
  * MATCHING STRATEGIES (in order of priority):
@@ -1301,10 +1338,12 @@ async function fetchNYCDataForClients(clients) {
   console.log(`Searching for ${searchTerms.size} unique client name patterns...`);
   console.log('FILTERS: IDLING violations only, hearing_date >= 2022-01-01');
 
+  // Pagination constants: fetch 500 per page, cap at 5000 per search term
+  const PAGE_SIZE = 500;
+  const MAX_PER_TERM = 5000;
+
   for (const searchTerm of searchTerms) {
     try {
-      const url = new URL(NYC_API_URL);
-      url.searchParams.append('$limit', 500);
       const escapedTerm = searchTerm.replace(/'/g, "''");
 
       // CRITICAL FILTERS:
@@ -1317,25 +1356,38 @@ async function fetchNYCDataForClients(clients) {
         `hearing_date >= '2022-01-01T00:00:00'`
       ].join(' AND ');
 
-      url.searchParams.append('$where', whereClause);
+      // Paginate through all results for this search term
+      let offset = 0;
+      let pageData;
+      let termTotal = 0;
 
-      const response = await fetch(url.toString(), { headers });
+      do {
+        const url = new URL(NYC_API_URL);
+        url.searchParams.append('$limit', PAGE_SIZE);
+        url.searchParams.append('$offset', offset);
+        url.searchParams.append('$where', whereClause);
 
-      if (!response.ok) {
-        console.error(`NYC API error for "${searchTerm}": ${response.status}`);
-        continue;
-      }
+        const response = await fetch(url.toString(), { headers });
 
-      const data = await response.json();
-
-      for (const summons of data) {
-        if (!seenTickets.has(summons.ticket_number)) {
-          seenTickets.add(summons.ticket_number);
-          allSummonses.push(summons);
+        if (!response.ok) {
+          console.error(`NYC API error for "${searchTerm}" (offset ${offset}): ${response.status}`);
+          break;
         }
-      }
 
-      console.log(`  Found ${data.length} IDLING (2022+) for "${searchTerm}"`);
+        pageData = await response.json();
+
+        for (const summons of pageData) {
+          if (!seenTickets.has(summons.ticket_number)) {
+            seenTickets.add(summons.ticket_number);
+            allSummonses.push(summons);
+          }
+        }
+
+        termTotal += pageData.length;
+        offset += pageData.length;
+      } while (pageData.length === PAGE_SIZE && offset < MAX_PER_TERM);
+
+      console.log(`  Found ${termTotal} IDLING (2022+) for "${searchTerm}"${termTotal >= MAX_PER_TERM ? ' (capped)' : ''}`);
     } catch (error) {
       console.error(`Error querying for "${searchTerm}":`, error.message);
     }
@@ -1532,6 +1584,7 @@ exports._testExports = {
   looksLikeSuffixFragment,
   matchRespondentToClient,
   buildClientNameMap,
+  extractPlateFromViolationDetails,
 };
 
 /**

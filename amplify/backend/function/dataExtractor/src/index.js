@@ -45,6 +45,13 @@ exports.handler = async (event) => {
     if (event.Records && event.Records.length > 0) {
       // DynamoDB Stream trigger format
       const record = event.Records[0];
+
+      // Skip REMOVE events — no NewImage to process
+      if (record.eventName === 'REMOVE') {
+        console.log('Skipping REMOVE event — no NewImage available');
+        return { statusCode: 200, body: JSON.stringify({ message: 'Skipped REMOVE event' }) };
+      }
+
       const newImage = record.dynamodb.NewImage;
 
       // Unmarshall DynamoDB attribute values
