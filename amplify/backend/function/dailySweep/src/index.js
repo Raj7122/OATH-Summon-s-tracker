@@ -222,13 +222,24 @@ async function executePhase1MetadataSync() {
   results.casesFromAPI = apiSummonses.length;
   console.log(`Fetched ${apiSummonses.length} summonses from NYC API`);
 
+  // Step 3b: Pre-load all existing summons into a Map for O(1) lookups
+  // This avoids ~3600 individual DB queries during processing
+  const allExisting = await fetchAllActiveSummons();
+  const existingSummonsMap = new Map();
+  for (const record of allExisting) {
+    if (record.summons_number) {
+      existingSummonsMap.set(record.summons_number, record);
+    }
+  }
+  console.log(`Pre-loaded ${existingSummonsMap.size} existing summons for fast lookup`);
+
   // Step 4: Process each summons - UPDATE METADATA ONLY
   for (const apiSummons of apiSummonses) {
     try {
       const ticketNumber = apiSummons.ticket_number;
       seenSummonsNumbers.add(ticketNumber);
 
-      const processResult = await processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime);
+      const processResult = await processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime, existingSummonsMap);
 
       if (processResult.action === 'created') {
         results.newRecordsCreated++;
@@ -260,7 +271,7 @@ async function executePhase1MetadataSync() {
  * Process a single summons - UPDATE METADATA ONLY (no OCR trigger)
  * Now includes Activity Log for audit trail and last_metadata_sync tracking
  */
-async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime) {
+async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime, existingSummonsMap) {
   const ticketNumber = apiSummons.ticket_number;
   const respondentFirstName = apiSummons.respondent_first_name || '';
   const respondentLastName = apiSummons.respondent_last_name || '';
@@ -292,8 +303,10 @@ async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime) {
     }
   }
 
-  // Check if summons already exists
-  const existingSummons = await findExistingSummons(ticketNumber);
+  // Check if summons already exists (O(1) Map lookup instead of DB query)
+  const existingSummons = existingSummonsMap
+    ? existingSummonsMap.get(ticketNumber) || null
+    : await findExistingSummons(ticketNumber);
 
   // Extract and normalize NYC API data
   const incomingData = extractAPIMetadata(apiSummons);

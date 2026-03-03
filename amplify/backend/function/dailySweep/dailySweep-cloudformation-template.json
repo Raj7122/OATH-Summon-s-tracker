@@ -83,9 +83,19 @@
             },
             "API_OATHSUMMONSTRACKER_GRAPHQLAPIENDPOINTOUTPUT": {
               "Ref": "apioathsummonstrackerGraphQLAPIEndpointOutput"
+            },
+            "CLIENTS_TABLE": {
+              "Fn::Join": ["-", ["Client", {"Ref": "apioathsummonstrackerGraphQLAPIIdOutput"}, {"Ref": "env"}]]
+            },
+            "SUMMONS_TABLE": {
+              "Fn::Join": ["-", ["Summons", {"Ref": "apioathsummonstrackerGraphQLAPIIdOutput"}, {"Ref": "env"}]]
+            },
+            "SYNC_STATUS_TABLE": {
+              "Fn::Join": ["-", ["SyncStatus", {"Ref": "apioathsummonstrackerGraphQLAPIIdOutput"}, {"Ref": "env"}]]
             }
           }
         },
+        "MemorySize": 512,
         "Role": {
           "Fn::GetAtt": [
             "LambdaExecutionRole",
@@ -94,7 +104,7 @@
         },
         "Runtime": "nodejs22.x",
         "Layers": [],
-        "Timeout": 25
+        "Timeout": 900
       }
     },
     "LambdaExecutionRole": {
