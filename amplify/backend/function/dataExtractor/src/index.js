@@ -77,11 +77,13 @@ exports.handler = async (event) => {
     // This prevents wasting OCR credits on already-processed records
     const existingRecord = await fetchExistingRecord(summons_id);
 
-    // Check if record needs healing (has violation_narrative but missing key OCR fields)
+    // Check if record needs healing (has violation_narrative but missing any critical OCR field)
     const needsHealing = existingRecord &&
       existingRecord.violation_narrative &&
       existingRecord.violation_narrative.length > 0 &&
-      (!existingRecord.id_number || !existingRecord.license_plate_ocr);
+      (!existingRecord.id_number || !existingRecord.license_plate_ocr ||
+       !existingRecord.idling_duration_ocr || !existingRecord.vehicle_type_ocr ||
+       !existingRecord.prior_offense_status || !existingRecord.name_on_summons_ocr);
 
     // Skip if already fully OCR'd, UNLESS healing mode is enabled for partial records
     if (existingRecord && existingRecord.violation_narrative && existingRecord.violation_narrative.length > 0) {
@@ -90,6 +92,10 @@ exports.handler = async (event) => {
         console.log(`HEALING MODE: ${summons_number} has partial OCR data, re-extracting...`);
         console.log(`  - Missing id_number: ${!existingRecord.id_number}`);
         console.log(`  - Missing license_plate_ocr: ${!existingRecord.license_plate_ocr}`);
+        console.log(`  - Missing idling_duration_ocr: ${!existingRecord.idling_duration_ocr}`);
+        console.log(`  - Missing vehicle_type_ocr: ${!existingRecord.vehicle_type_ocr}`);
+        console.log(`  - Missing prior_offense_status: ${!existingRecord.prior_offense_status}`);
+        console.log(`  - Missing name_on_summons_ocr: ${!existingRecord.name_on_summons_ocr}`);
       } else if (healingMode && !needsHealing) {
         // Healing mode but record is already complete
         console.log(`SKIPPED (healing): ${summons_number} already fully OCR'd`);

@@ -85,13 +85,46 @@
               "Ref": "apioathsummonstrackerGraphQLAPIEndpointOutput"
             },
             "CLIENTS_TABLE": {
-              "Fn::Join": ["-", ["Client", {"Ref": "apioathsummonstrackerGraphQLAPIIdOutput"}, {"Ref": "env"}]]
+              "Fn::Join": [
+                "-",
+                [
+                  "Client",
+                  {
+                    "Ref": "apioathsummonstrackerGraphQLAPIIdOutput"
+                  },
+                  {
+                    "Ref": "env"
+                  }
+                ]
+              ]
             },
             "SUMMONS_TABLE": {
-              "Fn::Join": ["-", ["Summons", {"Ref": "apioathsummonstrackerGraphQLAPIIdOutput"}, {"Ref": "env"}]]
+              "Fn::Join": [
+                "-",
+                [
+                  "Summons",
+                  {
+                    "Ref": "apioathsummonstrackerGraphQLAPIIdOutput"
+                  },
+                  {
+                    "Ref": "env"
+                  }
+                ]
+              ]
             },
             "SYNC_STATUS_TABLE": {
-              "Fn::Join": ["-", ["SyncStatus", {"Ref": "apioathsummonstrackerGraphQLAPIIdOutput"}, {"Ref": "env"}]]
+              "Fn::Join": [
+                "-",
+                [
+                  "SyncStatus",
+                  {
+                    "Ref": "apioathsummonstrackerGraphQLAPIIdOutput"
+                  },
+                  {
+                    "Ref": "env"
+                  }
+                ]
+              ]
             }
           }
         },

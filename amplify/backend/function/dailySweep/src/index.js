@@ -121,6 +121,9 @@ exports.handler = async (event, context) => {
     console.log('PHASE 2: PRIORITY QUEUE OCR (Smart 500)');
     console.log('='.repeat(60));
 
+    // One-time reset: give permanently-failed records (ocr_failure_count >= 3) another chance
+    await resetPermanentlyFailedRecords();
+
     const remainingQuota = MAX_OCR_REQUESTS_PER_DAY - ocrCounter.ocr_processed_today;
     console.log(`Remaining OCR quota for today: ${remainingQuota}`);
 
@@ -895,8 +898,8 @@ function calculateTieredPriorityScore(summons) {
  * This includes:
  * 1. Records with ocr_status = 'pending' (new records awaiting OCR)
  * 2. Records with no ocr_status and no violation_narrative (legacy records)
- * 3. SELF-HEALING: Records with ocr_status = 'complete' but missing id_number
- *    (these have partial OCR data and need re-processing)
+ * 3. SELF-HEALING: Records with ocr_status = 'complete' but missing any critical OCR field
+ *    (id_number, license_plate_ocr, idling_duration_ocr, vehicle_type_ocr, prior_offense_status, name_on_summons_ocr)
  */
 async function fetchPendingOCRRecords() {
   const allRecords = [];
@@ -922,7 +925,7 @@ async function fetchPendingOCRRecords() {
     lastEvaluatedKey = result.LastEvaluatedKey;
   } while (lastEvaluatedKey);
 
-  // Second scan: Get self-healing candidates (complete but missing id_number)
+  // Second scan: Get self-healing candidates (complete but missing critical OCR fields)
   const selfHealingRecords = await fetchSelfHealingCandidates();
 
   // Track counts for logging
@@ -965,8 +968,8 @@ async function fetchSelfHealingCandidates() {
   do {
     const params = {
       TableName: SUMMONS_TABLE,
-      // Records marked complete but missing id_number (have violation_narrative)
-      FilterExpression: 'ocr_status = :complete AND attribute_exists(violation_narrative) AND attribute_not_exists(id_number) AND (is_archived <> :archived OR attribute_not_exists(is_archived))',
+      // Records marked complete but missing any critical OCR field (have violation_narrative)
+      FilterExpression: 'ocr_status = :complete AND attribute_exists(violation_narrative) AND (attribute_not_exists(id_number) OR attribute_not_exists(license_plate_ocr) OR attribute_not_exists(idling_duration_ocr) OR attribute_not_exists(vehicle_type_ocr) OR attribute_not_exists(prior_offense_status) OR attribute_not_exists(name_on_summons_ocr)) AND (is_archived <> :archived OR attribute_not_exists(is_archived))',
       ExpressionAttributeValues: {
         ':complete': 'complete',
         ':archived': true,
@@ -1057,6 +1060,82 @@ async function incrementOCRFailureCount(id, errorReason) {
 }
 
 /**
+ * One-time reset of permanently-failed OCR records (ocr_failure_count >= 3).
+ * Gated by last_ocr_reset on SyncStatus — only runs if never run before or
+ * if last_ocr_reset is cleared manually to re-trigger.
+ */
+async function resetPermanentlyFailedRecords() {
+  try {
+    // Check SyncStatus for last_ocr_reset flag
+    const syncResult = await dynamodb.get({
+      TableName: SYNC_STATUS_TABLE,
+      Key: { id: 'GLOBAL' },
+    }).promise();
+
+    const syncStatus = syncResult.Item;
+    if (syncStatus && syncStatus.last_ocr_reset) {
+      console.log(`OCR failure reset already performed on ${syncStatus.last_ocr_reset}. Skipping.`);
+      return;
+    }
+
+    // Scan for records with ocr_failure_count >= 3
+    const failedRecords = [];
+    let lastEvaluatedKey = null;
+
+    do {
+      const params = {
+        TableName: SUMMONS_TABLE,
+        FilterExpression: 'ocr_failure_count >= :maxFailures AND (is_archived <> :archived OR attribute_not_exists(is_archived))',
+        ExpressionAttributeValues: {
+          ':maxFailures': 3,
+          ':archived': true,
+        },
+      };
+
+      if (lastEvaluatedKey) {
+        params.ExclusiveStartKey = lastEvaluatedKey;
+      }
+
+      const result = await dynamodb.scan(params).promise();
+      failedRecords.push(...(result.Items || []));
+      lastEvaluatedKey = result.LastEvaluatedKey;
+    } while (lastEvaluatedKey);
+
+    console.log(`Found ${failedRecords.length} permanently-failed OCR records (failure_count >= 3)`);
+
+    if (failedRecords.length === 0) {
+      // Still mark as done so we don't scan again
+      await updateSyncStatus({ last_ocr_reset: new Date().toISOString() });
+      return;
+    }
+
+    // Reset failure counts in batches of 25 (DynamoDB batch limit)
+    let resetCount = 0;
+    for (const record of failedRecords) {
+      await dynamodb.update({
+        TableName: SUMMONS_TABLE,
+        Key: { id: record.id },
+        UpdateExpression: 'SET ocr_failure_count = :zero, ocr_status = :pending, updatedAt = :updatedAt REMOVE ocr_failure_reason',
+        ExpressionAttributeValues: {
+          ':zero': 0,
+          ':pending': 'pending',
+          ':updatedAt': new Date().toISOString(),
+        },
+      }).promise();
+      resetCount++;
+    }
+
+    console.log(`Reset ${resetCount} permanently-failed OCR records for retry`);
+
+    // Write the flag so this doesn't run again
+    await updateSyncStatus({ last_ocr_reset: new Date().toISOString() });
+  } catch (error) {
+    console.error('Error resetting permanently-failed OCR records:', error);
+    // Non-fatal — don't block Phase 2
+  }
+}
+
+/**
  * Check if record already has OCR data (safety check)
  */
 function hasExistingOCRData(record) {
@@ -1074,8 +1153,12 @@ function needsOCRHealing(record) {
   const hasNarrative = record.violation_narrative && record.violation_narrative.length > 0;
   const missingIdNumber = !record.id_number;
   const missingLicensePlate = !record.license_plate_ocr;
+  const missingIdlingDuration = !record.idling_duration_ocr;
+  const missingVehicleType = !record.vehicle_type_ocr;
+  const missingPriorOffense = !record.prior_offense_status;
+  const missingNameOnSummons = !record.name_on_summons_ocr;
 
-  return hasNarrative && (missingIdNumber || missingLicensePlate);
+  return hasNarrative && (missingIdNumber || missingLicensePlate || missingIdlingDuration || missingVehicleType || missingPriorOffense || missingNameOnSummons);
 }
 
 /**

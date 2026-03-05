@@ -68,6 +68,8 @@ export const getSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        plate_filter_enabled
+        plate_filter_list
         createdAt
         updatedAt
         __typename
@@ -99,9 +101,16 @@ export const getSummons = /* GraphQL */ `
       evidence_requested_date
       evidence_received
       evidence_received_date
+      evidence_reviewed_date
+      added_to_calendar_date
       attachments
       internal_status
       internal_status_attr
+      evidence_reviewed_attr
+      added_to_calendar_attr
+      evidence_requested_attr
+      evidence_received_attr
+      dep_file_date_attr
       offense_level
       agency_id_number
       last_change_summary
@@ -169,9 +178,16 @@ export const listSummons = /* GraphQL */ `
         evidence_requested_date
         evidence_received
         evidence_received_date
+        evidence_reviewed_date
+        added_to_calendar_date
         attachments
         internal_status
         internal_status_attr
+        evidence_reviewed_attr
+        added_to_calendar_attr
+        evidence_requested_attr
+        evidence_received_attr
+        dep_file_date_attr
         offense_level
         agency_id_number
         last_change_summary
@@ -214,15 +230,26 @@ export const getSyncStatus = /* GraphQL */ `
       sync_in_progress
       phase1_status
       phase1_completed_at
+      phase1_clients_processed
+      phase1_cases_from_api
       phase1_new_records
       phase1_updated_records
       phase1_unchanged_records
+      phase1_flagged_for_ocr
+      phase1_records_archived
+      phase1_error_count
       phase1_errors
       phase2_status
       phase2_completed_at
       phase2_ocr_processed
       phase2_ocr_remaining
       phase2_ocr_failed
+      phase2_ocr_healed
+      phase2_ocr_skipped
+      phase2_excluded_max_failures
+      phase2_excluded_old_hearings
+      phase2_graceful_exit
+      phase2_rate_limit_hits
       ocr_processed_today
       ocr_processing_date
       oath_api_reachable
@@ -248,15 +275,26 @@ export const listSyncStatuses = /* GraphQL */ `
         sync_in_progress
         phase1_status
         phase1_completed_at
+        phase1_clients_processed
+        phase1_cases_from_api
         phase1_new_records
         phase1_updated_records
         phase1_unchanged_records
+        phase1_flagged_for_ocr
+        phase1_records_archived
+        phase1_error_count
         phase1_errors
         phase2_status
         phase2_completed_at
         phase2_ocr_processed
         phase2_ocr_remaining
         phase2_ocr_failed
+        phase2_ocr_healed
+        phase2_ocr_skipped
+        phase2_excluded_max_failures
+        phase2_excluded_old_hearings
+        phase2_graceful_exit
+        phase2_rate_limit_hits
         ocr_processed_today
         ocr_processing_date
         oath_api_reachable
@@ -318,9 +356,16 @@ export const summonsByClientIDAndHearing_date = /* GraphQL */ `
         evidence_requested_date
         evidence_received
         evidence_received_date
+        evidence_reviewed_date
+        added_to_calendar_date
         attachments
         internal_status
         internal_status_attr
+        evidence_reviewed_attr
+        added_to_calendar_attr
+        evidence_requested_attr
+        evidence_received_attr
+        dep_file_date_attr
         offense_level
         agency_id_number
         last_change_summary
@@ -399,9 +444,16 @@ export const summonsBySummonsNumber = /* GraphQL */ `
         evidence_requested_date
         evidence_received
         evidence_received_date
+        evidence_reviewed_date
+        added_to_calendar_date
         attachments
         internal_status
         internal_status_attr
+        evidence_reviewed_attr
+        added_to_calendar_attr
+        evidence_requested_attr
+        evidence_received_attr
+        dep_file_date_attr
         offense_level
         agency_id_number
         last_change_summary
@@ -480,9 +532,16 @@ export const summonsByOcrStatus = /* GraphQL */ `
         evidence_requested_date
         evidence_received
         evidence_received_date
+        evidence_reviewed_date
+        added_to_calendar_date
         attachments
         internal_status
         internal_status_attr
+        evidence_reviewed_attr
+        added_to_calendar_attr
+        evidence_requested_attr
+        evidence_received_attr
+        dep_file_date_attr
         offense_level
         agency_id_number
         last_change_summary
