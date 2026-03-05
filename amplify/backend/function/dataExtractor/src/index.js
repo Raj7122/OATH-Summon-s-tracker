@@ -374,8 +374,9 @@ async function updateSummonsWithExtractedDataAndLog(summonsId, extractedData, ac
     const existingRecord = await fetchExistingRecord(summonsId);
     const existingLog = existingRecord?.activity_log || [];
 
-    // Append the new activity entry
-    const updatedLog = [...existingLog, activityEntry];
+    // Append the new activity entry (capped to prevent DynamoDB 400KB limit)
+    const MAX_LOG_ENTRIES = 100;
+    const updatedLog = [...existingLog, activityEntry].slice(-MAX_LOG_ENTRIES);
 
     // Build update expression dynamically based on available data
     const updateExpressions = [];

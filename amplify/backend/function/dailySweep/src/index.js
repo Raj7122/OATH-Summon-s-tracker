@@ -58,6 +58,9 @@ const NYC_API_URL = 'https://data.cityofnewyork.us/resource/jz4z-kudi.json';
 
 // Priority Queue Configuration
 const MAX_OCR_REQUESTS_PER_DAY = 500;
+
+// Activity log size cap to prevent DynamoDB 400KB item size limit
+const MAX_LOG_ENTRIES = 100;
 const OCR_THROTTLE_MS = 2000; // 2 seconds between requests
 const MAX_OCR_FAILURES = 3; // Max retry attempts before giving up
 const GHOST_GRACE_DAYS = 3; // Days before archiving missing records
@@ -98,11 +101,17 @@ exports.handler = async (event, context) => {
     await updateSyncStatus({
       phase1_status: phase1Results.errors > 0 ? 'partial' : 'success',
       phase1_completed_at: new Date().toISOString(),
+      phase1_clients_processed: phase1Results.clientsProcessed,
+      phase1_cases_from_api: phase1Results.casesFromAPI,
       phase1_new_records: phase1Results.newRecordsCreated,
       phase1_updated_records: phase1Results.recordsUpdated,
       phase1_unchanged_records: phase1Results.recordsSkipped,
+      phase1_flagged_for_ocr: phase1Results.recordsFlaggedForOCR,
+      phase1_records_archived: phase1Results.recordsArchived,
+      phase1_error_count: phase1Results.errors,
       oath_api_reachable: true,
       oath_api_last_check: new Date().toISOString(),
+      oath_api_error: null,  // Clear any stale error from previous failed runs
     });
 
     // ========================================================================
@@ -125,6 +134,12 @@ exports.handler = async (event, context) => {
       phase2_ocr_processed: phase2Results.ocrSuccess,
       phase2_ocr_remaining: phase2Results.pendingRecords - phase2Results.recordsProcessed,
       phase2_ocr_failed: phase2Results.ocrFailed,
+      phase2_ocr_healed: phase2Results.ocrHealed,
+      phase2_ocr_skipped: phase2Results.ocrSkipped,
+      phase2_excluded_max_failures: phase2Results.ocrExcludedMaxFailures,
+      phase2_excluded_old_hearings: phase2Results.ocrExcludedOldHearings,
+      phase2_graceful_exit: phase2Results.gracefulExit,
+      phase2_rate_limit_hits: phase2Results.rateLimitHits,
       ocr_processed_today: ocrCounter.ocr_processed_today + phase2Results.ocrSuccess,
     });
 
@@ -141,6 +156,7 @@ exports.handler = async (event, context) => {
     await updateSyncStatus({
       sync_in_progress: false,
       last_successful_sync: new Date().toISOString(),
+      oath_api_error: null,  // Clear any stale error from previous failed runs
     });
 
     console.log('\n' + '='.repeat(60));
@@ -233,6 +249,29 @@ async function executePhase1MetadataSync() {
   }
   console.log(`Pre-loaded ${existingSummonsMap.size} existing summons for fast lookup`);
 
+  // Step 3c: Trim any oversized activity_log arrays to prevent DynamoDB 400KB limit
+  let trimmedCount = 0;
+  for (const record of allExisting) {
+    if (record.activity_log && record.activity_log.length > MAX_LOG_ENTRIES) {
+      const trimmedLog = record.activity_log.slice(-MAX_LOG_ENTRIES);
+      await dynamodb.update({
+        TableName: SUMMONS_TABLE,
+        Key: { id: record.id },
+        UpdateExpression: 'SET activity_log = :log, updatedAt = :updatedAt',
+        ExpressionAttributeValues: {
+          ':log': trimmedLog,
+          ':updatedAt': syncTime,
+        },
+      }).promise();
+      // Update the cached record so downstream processing uses the trimmed log
+      record.activity_log = trimmedLog;
+      trimmedCount++;
+    }
+  }
+  if (trimmedCount > 0) {
+    console.log(`Trimmed oversized activity_log on ${trimmedCount} records (cap: ${MAX_LOG_ENTRIES})`);
+  }
+
   // Step 4: Process each summons - UPDATE METADATA ONLY
   for (const apiSummons of apiSummonses) {
     try {
@@ -322,9 +361,9 @@ async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime, e
       // Determine if record needs OCR (has no violation_narrative)
       const needsOCR = !existingSummons.violation_narrative && existingSummons.ocr_status !== 'complete';
 
-      // Get existing activity log and append new entries
+      // Get existing activity log and append new entries (capped to prevent DynamoDB 400KB limit)
       const existingLog = existingSummons.activity_log || [];
-      const updatedLog = [...existingLog, ...changeResult.activityEntries];
+      const updatedLog = [...existingLog, ...changeResult.activityEntries].slice(-MAX_LOG_ENTRIES);
 
       await updateSummonsMetadataWithLog(
         existingSummons.id,
@@ -562,7 +601,7 @@ async function detectAndHandleGhostSummons(seenSummonsNumbers, syncTime) {
           description: `Case archived: ${archiveReason} (missing from OATH API for ${GHOST_GRACE_DAYS}+ days)`,
           old_value: dbSummons.status || 'Unknown',
           new_value: 'ARCHIVED',
-        }];
+        }].slice(-MAX_LOG_ENTRIES);
 
         await dynamodb.update({
           TableName: SUMMONS_TABLE,
@@ -1383,7 +1422,8 @@ async function fetchNYCDataForClients(clients) {
         const response = await fetch(url.toString(), { headers });
 
         if (!response.ok) {
-          console.error(`NYC API error for "${searchTerm}" (offset ${offset}): ${response.status}`);
+          const errorBody = await response.text().catch(() => '');
+          console.error(`NYC API error for "${searchTerm}" (offset ${offset}): ${response.status} - ${errorBody}`);
           break;
         }
 
