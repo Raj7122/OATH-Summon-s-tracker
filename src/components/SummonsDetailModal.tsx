@@ -324,13 +324,23 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     return { completed: legacyField };
   };
 
-  // Helper: parse AWSJSON _attr field (may arrive as JSON string or already-parsed object)
+  // Helper: parse AWSJSON _attr field (may arrive as JSON string, double-stringified, or already-parsed object)
   const parseAttr = <T,>(raw: unknown, fallback: T): T => {
     if (!raw) return fallback;
+    // Already an object (Amplify v6 may auto-parse AWSJSON)
+    if (typeof raw === 'object' && raw !== null) return raw as T;
     if (typeof raw === 'string') {
-      try { return JSON.parse(raw); } catch { return fallback; }
+      try {
+        let parsed = JSON.parse(raw);
+        // Handle double-stringified AWSJSON: parse again if result is still a string
+        if (typeof parsed === 'string') {
+          try { parsed = JSON.parse(parsed); } catch { /* use first parse result */ }
+        }
+        if (parsed && typeof parsed === 'object') return parsed as T;
+        return fallback;
+      } catch { return fallback; }
     }
-    return raw as T;
+    return fallback;
   };
 
   // Initialize local state when summons changes
