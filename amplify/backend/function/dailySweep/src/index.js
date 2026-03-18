@@ -51,6 +51,7 @@ const CLIENTS_TABLE = process.env.CLIENTS_TABLE || 'Client-dev';
 const SUMMONS_TABLE = process.env.SUMMONS_TABLE || 'Summons-dev';
 const SYNC_STATUS_TABLE = process.env.SYNC_STATUS_TABLE || 'SyncStatus-dev';
 const NYC_API_TOKEN = process.env.NYC_OPEN_DATA_APP_TOKEN;
+const NYC_API_TOKEN_2 = process.env.NYC_OPEN_DATA_APP_TOKEN_2 || NYC_API_TOKEN; // Second token for parallel rate-limit buckets
 const DATA_EXTRACTOR_FUNCTION = process.env.DATA_EXTRACTOR_FUNCTION;
 
 // NYC Open Data API Configuration
@@ -64,6 +65,9 @@ const MAX_LOG_ENTRIES = 100;
 const OCR_THROTTLE_MS = 2000; // 2 seconds between requests
 const MAX_OCR_FAILURES = 3; // Max retry attempts before giving up
 const GHOST_GRACE_DAYS = 3; // Days before archiving missing records
+const API_CONCURRENCY = 8; // Max parallel NYC API requests (4 per token with dual tokens)
+const PHASE1_TIMEOUT_BUFFER_MS = 120000; // 2 min buffer before Lambda timeout
+const FETCH_TIMEOUT_MS = 30000; // 30s per-request timeout to prevent slow Socrata queries from blocking batches
 
 /**
  * Main handler for the daily sweep Lambda function
@@ -94,7 +98,7 @@ exports.handler = async (event, context) => {
     console.log('PHASE 1: METADATA SYNC (Unlimited Cost)');
     console.log('='.repeat(60));
 
-    const phase1Results = await executePhase1MetadataSync();
+    const phase1Results = await executePhase1MetadataSync(context);
     console.log('\nPhase 1 Complete:', phase1Results);
 
     // Update SyncStatus with Phase 1 results
@@ -113,6 +117,27 @@ exports.handler = async (event, context) => {
       oath_api_last_check: new Date().toISOString(),
       oath_api_error: null,  // Clear any stale error from previous failed runs
     });
+
+    // Check if Phase 1 timed out or we're running low on time — skip Phase 2 if so
+    if (phase1Results.timedOut || context.getRemainingTimeInMillis() < 90000) {
+      console.log('\n⚠️ Phase 1 timed out or insufficient time remaining — skipping Phase 2');
+      console.log(`  Remaining time: ${Math.round(context.getRemainingTimeInMillis() / 1000)}s`);
+      await updateSyncStatus({
+        phase1_status: phase1Results.timedOut ? 'partial_timeout' : (phase1Results.errors > 0 ? 'partial' : 'success'),
+        phase2_status: 'skipped_timeout',
+        phase2_completed_at: new Date().toISOString(),
+        sync_in_progress: false,
+        last_successful_sync: new Date().toISOString(),
+      });
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          message: 'Daily sweep completed (Phase 2 skipped due to timeout)',
+          phase1: phase1Results,
+          phase2: 'skipped_timeout',
+        }),
+      };
+    }
 
     // ========================================================================
     // PHASE 2: PRIORITY QUEUE OCR
@@ -207,7 +232,7 @@ exports.handler = async (event, context) => {
  * - Flags new/incomplete records with ocr_status = 'pending'
  * - Detects "ghost" records missing from API for 3+ days
  */
-async function executePhase1MetadataSync() {
+async function executePhase1MetadataSync(context) {
   const results = {
     clientsProcessed: 0,
     casesFromAPI: 0,
@@ -217,6 +242,7 @@ async function executePhase1MetadataSync() {
     recordsFlaggedForOCR: 0,
     recordsArchived: 0,
     errors: 0,
+    timedOut: false,
   };
 
   const syncTime = new Date().toISOString();
@@ -236,8 +262,8 @@ async function executePhase1MetadataSync() {
   const clientNameMap = buildClientNameMap(clients);
   console.log(`Built name map with ${clientNameMap.size} unique names`);
 
-  // Step 3: Fetch all summonses from NYC API
-  const apiSummonses = await fetchNYCDataForClients(clients);
+  // Step 3: Fetch all summonses from NYC API (parallelized with timeout awareness)
+  const apiSummonses = await fetchNYCDataForClients(clients, context);
   results.casesFromAPI = apiSummonses.length;
   console.log(`Fetched ${apiSummonses.length} summonses from NYC API`);
 
@@ -275,8 +301,16 @@ async function executePhase1MetadataSync() {
     console.log(`Trimmed oversized activity_log on ${trimmedCount} records (cap: ${MAX_LOG_ENTRIES})`);
   }
 
-  // Step 4: Process each summons - UPDATE METADATA ONLY
+  // Step 4: Process each summons - UPDATE METADATA ONLY (with timeout guard)
+  let phase1TimedOut = false;
   for (const apiSummons of apiSummonses) {
+    // Timeout guard: break if less than 60s remaining
+    if (context.getRemainingTimeInMillis() < 60000) {
+      console.warn(`⚠️ Phase 1 timeout guard triggered — ${Math.round(context.getRemainingTimeInMillis() / 1000)}s remaining, stopping processing`);
+      phase1TimedOut = true;
+      break;
+    }
+
     try {
       const ticketNumber = apiSummons.ticket_number;
       seenSummonsNumbers.add(ticketNumber);
@@ -300,11 +334,16 @@ async function executePhase1MetadataSync() {
     }
   }
 
-  // Step 5: Ghost Detection - Find records missing from API
-  console.log('\nRunning Ghost Detection...');
-  const ghostResults = await detectAndHandleGhostSummons(seenSummonsNumbers, syncTime);
-  results.recordsArchived = ghostResults.archived;
-  console.log(`Ghost Detection: ${ghostResults.warnings} warnings, ${ghostResults.archived} archived`);
+  // Step 5: Ghost Detection - skip if timed out (incomplete data would cause false positives)
+  if (phase1TimedOut) {
+    console.log('\nSkipping Ghost Detection — Phase 1 timed out (incomplete API data)');
+    results.timedOut = true;
+  } else {
+    console.log('\nRunning Ghost Detection...');
+    const ghostResults = await detectAndHandleGhostSummons(seenSummonsNumbers, syncTime);
+    results.recordsArchived = ghostResults.archived;
+    console.log(`Ghost Detection: ${ghostResults.warnings} warnings, ${ghostResults.archived} archived`);
+  }
 
   return results;
 }
@@ -345,10 +384,20 @@ async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime, e
     }
   }
 
-  // Check if summons already exists (O(1) Map lookup instead of DB query)
-  const existingSummons = existingSummonsMap
+  // Check if summons already exists (O(1) Map lookup, with DB fallback to prevent duplicates)
+  let existingSummons = existingSummonsMap
     ? existingSummonsMap.get(ticketNumber) || null
-    : await findExistingSummons(ticketNumber);
+    : null;
+
+  // Dedup guard: if the pre-loaded map missed this record (stale/incomplete scan),
+  // do a direct DB query before creating a duplicate. This catches edge cases where
+  // the full-table scan in fetchAllActiveSummons() returned partial results.
+  if (!existingSummons) {
+    existingSummons = await findExistingSummons(ticketNumber);
+    if (existingSummons) {
+      console.log(`⚠ Dedup guard caught existing record for ${ticketNumber} (missed by pre-loaded map)`);
+    }
+  }
 
   // Extract and normalize NYC API data
   const incomingData = extractAPIMetadata(apiSummons);
@@ -1246,7 +1295,7 @@ function normalizeCompanyName(name) {
   return name
     .toLowerCase()
     .trim()
-    .replace(/&/g, ' ')                    // normalize ampersand to space (e.g., "J & M" -> "J  M")
+    .replace(/[&\-]/g, ' ')                 // normalize ampersand and hyphen to space (e.g., "COCA-COLA" -> "COCA COLA")
     .replace(/\s+/g, ' ')                  // collapse multiple spaces
     .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '')
     .trim();
@@ -1439,20 +1488,15 @@ function buildClientNameMap(clients) {
  *   - IDLING violations only (charge_1_code_description or charge_2_code_description contains 'IDLING')
  *   - Hearing date >= 2022-01-01 (per TRD requirements)
  */
-async function fetchNYCDataForClients(clients) {
+async function fetchNYCDataForClients(clients, context) {
   const allSummonses = [];
   const seenTickets = new Set();
-
-  const headers = {
-    'X-App-Token': NYC_API_TOKEN,
-    'Content-Type': 'application/json',
-  };
 
   // Build unique search terms from client names and AKAs
   const searchTerms = new Set();
   clients.forEach(client => {
     const mainName = client.name
-      .replace(/&/g, ' ')                          // strip ampersand for API LIKE matching
+      .replace(/&/g, ' ')                              // strip ampersand for API LIKE matching (keep hyphens — LIKE is literal)
       .replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '')
       .replace(/\s+/g, ' ')
       .trim();
@@ -1461,7 +1505,7 @@ async function fetchNYCDataForClients(clients) {
     if (client.akas && Array.isArray(client.akas)) {
       client.akas.forEach(aka => {
         const akaMain = aka
-          .replace(/&/g, ' ')                      // strip ampersand for API LIKE matching
+          .replace(/&/g, ' ')                          // strip ampersand for API LIKE matching (keep hyphens — LIKE is literal)
           .replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '')
           .replace(/\s+/g, ' ')
           .trim();
@@ -1470,62 +1514,111 @@ async function fetchNYCDataForClients(clients) {
     }
   });
 
-  console.log(`Searching for ${searchTerms.size} unique client name patterns...`);
+  console.log(`Searching for ${searchTerms.size} unique client name patterns (concurrency: ${API_CONCURRENCY})...`);
   console.log('FILTERS: IDLING violations only, hearing_date >= 2022-01-01');
 
   // Pagination constants: fetch 500 per page, cap at 5000 per search term
   const PAGE_SIZE = 500;
   const MAX_PER_TERM = 5000;
 
-  for (const searchTerm of searchTerms) {
-    try {
-      const escapedTerm = searchTerm.replace(/'/g, "''");
+  // Dual-token array for round-robin distribution across Socrata rate-limit buckets
+  const tokens = [NYC_API_TOKEN, NYC_API_TOKEN_2];
 
-      // CRITICAL FILTERS:
-      // 1. Match client name in respondent_last_name
-      // 2. IDLING violations only (check both charge fields)
-      // 3. Hearing date >= 2022-01-01
-      const whereClause = [
-        `upper(respondent_last_name) like '%${escapedTerm}%'`,
-        `(upper(charge_1_code_description) like '%IDLING%' OR upper(charge_2_code_description) like '%IDLING%')`,
-        `hearing_date >= '2022-01-01T00:00:00'`
-      ].join(' AND ');
+  // Inner function to fetch all pages for a single search term
+  // Accepts apiToken to distribute requests across independent rate-limit buckets
+  async function fetchForTerm(searchTerm, apiToken) {
+    const termSummonses = [];
+    const escapedTerm = searchTerm.replace(/'/g, "''");
 
-      // Paginate through all results for this search term
-      let offset = 0;
-      let pageData;
-      let termTotal = 0;
+    const termHeaders = {
+      'X-App-Token': apiToken,
+      'Content-Type': 'application/json',
+    };
 
-      do {
-        const url = new URL(NYC_API_URL);
-        url.searchParams.append('$limit', PAGE_SIZE);
-        url.searchParams.append('$offset', offset);
-        url.searchParams.append('$where', whereClause);
+    // CRITICAL FILTERS:
+    // 1. Match client name in respondent_last_name
+    // 2. IDLING violations only (check both charge fields)
+    // 3. Hearing date >= 2022-01-01
+    const whereClause = [
+      `upper(respondent_last_name) like '%${escapedTerm}%'`,
+      `(upper(charge_1_code_description) like '%IDLING%' OR upper(charge_2_code_description) like '%IDLING%')`,
+      `hearing_date >= '2022-01-01T00:00:00'`
+    ].join(' AND ');
 
-        const response = await fetch(url.toString(), { headers });
+    let offset = 0;
+    let pageData;
+    let termTotal = 0;
 
-        if (!response.ok) {
-          const errorBody = await response.text().catch(() => '');
-          console.error(`NYC API error for "${searchTerm}" (offset ${offset}): ${response.status} - ${errorBody}`);
-          break;
+    do {
+      const url = new URL(NYC_API_URL);
+      url.searchParams.append('$limit', PAGE_SIZE);
+      url.searchParams.append('$offset', offset);
+      url.searchParams.append('$where', whereClause);
+
+      // AbortController enforces per-request timeout so one slow Socrata query
+      // can't block the entire batch for minutes
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+      let response;
+      try {
+        response = await fetch(url.toString(), { headers: termHeaders, signal: controller.signal });
+      } catch (err) {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {
+          console.warn(`  ⏱️ Timeout (${FETCH_TIMEOUT_MS / 1000}s) for "${searchTerm}" (offset ${offset}) — skipping remaining pages`);
+        } else {
+          console.error(`  Fetch error for "${searchTerm}" (offset ${offset}):`, err.message);
         }
+        break;
+      }
+      clearTimeout(timeoutId);
 
-        pageData = await response.json();
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => '');
+        console.error(`NYC API error for "${searchTerm}" (offset ${offset}): ${response.status} - ${errorBody}`);
+        break;
+      }
 
-        for (const summons of pageData) {
+      pageData = await response.json();
+      termSummonses.push(...pageData);
+      termTotal += pageData.length;
+      offset += pageData.length;
+    } while (pageData.length === PAGE_SIZE && offset < MAX_PER_TERM);
+
+    console.log(`  Found ${termTotal} IDLING (2022+) for "${searchTerm}"${termTotal >= MAX_PER_TERM ? ' (capped)' : ''}`);
+    return termSummonses;
+  }
+
+  // Process search terms in parallel chunks of API_CONCURRENCY
+  // Round-robin token assignment: 4 requests per token per batch
+  const termsArray = Array.from(searchTerms);
+  for (let i = 0; i < termsArray.length; i += API_CONCURRENCY) {
+    // Timeout guard: stop fetching if running low on time
+    if (context.getRemainingTimeInMillis() < PHASE1_TIMEOUT_BUFFER_MS) {
+      console.warn(`⚠️ fetchNYCDataForClients timeout guard — ${Math.round(context.getRemainingTimeInMillis() / 1000)}s remaining, processed ${i}/${termsArray.length} terms`);
+      break;
+    }
+
+    const chunk = termsArray.slice(i, i + API_CONCURRENCY);
+    const batchNum = Math.floor(i / API_CONCURRENCY) + 1;
+    const totalBatches = Math.ceil(termsArray.length / API_CONCURRENCY);
+    console.log(`\n  Batch ${batchNum}/${totalBatches}: fetching ${chunk.length} terms in parallel...`);
+
+    const settled = await Promise.allSettled(chunk.map((term, idx) => fetchForTerm(term, tokens[idx % tokens.length])));
+
+    // Dedup results from this batch into the global collections
+    for (const result of settled) {
+      if (result.status === 'fulfilled') {
+        for (const summons of result.value) {
           if (!seenTickets.has(summons.ticket_number)) {
             seenTickets.add(summons.ticket_number);
             allSummonses.push(summons);
           }
         }
-
-        termTotal += pageData.length;
-        offset += pageData.length;
-      } while (pageData.length === PAGE_SIZE && offset < MAX_PER_TERM);
-
-      console.log(`  Found ${termTotal} IDLING (2022+) for "${searchTerm}"${termTotal >= MAX_PER_TERM ? ' (capped)' : ''}`);
-    } catch (error) {
-      console.error(`Error querying for "${searchTerm}":`, error.message);
+      } else {
+        console.error(`  Batch term failed:`, result.reason?.message || result.reason);
+      }
     }
   }
 

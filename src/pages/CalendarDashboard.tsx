@@ -66,6 +66,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
 import DownloadIcon from '@mui/icons-material/Download';
+import DescriptionIcon from '@mui/icons-material/Description';
 import DateRangeIcon from '@mui/icons-material/DateRange';
 import { generateClient } from 'aws-amplify/api';
 
@@ -89,6 +90,9 @@ import { horizonColors } from '../theme';
 
 // CSV Export
 import { generateCSV, downloadCSV } from '../lib/csvExport';
+
+// Notice of Appearance DOCX
+import { generateNoticeOfAppearance } from '../utils/noticeOfAppearance';
 
 // Week utilities
 import { getISOWeekRange } from '../utils/weekFilters';
@@ -747,6 +751,54 @@ const CalendarDashboard: React.FC = () => {
   }, [selectedWeek, weeklyFilteredSummonses]);
 
   /**
+   * Generate Notice of Appearance DOCX for the selected single date.
+   */
+  const handleGenerateNoticeDay = useCallback(async () => {
+    if (!selectedDate || filteredByDate.length === 0) {
+      setSnackbar({ open: true, message: 'No hearings for this date.', severity: 'error' });
+      return;
+    }
+    const dateLabel = selectedDate.format('dddd, MMMM D, YYYY');
+    try {
+      await generateNoticeOfAppearance(filteredByDate, dateLabel);
+      setSnackbar({ open: true, message: `Notice of Appearance generated for ${dateLabel}.`, severity: 'success' });
+    } catch (err) {
+      console.error('Notice of Appearance generation failed:', err);
+      setSnackbar({ open: true, message: 'Failed to generate Notice of Appearance.', severity: 'error' });
+    }
+  }, [selectedDate, filteredByDate]);
+
+  /**
+   * Generate Notice of Appearance DOCX(s) for the selected week — one per hearing day.
+   */
+  const handleGenerateNoticeWeek = useCallback(async () => {
+    if (!selectedWeek || weeklyFilteredSummonses.length === 0) {
+      setSnackbar({ open: true, message: 'No hearings to generate notices for this week.', severity: 'error' });
+      return;
+    }
+    // Group summonses by hearing date (YYYY-MM-DD)
+    const byDate = new Map<string, Summons[]>();
+    for (const s of weeklyFilteredSummonses) {
+      const key = s.hearing_date ? dayjs.utc(s.hearing_date).format('YYYY-MM-DD') : 'unknown';
+      if (!byDate.has(key)) byDate.set(key, []);
+      byDate.get(key)!.push(s);
+    }
+    try {
+      let count = 0;
+      for (const [dateKey, daySummonses] of byDate) {
+        if (dateKey === 'unknown') continue;
+        const dateLabel = dayjs.utc(dateKey).format('dddd, MMMM D, YYYY');
+        await generateNoticeOfAppearance(daySummonses, dateLabel);
+        count++;
+      }
+      setSnackbar({ open: true, message: `Generated ${count} Notice${count !== 1 ? 's' : ''} of Appearance.`, severity: 'success' });
+    } catch (err) {
+      console.error('Notice of Appearance generation failed:', err);
+      setSnackbar({ open: true, message: 'Failed to generate Notice of Appearance.', severity: 'error' });
+    }
+  }, [selectedWeek, weeklyFilteredSummonses]);
+
+  /**
    * Close snackbar
    */
   const handleSnackbarClose = () => {
@@ -1203,14 +1255,33 @@ const CalendarDashboard: React.FC = () => {
                       '& .MuiAlert-message': { width: '100%' },
                     }}
                     action={
-                      <Button
-                        color="inherit"
-                        size="small"
-                        onClick={() => setSelectedDate(null)}
-                        sx={{ fontWeight: 600 }}
-                      >
-                        Show All
-                      </Button>
+                      <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="secondary"
+                          startIcon={<DescriptionIcon />}
+                          onClick={handleGenerateNoticeDay}
+                          sx={{
+                            height: 32,
+                            textTransform: 'none',
+                            fontWeight: 600,
+                            borderRadius: 2,
+                            boxShadow: 'none',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Notice of Appearance
+                        </Button>
+                        <Button
+                          color="inherit"
+                          size="small"
+                          onClick={() => setSelectedDate(null)}
+                          sx={{ fontWeight: 600 }}
+                        >
+                          Show All
+                        </Button>
+                      </Box>
                     }
                   >
                     <Typography variant="body2">
@@ -1268,6 +1339,22 @@ const CalendarDashboard: React.FC = () => {
                         }}
                       >
                         Export Week
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="secondary"
+                        startIcon={<DescriptionIcon />}
+                        onClick={handleGenerateNoticeWeek}
+                        sx={{
+                          height: 32,
+                          textTransform: 'none',
+                          fontWeight: 600,
+                          borderRadius: 2,
+                          boxShadow: 'none',
+                        }}
+                      >
+                        Notice of Appearance
                       </Button>
                       <Button
                         color="inherit"
