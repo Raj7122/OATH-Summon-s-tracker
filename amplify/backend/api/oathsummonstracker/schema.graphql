@@ -11,6 +11,8 @@ type Client @model @auth(rules: [{ allow: private }]) {
   contact_email1: String
   contact_phone2: String
   contact_email2: String
+  plate_filter_enabled: Boolean @default(value: "false")
+  plate_filter_list: [String]
   summonses: [Summons] @hasMany(indexName: "byClient", fields: ["id"])
 }
 
@@ -60,12 +62,24 @@ type Summons @model @auth(rules: [{ allow: private }]) {
   evidence_requested: Boolean @default(value: "false")
   evidence_requested_date: AWSDateTime
   evidence_received: Boolean @default(value: "false")
+  evidence_received_date: AWSDateTime
+  evidence_reviewed_date: AWSDateTime
+  added_to_calendar_date: AWSDateTime
+
+  # File attachments stored as AWSJSON array
+  # Structure: [{ id, key, type, name, uploadedBy, uploadedById, uploadedAt, size }]
+  attachments: AWSJSON
 
   # TRD v1.8: Client Feedback Updates
   internal_status: String @default(value: "New")
   # Internal status with attribution (who changed it and when)
   # Structure: { value: string, by: string, userId: string, date: string }
   internal_status_attr: AWSJSON
+  evidence_reviewed_attr: AWSJSON
+  added_to_calendar_attr: AWSJSON
+  evidence_requested_attr: AWSJSON
+  evidence_received_attr: AWSJSON
+  dep_file_date_attr: AWSJSON
   offense_level: String
   agency_id_number: String
 
@@ -103,6 +117,10 @@ type Summons @model @auth(rules: [{ allow: private }]) {
   archived_at: AWSDateTime
   archived_reason: String
 
+  # Invoice Tracking
+  is_invoiced: Boolean @default(value: "false")
+  invoice_date: AWSDateTime
+
   # Activity Log (Summons Lifecycle Audit)
   # Stores history of all changes detected during daily sweeps
   # Structure: [{ date, type, description, old_value, new_value }]
@@ -123,9 +141,14 @@ type SyncStatus @model @auth(rules: [{ allow: private }]) {
   # Phase 1 Results (Metadata Sweep)
   phase1_status: String  # 'success' | 'partial' | 'failed'
   phase1_completed_at: AWSDateTime
+  phase1_clients_processed: Int
+  phase1_cases_from_api: Int
   phase1_new_records: Int
   phase1_updated_records: Int
   phase1_unchanged_records: Int
+  phase1_flagged_for_ocr: Int
+  phase1_records_archived: Int
+  phase1_error_count: Int
   phase1_errors: [String]
 
   # Phase 2 Results (OCR Processing)
@@ -134,6 +157,12 @@ type SyncStatus @model @auth(rules: [{ allow: private }]) {
   phase2_ocr_processed: Int
   phase2_ocr_remaining: Int
   phase2_ocr_failed: Int
+  phase2_ocr_healed: Int
+  phase2_ocr_skipped: Int
+  phase2_excluded_max_failures: Int
+  phase2_excluded_old_hearings: Int
+  phase2_graceful_exit: Boolean
+  phase2_rate_limit_hits: Int
 
   # Daily OCR Counter (resets each day)
   ocr_processed_today: Int @default(value: "0")

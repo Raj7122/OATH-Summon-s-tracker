@@ -1,0 +1,15 @@
+{
+  "version": "1",
+  "serviceConfiguration": {
+    "serviceName": "S3",
+    "bucketName": "oath-evidence-files",
+    "permissions": {
+      "auth": [
+        "create",
+        "read",
+        "update",
+        "delete"
+      ]
+    }
+  }
+}

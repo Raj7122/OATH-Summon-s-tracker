@@ -29,8 +29,10 @@ dayjs.extend(utc);
 import {
   DataGrid,
   GridColDef,
+  GridColumnVisibilityModel,
   GridRenderCellParams,
   GridRowParams,
+  GridToolbar,
 } from '@mui/x-data-grid';
 import {
   Box,
@@ -53,11 +55,28 @@ import UpdateIcon from '@mui/icons-material/Update';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import SearchIcon from '@mui/icons-material/Search';
 import CloseIcon from '@mui/icons-material/Close';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import SummonsDetailModal from './SummonsDetailModal';
 import { dataGridPremiumStyles } from '../theme';
 
 // Import shared types
 import { Summons, isNewRecord, isUpdatedRecord, isFreshSummons, getStatusColor } from '../types/summons';
+
+// localStorage key for persisting column visibility preferences
+const COLUMN_VISIBILITY_KEY = 'oath-simple-table-column-visibility';
+
+// Columns hidden by default — users can toggle them on via "Manage columns"
+const DEFAULT_HIDDEN_COLUMNS: GridColumnVisibilityModel = {
+  summons_number: false,
+  amount_due: false,
+  base_fine: false,
+  lag_days: false,
+  license_plate: false,
+  violation_location: false,
+  code_description: false,
+  internal_status: false,
+  offense_level: false,
+};
 
 /**
  * Props for SimpleSummonsTable component
@@ -66,7 +85,7 @@ interface SimpleSummonsTableProps {
   /** Array of summons to display */
   summonses: Summons[];
   /** Callback when a summons field is updated */
-  onUpdate: (id: string, field: string, value: unknown) => void;
+  onUpdate: (id: string, field: string, value: unknown, extraFields?: Record<string, unknown>) => void;
   /** Optional: pre-selected filter from parent */
   activeFilter?: 'all' | 'updated' | 'new';
   /** Optional: callback when filter changes */
@@ -97,6 +116,20 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
+  // Persist column visibility preferences in localStorage
+  const [columnVisibilityModel, setColumnVisibilityModel] = useState<GridColumnVisibilityModel>(() => {
+    try {
+      const saved = localStorage.getItem(COLUMN_VISIBILITY_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch { /* ignore corrupted localStorage */ }
+    return DEFAULT_HIDDEN_COLUMNS;
+  });
+
+  const handleColumnVisibilityChange = (newModel: GridColumnVisibilityModel) => {
+    setColumnVisibilityModel(newModel);
+    localStorage.setItem(COLUMN_VISIBILITY_KEY, JSON.stringify(newModel));
+  };
+
   // Local filter state (if not controlled externally)
   const [localFilter, setLocalFilter] = useState<ActivityFilter>('all');
   const activityFilter = externalFilter ?? localFilter;
@@ -168,8 +201,8 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
   /**
    * Handle update from modal
    */
-  const handleModalUpdate = (id: string, field: string, value: unknown) => {
-    onUpdate(id, field, value);
+  const handleModalUpdate = (id: string, field: string, value: unknown, extraFields?: Record<string, unknown>) => {
+    onUpdate(id, field, value, extraFields);
   };
   
   /**
@@ -180,14 +213,44 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
     const summons = params.row as Summons;
     const isNew = isNewRecord(summons);
     const isUpdated = isUpdatedRecord(summons);
-    
+
+    // Check if summons has attachments
+    // AWSJSON fields may be stored as JSON strings, so parse before checking length
+    let parsedAttachments: Array<unknown> = [];
+    if (summons.attachments) {
+      if (typeof summons.attachments === 'string') {
+        try {
+          parsedAttachments = JSON.parse(summons.attachments);
+        } catch {
+          parsedAttachments = [];
+        }
+      } else if (Array.isArray(summons.attachments)) {
+        parsedAttachments = summons.attachments;
+      }
+    }
+    const hasAttachments = parsedAttachments.length > 0;
+    const attachmentCount = parsedAttachments.length;
+
     // Build tooltip content for UPDATED badge
     const changeTooltip = summons.last_change_summary
       ? `Change: ${summons.last_change_summary}`
       : 'Record was recently updated';
-    
+
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+        {/* Attachment Indicator */}
+        {hasAttachments && (
+          <Tooltip title={`${attachmentCount} file${attachmentCount > 1 ? 's' : ''} attached`} arrow placement="top">
+            <AttachFileIcon
+              sx={{
+                fontSize: 14,
+                color: 'text.secondary',
+                transform: 'rotate(45deg)',
+              }}
+            />
+          </Tooltip>
+        )}
+
         {/* Activity Badge - NEW */}
         {isNew && (
           <Chip
@@ -324,6 +387,71 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
         if (!parsed.isValid()) return '—';
         return parsed.format(isMobile ? 'MM/DD' : 'MMM D, YYYY');
       },
+    },
+    // Additional columns — hidden by default, togglable via "Manage columns"
+    {
+      field: 'summons_number',
+      headerName: 'Summons #',
+      width: 140,
+      sortable: true,
+    },
+    {
+      field: 'amount_due',
+      headerName: 'Amount Due',
+      width: 120,
+      sortable: true,
+      renderCell: (params: GridRenderCellParams) => {
+        const val = params.value;
+        if (val == null) return '—';
+        return `$${Number(val).toFixed(2)}`;
+      },
+    },
+    {
+      field: 'base_fine',
+      headerName: 'Base Fine',
+      width: 110,
+      sortable: true,
+      renderCell: (params: GridRenderCellParams) => {
+        const val = params.value;
+        if (val == null) return '—';
+        return `$${Number(val).toFixed(2)}`;
+      },
+    },
+    {
+      field: 'lag_days',
+      headerName: 'Lag Days',
+      width: 100,
+      sortable: true,
+    },
+    {
+      field: 'license_plate',
+      headerName: 'License Plate',
+      width: 120,
+      sortable: true,
+    },
+    {
+      field: 'violation_location',
+      headerName: 'Location',
+      width: 180,
+      sortable: true,
+    },
+    {
+      field: 'code_description',
+      headerName: 'Violation Type',
+      width: 140,
+      sortable: true,
+    },
+    {
+      field: 'internal_status',
+      headerName: 'Internal Status',
+      width: 140,
+      sortable: true,
+    },
+    {
+      field: 'offense_level',
+      headerName: 'Offense Level',
+      width: 120,
+      sortable: true,
     },
     {
       field: 'actions',
@@ -548,6 +676,8 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
         rows={filteredSummonses}
         columns={columns}
         pageSizeOptions={[10, 25, 50]}
+        columnVisibilityModel={columnVisibilityModel}
+        onColumnVisibilityModelChange={handleColumnVisibilityChange}
         initialState={{
           pagination: {
             paginationModel: { pageSize: 25 },
@@ -556,12 +686,15 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
             sortModel: [{ field: 'hearing_date', sort: 'desc' }],
           },
         }}
+        slots={{ toolbar: GridToolbar }}
+        slotProps={{
+          toolbar: { showQuickFilter: false },
+        }}
         onRowClick={handleRowClick}
         getRowClassName={(params: GridRowParams) => {
           return isFreshSummons(params.row) ? 'fresh-row' : '';
         }}
         disableRowSelectionOnClick
-        disableColumnMenu={isMobile}
         autoHeight
         sx={{
           ...dataGridPremiumStyles,
@@ -605,9 +738,9 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
           '& .fresh-row:hover': {
             backgroundColor: (theme) => alpha(theme.palette.info.main, 0.12),
           },
-          // Ensure no horizontal scroll
+          // Allow horizontal scroll when extra columns are visible
           '& .MuiDataGrid-virtualScroller': {
-            overflowX: 'hidden',
+            overflowX: 'auto',
           },
         }}
       />

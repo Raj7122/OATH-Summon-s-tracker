@@ -1,18 +1,23 @@
-import { AppBar, Toolbar, Typography, Button, Box, IconButton, Menu, MenuItem, Divider } from '@mui/material';
+import { AppBar, Toolbar, Typography, Button, Box, IconButton, Menu, MenuItem, Divider, Badge } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useInvoice } from '../contexts/InvoiceContext';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import MenuIcon from '@mui/icons-material/Menu';
 import GavelIcon from '@mui/icons-material/Gavel';
+import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import SyncStatusBadge from './SyncStatusBadge';
 
 const Header = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { signOut, user } = useAuth();
+  const { getCartCount } = useInvoice();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [mobileMenuAnchor, setMobileMenuAnchor] = useState<null | HTMLElement>(null);
+
+  const cartCount = getCartCount();
 
   const handleAccountMenu = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -156,6 +161,43 @@ const Header = () => {
           >
             Clients
           </Button>
+          <Button
+            onClick={() => handleNavigate('/invoice-builder')}
+            sx={{
+              fontWeight: 600,
+              color: '#FFFFFF',
+              backgroundColor: isActive('/invoice-builder')
+                ? 'rgba(255, 255, 255, 0.18)'
+                : 'transparent',
+              borderRadius: 2,
+              px: 2.5,
+              py: 1,
+              textTransform: 'none',
+              fontSize: '0.95rem',
+              '&:hover': {
+                backgroundColor: 'rgba(255, 255, 255, 0.25)',
+              },
+            }}
+            startIcon={
+              <Badge
+                badgeContent={cartCount}
+                color="error"
+                sx={{
+                  '& .MuiBadge-badge': {
+                    right: -3,
+                    top: 3,
+                    fontSize: '0.7rem',
+                    minWidth: 18,
+                    height: 18,
+                  },
+                }}
+              >
+                <ShoppingCartIcon sx={{ fontSize: 20 }} />
+              </Badge>
+            }
+          >
+            Invoice
+          </Button>
         </Box>
 
         {/* Mobile Navigation */}
@@ -174,6 +216,16 @@ const Header = () => {
           >
             <MenuItem onClick={() => handleNavigate('/dashboard')}>Dashboard</MenuItem>
             <MenuItem onClick={() => handleNavigate('/clients')}>Clients</MenuItem>
+            <MenuItem onClick={() => handleNavigate('/invoice-builder')}>
+              <Badge
+                badgeContent={cartCount}
+                color="error"
+                sx={{ mr: 1 }}
+              >
+                <ShoppingCartIcon sx={{ fontSize: 20 }} />
+              </Badge>
+              Invoice {cartCount > 0 && `(${cartCount})`}
+            </MenuItem>
           </Menu>
         </Box>
 

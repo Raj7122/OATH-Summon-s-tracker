@@ -31,8 +31,13 @@ import PaymentIcon from '@mui/icons-material/Payment';
 import EditIcon from '@mui/icons-material/Edit';
 import DocumentScannerIcon from '@mui/icons-material/DocumentScanner';
 import ArchiveIcon from '@mui/icons-material/Archive';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
+import FilterAltIcon from '@mui/icons-material/FilterAlt';
 import { generateClient } from 'aws-amplify/api';
 import { listSummons } from '../graphql/queries';
+import { listClientsWithPlateFilter } from '../graphql/customQueries';
+import { Client } from '../types/summons';
+import { applyPlateFilters } from '../lib/plateFilter';
 import SummonsTable from '../components/SummonsTable';
 import DashboardSummary from '../components/DashboardSummary';
 
@@ -41,7 +46,7 @@ const client = generateClient();
 // Activity Log Entry for Summons Lifecycle Audit
 interface ActivityLogEntry {
   date: string;
-  type: 'CREATED' | 'STATUS_CHANGE' | 'RESCHEDULE' | 'RESULT_CHANGE' | 'AMOUNT_CHANGE' | 'PAYMENT' | 'AMENDMENT' | 'OCR_COMPLETE' | 'ARCHIVED';
+  type: 'CREATED' | 'STATUS_CHANGE' | 'RESCHEDULE' | 'RESULT_CHANGE' | 'AMOUNT_CHANGE' | 'PAYMENT' | 'AMENDMENT' | 'OCR_COMPLETE' | 'ARCHIVED' | 'EVIDENCE_UPLOADED';
   description: string;
   old_value: string | null;
   new_value: string | null;
@@ -93,6 +98,9 @@ interface Summons {
   last_change_at?: string;
   // Activity Log (Summons Lifecycle Audit)
   activity_log?: ActivityLogEntry[];
+  // File attachments (AWSJSON - can be string or array)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  attachments?: any;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -132,9 +140,9 @@ function getBusinessDays(startDate: Date, endDate: Date): number {
 type ActivityFilter = 'updated' | 'new' | null;
 
 /**
- * Check if a summons is a new record (created within last 72 hours)
+ * Check if a summons is a new record (created within last 1 week / 168 hours)
  *
- * A record is "NEW" if it was discovered/created within the last 72 hours.
+ * A record is "NEW" if it was discovered/created within the last 168 hours (1 week).
  * This indicates the daily sweep found a new summons from the NYC API.
  *
  * Note: We only check createdAt, not updatedAt, because the daily sweep
@@ -147,8 +155,8 @@ function isNewRecord(summons: Summons): boolean {
   const now = new Date();
   const hoursSinceCreation = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
 
-  // NEW: created within last 72 hours (discovered by daily sweep recently)
-  return hoursSinceCreation <= 72;
+  // NEW: created within last 168 hours / 1 week (discovered by daily sweep recently)
+  return hoursSinceCreation <= 168;
 }
 
 /**
@@ -166,8 +174,8 @@ function isUpdatedRecord(summons: Summons): boolean {
   const now = new Date();
   const hoursSinceChange = (now.getTime() - lastChangeDate.getTime()) / (1000 * 60 * 60);
 
-  // Show UPDATED badge if daily sweep detected changes within last 72 hours
-  return hoursSinceChange <= 72;
+  // Show UPDATED badge if daily sweep detected changes within last 168 hours (1 week)
+  return hoursSinceChange <= 168;
 }
 
 /**
@@ -193,17 +201,23 @@ function getActivityIcon(type: ActivityLogEntry['type']) {
       return <DocumentScannerIcon sx={{ color: '#00BCD4' }} />;
     case 'ARCHIVED':
       return <ArchiveIcon sx={{ color: '#757575' }} />;
+    case 'EVIDENCE_UPLOADED':
+      return <AttachFileIcon sx={{ color: '#9C27B0' }} />; // Purple
     default:
       return <HistoryIcon />;
   }
 }
 
+// Audit trail filter type options
+type AuditTrailFilterType = ActivityLogEntry['type'] | null;
+
 const Dashboard = () => {
   const [summonses, setSummonses] = useState<Summons[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending' | null>(null);
+  const [activeFilter, setActiveFilter] = useState<'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending' | 'has_evidence' | null>(null);
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>(null);
   const [auditTrailOpen, setAuditTrailOpen] = useState(false);
+  const [auditTrailFilter, setAuditTrailFilter] = useState<AuditTrailFilterType>(null);
 
   useEffect(() => {
     loadSummonses();
@@ -212,6 +226,7 @@ const Dashboard = () => {
   /**
    * Get all activity log entries across all summonses, sorted by date (most recent first)
    * This provides a comprehensive audit trail of all NYC API changes detected by daily sweep
+   * Optionally filtered by activity type
    */
   const getAllActivityLogs = (): Array<ActivityLogEntry & { summons_number: string; respondent_name: string }> => {
     const allLogs: Array<ActivityLogEntry & { summons_number: string; respondent_name: string }> = [];
@@ -231,6 +246,11 @@ const Dashboard = () => {
     // Sort by date, most recent first
     allLogs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
+    // Apply type filter if set
+    if (auditTrailFilter) {
+      return allLogs.filter(log => log.type === auditTrailFilter);
+    }
+
     return allLogs;
   };
 
@@ -248,15 +268,33 @@ const Dashboard = () => {
 
       // Paginate through ALL summonses
       while (fetchCount < MAX_FETCHES) {
+        console.log(`Fetching summonses batch ${fetchCount + 1}...`);
         const result = await client.graphql({
           query: listSummons,
           variables: {
             limit: 1000, // Fetch in large batches for efficiency
             nextToken: currentToken,
           },
-        }) as { data: { listSummons: { items: Summons[]; nextToken: string | null } } };
+        }) as {
+          data?: { listSummons: { items: Summons[]; nextToken: string | null } };
+          errors?: Array<{ message: string; path?: string[] }>;
+        };
 
-        const items = result.data.listSummons.items;
+        // Log any errors but continue if we have data (partial success)
+        if (result.errors && result.errors.length > 0) {
+          console.warn(`GraphQL returned ${result.errors.length} errors (likely invalid DateTime fields in some records):`);
+          result.errors.forEach((err, i) => {
+            console.warn(`  [${i}] ${err.message}`);
+          });
+        }
+
+        // Check if we have data (even with errors, AppSync returns valid items)
+        if (!result.data?.listSummons) {
+          console.error('No data returned from GraphQL query');
+          break;
+        }
+
+        const items = result.data.listSummons.items || [];
         currentToken = result.data.listSummons.nextToken;
 
         allSummonses = [...allSummonses, ...items];
@@ -270,16 +308,46 @@ const Dashboard = () => {
       }
 
       console.log('Loaded all summonses:', allSummonses.length);
-      setSummonses(allSummonses);
-    } catch (error) {
+
+      // Apply plate filtering (graceful degradation if client fetch fails)
+      let finalSummonses = allSummonses;
+      try {
+        let allClients: Client[] = [];
+        let clientNextToken: string | null = null;
+        do {
+          const clientResult = await client.graphql({
+            query: listClientsWithPlateFilter,
+            variables: { limit: 100, nextToken: clientNextToken },
+          }) as { data: { listClients: { items: Client[]; nextToken: string | null } } };
+          allClients = [...allClients, ...clientResult.data.listClients.items];
+          clientNextToken = clientResult.data.listClients.nextToken;
+        } while (clientNextToken);
+        finalSummonses = applyPlateFilters(allSummonses, allClients);
+      } catch (plateError) {
+        console.warn('Plate filter skipped (client fetch failed):', plateError);
+      }
+      setSummonses(finalSummonses);
+    } catch (error: unknown) {
       console.error('Error loading summonses:', error);
       // Log detailed error information for debugging
       if (error instanceof Error) {
         console.error('Error message:', error.message);
         console.error('Error stack:', error.stack);
       }
-      // Log the full error object
-      console.error('Full error object:', JSON.stringify(error, null, 2));
+      // Check for GraphQL-specific errors
+      const graphqlError = error as { errors?: Array<{ message: string; errorType?: string; path?: string[] }> };
+      if (graphqlError.errors && Array.isArray(graphqlError.errors)) {
+        console.error('GraphQL Errors:');
+        graphqlError.errors.forEach((err, i) => {
+          console.error(`  [${i}] Type: ${err.errorType}, Message: ${err.message}, Path: ${err.path?.join('.')}`);
+        });
+      }
+      // Try to log full error with fallback
+      try {
+        console.error('Full error object:', JSON.stringify(error, null, 2));
+      } catch {
+        console.error('Could not stringify error. Keys:', Object.keys(error as object));
+      }
     } finally {
       setLoading(false);
     }
@@ -291,9 +359,9 @@ const Dashboard = () => {
 
   /**
    * Handle deadline card click - toggle filter on/off
-   * @param filter - The filter type ('critical' | 'approaching' | 'hearing_complete' | 'evidence_pending')
+   * @param filter - The filter type ('critical' | 'approaching' | 'hearing_complete' | 'evidence_pending' | 'has_evidence')
    */
-  const handleFilterClick = (filter: 'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending') => {
+  const handleFilterClick = (filter: 'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending' | 'has_evidence') => {
     // Toggle: if clicking the same filter, turn it off; otherwise, switch to new filter
     const newFilter = activeFilter === filter ? null : filter;
     console.log('Filter clicked:', filter, 'Current:', activeFilter, 'New:', newFilter);
@@ -393,6 +461,32 @@ const Dashboard = () => {
       return filtered;
     }
 
+    if (activeFilter === 'has_evidence') {
+      // Summonses with file attachments, sorted by hearing date (soonest first)
+      const filtered = summonses.filter((summons) => {
+        if (!summons.attachments) return false;
+        let parsed: unknown[] = [];
+        if (typeof summons.attachments === 'string') {
+          try {
+            parsed = JSON.parse(summons.attachments);
+          } catch {
+            return false;
+          }
+        } else if (Array.isArray(summons.attachments)) {
+          parsed = summons.attachments;
+        }
+        return parsed.length > 0;
+      });
+      // Sort by hearing date (soonest first), null dates at end
+      filtered.sort((a, b) => {
+        if (!a.hearing_date) return 1;
+        if (!b.hearing_date) return -1;
+        return new Date(a.hearing_date).getTime() - new Date(b.hearing_date).getTime();
+      });
+      console.log('Has Evidence filter returned:', filtered.length, 'summonses');
+      return filtered;
+    }
+
     console.log('No matching filter, returning all summonses');
     return summonses;
   };
@@ -411,6 +505,7 @@ const Dashboard = () => {
                 activeFilter === 'critical' ? 'Critical Deadlines' :
                 activeFilter === 'approaching' ? 'Approaching Deadlines' :
                 activeFilter === 'hearing_complete' ? 'Hearing Complete' :
+                activeFilter === 'has_evidence' ? 'Has Evidence' :
                 'Evidence Pending'
               }`}
               color="primary"
@@ -533,6 +628,7 @@ const Dashboard = () => {
                    activeFilter === 'approaching' ? 'approaching deadline' :
                    activeFilter === 'hearing_complete' ? 'hearing complete' :
                    activeFilter === 'evidence_pending' ? 'evidence pending' :
+                   activeFilter === 'has_evidence' ? 'with evidence' :
                    activityFilter === 'new' ? 'new' :
                    activityFilter === 'updated' ? 'recently updated' : ''}
                   {' '}record{filteredSummonses.length !== 1 ? 's' : ''}.
@@ -565,8 +661,101 @@ const Dashboard = () => {
           </Box>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Complete history of all changes detected by the daily sweep from NYC Open Data.
-            This ledger persists beyond the 72-hour UPDATED badge window.
+            This ledger persists beyond the 1-week UPDATED badge window.
           </Typography>
+
+          {/* Audit Trail Type Filter */}
+          <Box sx={{ mb: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+              <FilterAltIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+              <Typography variant="subtitle2" color="text.secondary">
+                Filter by Type
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+              <Chip
+                label="All"
+                size="small"
+                variant={auditTrailFilter === null ? 'filled' : 'outlined'}
+                color={auditTrailFilter === null ? 'primary' : 'default'}
+                onClick={() => setAuditTrailFilter(null)}
+                sx={{ cursor: 'pointer' }}
+              />
+              <Chip
+                label="Created"
+                size="small"
+                variant={auditTrailFilter === 'CREATED' ? 'filled' : 'outlined'}
+                color={auditTrailFilter === 'CREATED' ? 'primary' : 'default'}
+                onClick={() => setAuditTrailFilter('CREATED')}
+                sx={{ cursor: 'pointer' }}
+              />
+              <Chip
+                label="Status"
+                size="small"
+                variant={auditTrailFilter === 'STATUS_CHANGE' ? 'filled' : 'outlined'}
+                color={auditTrailFilter === 'STATUS_CHANGE' ? 'primary' : 'default'}
+                onClick={() => setAuditTrailFilter('STATUS_CHANGE')}
+                sx={{ cursor: 'pointer' }}
+              />
+              <Chip
+                label="Reschedule"
+                size="small"
+                variant={auditTrailFilter === 'RESCHEDULE' ? 'filled' : 'outlined'}
+                color={auditTrailFilter === 'RESCHEDULE' ? 'primary' : 'default'}
+                onClick={() => setAuditTrailFilter('RESCHEDULE')}
+                sx={{ cursor: 'pointer' }}
+              />
+              <Chip
+                label="Result"
+                size="small"
+                variant={auditTrailFilter === 'RESULT_CHANGE' ? 'filled' : 'outlined'}
+                color={auditTrailFilter === 'RESULT_CHANGE' ? 'primary' : 'default'}
+                onClick={() => setAuditTrailFilter('RESULT_CHANGE')}
+                sx={{ cursor: 'pointer' }}
+              />
+              <Chip
+                label="Amount"
+                size="small"
+                variant={auditTrailFilter === 'AMOUNT_CHANGE' ? 'filled' : 'outlined'}
+                color={auditTrailFilter === 'AMOUNT_CHANGE' ? 'primary' : 'default'}
+                onClick={() => setAuditTrailFilter('AMOUNT_CHANGE')}
+                sx={{ cursor: 'pointer' }}
+              />
+              <Chip
+                label="Payment"
+                size="small"
+                variant={auditTrailFilter === 'PAYMENT' ? 'filled' : 'outlined'}
+                color={auditTrailFilter === 'PAYMENT' ? 'primary' : 'default'}
+                onClick={() => setAuditTrailFilter('PAYMENT')}
+                sx={{ cursor: 'pointer' }}
+              />
+              <Chip
+                label="Evidence"
+                size="small"
+                variant={auditTrailFilter === 'EVIDENCE_UPLOADED' ? 'filled' : 'outlined'}
+                color={auditTrailFilter === 'EVIDENCE_UPLOADED' ? 'secondary' : 'default'}
+                onClick={() => setAuditTrailFilter('EVIDENCE_UPLOADED')}
+                sx={{ cursor: 'pointer' }}
+              />
+              <Chip
+                label="OCR"
+                size="small"
+                variant={auditTrailFilter === 'OCR_COMPLETE' ? 'filled' : 'outlined'}
+                color={auditTrailFilter === 'OCR_COMPLETE' ? 'primary' : 'default'}
+                onClick={() => setAuditTrailFilter('OCR_COMPLETE')}
+                sx={{ cursor: 'pointer' }}
+              />
+              <Chip
+                label="Archived"
+                size="small"
+                variant={auditTrailFilter === 'ARCHIVED' ? 'filled' : 'outlined'}
+                color={auditTrailFilter === 'ARCHIVED' ? 'primary' : 'default'}
+                onClick={() => setAuditTrailFilter('ARCHIVED')}
+                sx={{ cursor: 'pointer' }}
+              />
+            </Box>
+          </Box>
+
           <Divider sx={{ mb: 2 }} />
 
           {getAllActivityLogs().length === 0 ? (

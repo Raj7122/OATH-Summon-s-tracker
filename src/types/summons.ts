@@ -43,6 +43,26 @@ export interface InternalStatusAttribution {
 }
 
 /**
+ * File attachment type categories for evidence uploads
+ */
+export type AttachmentType = 'summons_pdf' | 'client_statement' | 'evidence_package';
+
+/**
+ * Attachment metadata stored in AWSJSON field
+ * All authenticated users can view/download attachments
+ */
+export interface Attachment {
+  id: string;           // UUID for the attachment
+  key: string;          // S3 object key (path in bucket)
+  type: AttachmentType; // Category of file
+  name: string;         // Original filename
+  size: number;         // File size in bytes
+  uploadedBy: string;   // User display name who uploaded
+  uploadedById: string; // Cognito user ID
+  uploadedAt: string;   // ISO timestamp of upload
+}
+
+/**
  * A single comment/note with attribution
  * Used for threaded comments in the notes section
  */
@@ -87,6 +107,11 @@ export interface Summons {
   evidence_requested: boolean;
   evidence_requested_date?: string;
   evidence_received: boolean;
+  evidence_received_date?: string;
+  evidence_reviewed_date?: string;
+  added_to_calendar_date?: string;
+  // File attachments (AWSJSON array)
+  attachments?: Attachment[];
   // New attribution-enabled evidence tracking fields
   evidence_reviewed_attr?: AttributionData;
   added_to_calendar_attr?: AttributionData;
@@ -126,6 +151,9 @@ export interface Summons {
   is_archived?: boolean;
   archived_at?: string;
   archived_reason?: string;
+  // Invoice Tracking
+  is_invoiced?: boolean;
+  invoice_date?: string;
   // Activity Log (Summons Lifecycle Audit)
   activity_log?: ActivityLogEntry[];
   // Timestamps
@@ -147,10 +175,11 @@ export interface Summons {
  * - AMENDMENT: Violation code/description changed
  * - OCR_COMPLETE: Document scan completed
  * - ARCHIVED: Record archived (missing from API or case closed)
+ * - EVIDENCE_UPLOADED: User uploaded evidence file
  */
 export interface ActivityLogEntry {
   date: string;
-  type: 'CREATED' | 'STATUS_CHANGE' | 'RESCHEDULE' | 'RESULT_CHANGE' | 'AMOUNT_CHANGE' | 'PAYMENT' | 'AMENDMENT' | 'OCR_COMPLETE' | 'ARCHIVED';
+  type: 'CREATED' | 'STATUS_CHANGE' | 'RESCHEDULE' | 'RESULT_CHANGE' | 'AMOUNT_CHANGE' | 'PAYMENT' | 'AMENDMENT' | 'OCR_COMPLETE' | 'ARCHIVED' | 'EVIDENCE_UPLOADED';
   description: string;
   old_value: string | null;
   new_value: string | null;
@@ -169,6 +198,8 @@ export interface Client {
   contact_email1?: string;
   contact_phone2?: string;
   contact_email2?: string;
+  plate_filter_enabled?: boolean;
+  plate_filter_list?: string[];
   createdAt?: string;
   updatedAt?: string;
   __typename?: string;
@@ -219,12 +250,12 @@ export type ActivityFilter = 'all' | 'updated' | 'new';
 export type DeadlineFilter = 'critical' | 'approaching' | 'hearing_complete' | 'evidence_pending' | null;
 
 /**
- * Check if a summons is a new record (created within last 72 hours)
+ * Check if a summons is a new record (created within last 1 week / 168 hours)
  *
- * A record is "NEW" if it was discovered/created within the last 72 hours.
+ * A record is "NEW" if it was discovered/created within the last 168 hours (1 week).
  * This indicates the daily sweep found a new summons from the NYC API.
  *
- * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
+ * TRD v1.9: 168-hour (1 week) window ensures Arthur sees new records for a full week.
  *
  * Note: We only check createdAt, not updatedAt, because the daily sweep runs OCR
  * immediately after creation which updates updatedAt. Checking createdAt alone
@@ -237,8 +268,8 @@ export function isNewRecord(summons: Summons): boolean {
   const now = new Date();
   const hoursSinceCreation = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
 
-  // NEW: created within last 72 hours (discovered by daily sweep recently)
-  return hoursSinceCreation <= 72;
+  // NEW: created within last 168 hours / 1 week (discovered by daily sweep recently)
+  return hoursSinceCreation <= 168;
 }
 
 /**
@@ -247,7 +278,7 @@ export function isNewRecord(summons: Summons): boolean {
  * Uses last_change_at (set by daily sweep when NYC API changes detected) instead of
  * updatedAt (which updates on any change including user notes/checkboxes).
  *
- * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
+ * TRD v1.9: 168-hour (1 week) window ensures Arthur sees updates for a full week.
  */
 export function isUpdatedRecord(summons: Summons): boolean {
   // Use last_change_at which is only set by the daily sweep when API changes are detected
@@ -261,12 +292,12 @@ export function isUpdatedRecord(summons: Summons): boolean {
   const now = new Date();
   const hoursSinceChange = (now.getTime() - lastChangeDate.getTime()) / (1000 * 60 * 60);
 
-  // Show UPDATED badge if daily sweep detected changes within last 72 hours
-  return hoursSinceChange <= 72;
+  // Show UPDATED badge if daily sweep detected changes within last 168 hours (1 week)
+  return hoursSinceChange <= 168;
 }
 
 /**
- * Check if a summons is "fresh" (new or updated in last 72 hours)
+ * Check if a summons is "fresh" (new or updated in last 1 week / 168 hours)
  */
 export function isFreshSummons(summons: Summons): boolean {
   return isNewRecord(summons) || isUpdatedRecord(summons);

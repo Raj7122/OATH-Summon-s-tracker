@@ -7,7 +7,13 @@ import {
   Chip,
   Typography,
   Stack,
+  Tooltip,
+  IconButton,
+  FormControlLabel,
+  Switch,
+  Alert,
 } from '@mui/material';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 
 interface Client {
   id?: string;
@@ -19,6 +25,68 @@ interface Client {
   contact_email1?: string;
   contact_phone2?: string;
   contact_email2?: string;
+  plate_filter_enabled?: boolean;
+  plate_filter_list?: string[];
+}
+
+/**
+ * Generates suggested AKAs based on common patterns that cause matching failures
+ * with the NYC Open Data API. The API often splits company names unpredictably,
+ * so these suggestions help users add variations that will match.
+ */
+function generateSuggestedAkas(clientName: string): string[] {
+  if (!clientName?.trim()) return [];
+
+  const suggestions: string[] = [];
+  const name = clientName.trim();
+  const words = name.split(/\s+/);
+
+  // Business suffixes to handle - the NYC API often truncates at suffix boundaries
+  const suffixPattern = /\s*(LLC|L\.L\.C\.|Inc|INC|I\.N\.C\.|Corp|CORP|Co|CO|Ltd|LTD)\.?$/i;
+  const suffixMatch = name.match(suffixPattern);
+
+  // 1. Without suffix (if name has one)
+  // Matches Strategy 2 in dailySweep - suffix is auto-stripped in normalization
+  if (suffixMatch) {
+    const withoutSuffix = name.replace(suffixPattern, '').trim();
+    suggestions.push(withoutSuffix);
+  }
+
+  // 2. Truncated suffix variant (e.g., "...CORP" → "...C")
+  // CRITICAL: Matches exact lastName from API when suffix is split
+  // Example: "CERCONE EXTERIOR RESTORATION CORP" → lastName: "CERCONE EXTERIOR RESTORATION C"
+  if (suffixMatch) {
+    const suffix = suffixMatch[1].replace(/\./g, '');
+    const baseName = name.replace(suffixPattern, '').trim();
+    const lastLetter = suffix.charAt(suffix.length - 1).toUpperCase();
+    suggestions.push(`${baseName} ${lastLetter}`);
+  }
+
+  // 3. First word only (if 3+ words) - catches short references
+  // Matches Strategy 4 fallback when only partial name comes through
+  if (words.length >= 3) {
+    const firstWord = words[0];
+    if (firstWord.length >= 4) {
+      suggestions.push(firstWord);
+    }
+  }
+
+  // 4. Progressive truncation (remove last word)
+  // Handles cases where API truncates the name - matches Strategy 3 partial matching
+  if (words.length >= 3) {
+    const withoutLast = words.slice(0, -1).join(' ');
+    const normalizedWithoutLast = withoutLast.toLowerCase();
+    const alreadySuggested = suggestions.some(s => s.toLowerCase() === normalizedWithoutLast);
+    if (!alreadySuggested && withoutLast.length >= 5) {
+      suggestions.push(withoutLast);
+    }
+  }
+
+  // Filter out duplicates and exact matches with the original name
+  const normalizedOriginal = name.toLowerCase();
+  return [...new Set(suggestions)]
+    .filter(s => s.toLowerCase() !== normalizedOriginal)
+    .filter(s => s.length >= 3);
 }
 
 interface ClientFormProps {
@@ -37,14 +105,28 @@ const ClientForm: React.FC<ClientFormProps> = ({ client, onSave, onCancel }) => 
     contact_email1: '',
     contact_phone2: '',
     contact_email2: '',
+    plate_filter_enabled: false,
+    plate_filter_list: [],
   });
   const [akaInput, setAkaInput] = useState('');
+  const [plateInput, setPlateInput] = useState('');
+  const [suggestedAkas, setSuggestedAkas] = useState<string[]>([]);
 
   useEffect(() => {
     if (client) {
       setFormData(client);
     }
   }, [client]);
+
+  // Generate suggested AKAs when name changes, filtering out any already in the list
+  useEffect(() => {
+    const suggestions = generateSuggestedAkas(formData.name || '');
+    const existingAkas = (formData.akas || []).map(a => a.toLowerCase());
+    const newSuggestions = suggestions.filter(
+      s => !existingAkas.includes(s.toLowerCase())
+    );
+    setSuggestedAkas(newSuggestions);
+  }, [formData.name, formData.akas]);
 
   const handleChange = (field: keyof Client) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [field]: e.target.value });
@@ -64,6 +146,31 @@ const ClientForm: React.FC<ClientFormProps> = ({ client, onSave, onCancel }) => 
     const newAkas = [...(formData.akas || [])];
     newAkas.splice(index, 1);
     setFormData({ ...formData, akas: newAkas });
+  };
+
+  const handleAddSuggestedAka = (aka: string) => {
+    setFormData({
+      ...formData,
+      akas: [...(formData.akas || []), aka],
+    });
+    // Suggestion will automatically disappear due to useEffect filter
+  };
+
+  const handleAddPlate = () => {
+    const plate = plateInput.trim().toUpperCase();
+    if (plate && !(formData.plate_filter_list || []).includes(plate)) {
+      setFormData({
+        ...formData,
+        plate_filter_list: [...(formData.plate_filter_list || []), plate],
+      });
+      setPlateInput('');
+    }
+  };
+
+  const handleDeletePlate = (index: number) => {
+    const newPlates = [...(formData.plate_filter_list || [])];
+    newPlates.splice(index, 1);
+    setFormData({ ...formData, plate_filter_list: newPlates });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -88,9 +195,38 @@ const ClientForm: React.FC<ClientFormProps> = ({ client, onSave, onCancel }) => 
 
         {/* AKAs (Also Known As) */}
         <Grid item xs={12}>
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            AKAs (Also Known As)
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+            <Typography variant="body2" color="text.secondary">
+              AKAs (Also Known As)
+            </Typography>
+            <Tooltip
+              title={
+                <Box sx={{ p: 1 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
+                    Add variations of how NYC might record this client:
+                  </Typography>
+                  <Typography variant="body2" component="div">
+                    <ul style={{ margin: 0, paddingLeft: 16 }}>
+                      <li>Shortened versions: "Cercone", "Cercone Exterior"</li>
+                      <li>Without suffix: "Cercone Exterior Restoration" (no Corp/LLC)</li>
+                      <li>Truncated names: "CERCONE EXTERIOR RESTORATION C"</li>
+                      <li>Common abbreviations: "CER Corp", "C.E.R."</li>
+                    </ul>
+                  </Typography>
+                  <Typography variant="body2" sx={{ mt: 1, fontStyle: 'italic' }}>
+                    The system automatically handles LLC/Inc/Corp suffixes, but truncated
+                    versions of the company name should be added as AKAs.
+                  </Typography>
+                </Box>
+              }
+              placement="right"
+              arrow
+            >
+              <IconButton size="small" sx={{ p: 0.25 }}>
+                <HelpOutlineIcon fontSize="small" color="action" />
+              </IconButton>
+            </Tooltip>
+          </Box>
           <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
             <TextField
               fullWidth
@@ -104,7 +240,7 @@ const ClientForm: React.FC<ClientFormProps> = ({ client, onSave, onCancel }) => 
                   handleAddAka();
                 }
               }}
-              helperText="Press Enter or click Add to add an alias"
+              helperText="Add name variations NYC might use (truncated names, abbreviations, without Corp/LLC)"
             />
             <Button variant="outlined" onClick={handleAddAka}>
               Add
@@ -119,6 +255,90 @@ const ClientForm: React.FC<ClientFormProps> = ({ client, onSave, onCancel }) => 
               />
             ))}
           </Stack>
+
+          {/* Suggested AKAs - displayed as clickable chips */}
+          {suggestedAkas.length > 0 && (
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="caption" color="text.secondary">
+                Suggested AKAs (click to add):
+              </Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" gap={1} sx={{ mt: 0.5 }}>
+                {suggestedAkas.map((suggestion, index) => (
+                  <Chip
+                    key={index}
+                    label={suggestion}
+                    size="small"
+                    variant="outlined"
+                    color="primary"
+                    onClick={() => handleAddSuggestedAka(suggestion)}
+                    sx={{ cursor: 'pointer' }}
+                  />
+                ))}
+              </Stack>
+            </Box>
+          )}
+        </Grid>
+
+        {/* License Plate Filter Section */}
+        <Grid item xs={12}>
+          <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>
+            License Plate Filter
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={formData.plate_filter_enabled || false}
+                onChange={(e) =>
+                  setFormData({ ...formData, plate_filter_enabled: e.target.checked })
+                }
+              />
+            }
+            label="Filter by License Plate"
+          />
+          <Typography variant="caption" display="block" color="text.secondary" sx={{ ml: 4, mt: -0.5 }}>
+            {formData.plate_filter_enabled
+              ? 'Only summonses matching these plates will be shown'
+              : 'Showing all summonses for this client'}
+          </Typography>
+
+          {formData.plate_filter_enabled && (
+            <Box sx={{ mt: 1.5 }}>
+              <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Add a License Plate"
+                  value={plateInput}
+                  onChange={(e) => setPlateInput(e.target.value.toUpperCase())}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddPlate();
+                    }
+                  }}
+                  helperText="Enter plate number and press Enter or click Add"
+                />
+                <Button variant="outlined" onClick={handleAddPlate}>
+                  Add
+                </Button>
+              </Box>
+              <Stack direction="row" spacing={1} flexWrap="wrap" gap={1}>
+                {formData.plate_filter_list?.map((plate, index) => (
+                  <Chip
+                    key={index}
+                    label={plate}
+                    onDelete={() => handleDeletePlate(index)}
+                    sx={{ fontFamily: 'monospace', fontWeight: 500 }}
+                  />
+                ))}
+              </Stack>
+              {(formData.plate_filter_list?.length || 0) > 0 && (
+                <Alert severity="info" sx={{ mt: 1.5 }}>
+                  {formData.plate_filter_list!.length} plate{formData.plate_filter_list!.length !== 1 ? 's' : ''} configured — only summonses matching these plates will appear in the dashboard and exports.
+                </Alert>
+              )}
+            </Box>
+          )}
         </Grid>
 
         {/* Contact Information Section */}

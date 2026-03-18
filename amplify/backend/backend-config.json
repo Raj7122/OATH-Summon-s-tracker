@@ -125,5 +125,20 @@
         }
       ]
     }
+  },
+  "storage": {
+    "oathEvidenceFiles": {
+      "dependsOn": [
+        {
+          "attributes": [
+            "UserPoolId"
+          ],
+          "category": "auth",
+          "resourceName": "oathsummonstracker8a6d84c8"
+        }
+      ],
+      "providerPlugin": "awscloudformation",
+      "service": "S3"
+    }
   }
 }

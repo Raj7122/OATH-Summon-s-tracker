@@ -1,0 +1,183 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "S3 resource stack for evidence file uploads - NYC OATH Summons Tracker",
+  "Parameters": {
+    "bucketName": {
+      "Type": "String",
+      "Default": "oath-evidence-files"
+    },
+    "authRoleName": {
+      "Type": "String"
+    },
+    "unauthRoleName": {
+      "Type": "String"
+    },
+    "env": {
+      "Type": "String"
+    }
+  },
+  "Conditions": {
+    "ShouldNotCreateEnvResources": {
+      "Fn::Equals": [
+        { "Ref": "env" },
+        "NONE"
+      ]
+    }
+  },
+  "Resources": {
+    "S3Bucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketName": {
+          "Fn::If": [
+            "ShouldNotCreateEnvResources",
+            { "Ref": "bucketName" },
+            {
+              "Fn::Join": [
+                "-",
+                [
+                  { "Ref": "bucketName" },
+                  { "Ref": "env" }
+                ]
+              ]
+            }
+          ]
+        },
+        "CorsConfiguration": {
+          "CorsRules": [
+            {
+              "AllowedHeaders": ["*"],
+              "AllowedMethods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+              "AllowedOrigins": ["*"],
+              "ExposedHeaders": ["ETag", "x-amz-meta-custom-header"],
+              "MaxAge": 3000
+            }
+          ]
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        }
+      }
+    },
+    "S3AuthProtectedPolicy": {
+      "Type": "AWS::IAM::Policy",
+      "DependsOn": ["S3Bucket"],
+      "Properties": {
+        "PolicyName": "S3AuthProtectedPolicy",
+        "Roles": [{ "Ref": "authRoleName" }],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:DeleteObject"
+              ],
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:aws:s3:::",
+                      { "Ref": "S3Bucket" },
+                      "/protected/${cognito-identity.amazonaws.com:sub}/*"
+                    ]
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "S3AuthPublicPolicy": {
+      "Type": "AWS::IAM::Policy",
+      "DependsOn": ["S3Bucket"],
+      "Properties": {
+        "PolicyName": "S3AuthPublicPolicy",
+        "Roles": [{ "Ref": "authRoleName" }],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:DeleteObject"
+              ],
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:aws:s3:::",
+                      { "Ref": "S3Bucket" },
+                      "/public/*"
+                    ]
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "S3AuthReadPolicy": {
+      "Type": "AWS::IAM::Policy",
+      "DependsOn": ["S3Bucket"],
+      "Properties": {
+        "PolicyName": "S3AuthReadPolicy",
+        "Roles": [{ "Ref": "authRoleName" }],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject",
+                "s3:ListBucket"
+              ],
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:aws:s3:::",
+                      { "Ref": "S3Bucket" },
+                      "/*"
+                    ]
+                  ]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:aws:s3:::",
+                      { "Ref": "S3Bucket" }
+                    ]
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "BucketName": {
+      "Value": { "Ref": "S3Bucket" },
+      "Description": "Bucket name for the S3 bucket"
+    },
+    "Region": {
+      "Value": { "Ref": "AWS::Region" }
+    }
+  }
+}

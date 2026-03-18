@@ -58,12 +58,18 @@ import {
   Select,
   MenuItem,
   Tooltip,
+  IconButton,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import FiberNewIcon from '@mui/icons-material/FiberNew';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
+import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
+import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
+import { useInvoice } from '../contexts/InvoiceContext';
+import { SummonsForInvoice } from '../types/invoice';
 
 const client = generateClient();
 
@@ -101,6 +107,9 @@ interface Summons {
   evidence_requested: boolean;
   evidence_requested_date?: string;
   evidence_received: boolean;
+  evidence_received_date?: string;
+  // File attachments (AWSJSON array)
+  attachments?: Array<{ id: string; key: string; type: string; name: string; size: number; uploadedBy: string; uploadedById: string; uploadedAt: string }>;
   license_plate_ocr?: string;
   id_number?: string;
   vehicle_type_ocr?: string;
@@ -158,6 +167,7 @@ interface SummonsTableProps {
 const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { addToCart, removeFromCart, isInCart } = useInvoice();
 
   const [notesDialog, setNotesDialog] = useState<{ open: boolean; summons: Summons | null }>({
     open: false,
@@ -410,33 +420,33 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   };
 
   /**
-   * Check if a summons is "fresh" (updated in last 72 hours)
+   * Check if a summons is "fresh" (updated in last 1 week / 168 hours)
    *
    * Calculates time difference between now and updatedAt timestamp.
-   * Used for row highlighting per the "72-Hour Freshness Rule".
-   * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
+   * Used for row highlighting per the "1 Week Freshness Rule".
+   * TRD v1.9: 168-hour (1 week) window ensures Arthur sees updates for a full week.
    *
    * @param {Summons} summons - Summons record to check
-   * @returns {boolean} True if updated within last 72 hours, false otherwise
+   * @returns {boolean} True if updated within last 168 hours, false otherwise
    */
   const isFreshSummons = (summons: Summons): boolean => {
     if (!summons.updatedAt) return false;
     const updatedDate = new Date(summons.updatedAt);
     const now = new Date();
     const diffHours = (now.getTime() - updatedDate.getTime()) / (1000 * 60 * 60);
-    return diffHours < 72; // 72 hours = 3 days to cover weekends
+    return diffHours < 168; // 168 hours = 1 week
   };
 
   /**
-   * Check if a summons is a brand new record (created within last 72 hours)
+   * Check if a summons is a brand new record (created within last 1 week / 168 hours)
    *
-   * A record is "NEW" if it was discovered/created within the last 72 hours.
+   * A record is "NEW" if it was discovered/created within the last 168 hours (1 week).
    * This indicates the daily sweep found a new summons from the NYC API.
    *
    * Note: We only check createdAt, not updatedAt, because the daily sweep
    * updates last_metadata_sync on every run which changes updatedAt.
    *
-   * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
+   * TRD v1.9: 168-hour (1 week) window ensures Arthur sees new records for a full week.
    *
    * @param {Summons} summons - Summons record to check
    * @returns {boolean} True if brand new, false otherwise
@@ -447,9 +457,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     const createdDate = new Date(summons.createdAt);
     const now = new Date();
 
-    // Check if created within 72 hours (TRD v1.9: cover weekends)
+    // Check if created within 168 hours / 1 week
     const diffHours = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
-    return diffHours < 72;
+    return diffHours < 168;
   };
 
   /**
@@ -460,7 +470,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
    *
    * Must not be a new record (new records get NEW badge, not UPDATED).
    *
-   * TRD v1.9: 72-hour window ensures Arthur sees Friday afternoon updates on Monday morning.
+   * TRD v1.9: 168-hour (1 week) window ensures Arthur sees updates for a full week.
    *
    * @param {Summons} summons - Summons record to check
    * @returns {boolean} True if recently updated, false otherwise
@@ -475,9 +485,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     const lastChangeDate = new Date(summons.last_change_at);
     const now = new Date();
 
-    // Check if daily sweep detected changes within last 72 hours (TRD v1.9: cover weekends)
+    // Check if daily sweep detected changes within last 168 hours (1 week)
     const diffHours = (now.getTime() - lastChangeDate.getTime()) / (1000 * 60 * 60);
-    return diffHours < 72;
+    return diffHours < 168;
   };
 
   /**
@@ -545,6 +555,23 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     const isNew = isNewRecord(summons);
     const isUpdated = isUpdatedRecord(summons);
 
+    // Check if summons has attachments
+    // AWSJSON fields may be stored as JSON strings, so parse before checking length
+    let parsedAttachments: Array<unknown> = [];
+    if (summons.attachments) {
+      if (typeof summons.attachments === 'string') {
+        try {
+          parsedAttachments = JSON.parse(summons.attachments);
+        } catch {
+          parsedAttachments = [];
+        }
+      } else if (Array.isArray(summons.attachments)) {
+        parsedAttachments = summons.attachments;
+      }
+    }
+    const hasAttachments = parsedAttachments.length > 0;
+    const attachmentCount = parsedAttachments.length;
+
     // Build tooltip content for UPDATED badge
     const changeTooltip = summons.last_change_summary
       ? `Change Detected: ${summons.last_change_summary} (${formatChangeDate(summons.last_change_at)})`
@@ -552,6 +579,19 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
 
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        {/* Attachment Indicator */}
+        {hasAttachments && (
+          <Tooltip title={`${attachmentCount} file${attachmentCount > 1 ? 's' : ''} attached`} arrow placement="top">
+            <AttachFileIcon
+              sx={{
+                fontSize: 16,
+                color: 'text.secondary',
+                transform: 'rotate(45deg)',
+              }}
+            />
+          </Tooltip>
+        )}
+
         {/* Activity Badge - NEW */}
         {isNew && (
           <Chip
@@ -638,8 +678,75 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     );
   };
 
+  /**
+   * Toggle summons in/out of invoice cart
+   *
+   * @param {Summons} summons - The summons to add or remove from cart
+   */
+  const handleCartToggle = (summons: Summons) => {
+    if (isInCart(summons.id)) {
+      removeFromCart(summons.id);
+    } else {
+      // Map Summons to SummonsForInvoice
+      const summonsForInvoice: SummonsForInvoice = {
+        id: summons.id,
+        summons_number: summons.summons_number,
+        respondent_name: summons.respondent_name,
+        clientID: summons.clientID,
+        violation_date: summons.violation_date,
+        hearing_date: summons.hearing_date,
+        hearing_result: summons.hearing_result || null,
+        status: summons.status,
+        amount_due: summons.amount_due,
+      };
+      addToCart(summonsForInvoice);
+    }
+  };
+
+  /**
+   * Render Add to Invoice button cell
+   *
+   * Shows a shopping cart icon that toggles between "Add to Invoice" and "In Cart" states.
+   * Uses filled icon and different color when item is already in cart.
+   *
+   * @param {GridRenderCellParams} params - MUI DataGrid cell parameters
+   * @returns {JSX.Element} IconButton with cart icon and tooltip
+   */
+  const renderInvoiceCartCell = (params: GridRenderCellParams) => {
+    const summons = params.row as Summons;
+    const inCart = isInCart(summons.id);
+
+    return (
+      <Tooltip title={inCart ? 'Remove from Invoice' : 'Add to Invoice'} arrow>
+        <IconButton
+          size="small"
+          onClick={() => handleCartToggle(summons)}
+          sx={{
+            color: inCart ? 'success.main' : 'action.active',
+            '&:hover': {
+              color: inCart ? 'success.dark' : 'primary.main',
+              backgroundColor: inCart ? 'success.light' : 'action.hover',
+            },
+          }}
+        >
+          {inCart ? <ShoppingCartIcon /> : <AddShoppingCartIcon />}
+        </IconButton>
+      </Tooltip>
+    );
+  };
+
   // Define columns - "Actionable 7" visible by default (UX Improvement #3)
   const columns: GridColDef[] = [
+    // Invoice Cart column - first for easy access
+    {
+      field: 'invoice_cart',
+      headerName: 'Invoice',
+      width: 70,
+      sortable: false,
+      filterable: false,
+      disableColumnMenu: true,
+      renderCell: renderInvoiceCartCell,
+    },
     {
       field: 'respondent_name',
       headerName: 'Client',
@@ -942,7 +1049,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
             cursor: 'pointer',
           },
           '& .fresh-row': {
-            backgroundColor: '#FFFDE7', // Pale "Attention Yellow" for 72-hour freshness (TRD v1.9)
+            backgroundColor: '#FFFDE7', // Pale "Attention Yellow" for 1-week freshness (TRD v1.9)
           },
           // Enhanced horizontal scrollbar visibility (works in Chrome, Safari, Edge, Firefox)
           '& .MuiDataGrid-virtualScroller': {
@@ -1003,6 +1110,17 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
           />
         </DialogContent>
         <DialogActions>
+          {notesDialog.summons && (
+            <Button
+              onClick={() => handleCartToggle(notesDialog.summons!)}
+              variant={isInCart(notesDialog.summons.id) ? 'contained' : 'outlined'}
+              color={isInCart(notesDialog.summons.id) ? 'success' : 'primary'}
+              startIcon={isInCart(notesDialog.summons.id) ? <ShoppingCartIcon /> : <AddShoppingCartIcon />}
+              sx={{ mr: 'auto' }}
+            >
+              {isInCart(notesDialog.summons.id) ? 'In Invoice Cart' : 'Add to Invoice'}
+            </Button>
+          )}
           <Button onClick={() => setNotesDialog({ open: false, summons: null })}>
             Close
           </Button>
@@ -1083,11 +1201,25 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
           />
         </Box>
 
+        {/* Add to Invoice Button */}
+        {mobileDrawer.summons && (
+          <Button
+            fullWidth
+            variant={isInCart(mobileDrawer.summons.id) ? 'contained' : 'outlined'}
+            color={isInCart(mobileDrawer.summons.id) ? 'success' : 'primary'}
+            onClick={() => handleCartToggle(mobileDrawer.summons!)}
+            startIcon={isInCart(mobileDrawer.summons.id) ? <ShoppingCartIcon /> : <AddShoppingCartIcon />}
+            sx={{ mt: 3 }}
+          >
+            {isInCart(mobileDrawer.summons.id) ? 'In Invoice Cart' : 'Add to Invoice'}
+          </Button>
+        )}
+
         <Button
           fullWidth
           variant="contained"
           onClick={() => setMobileDrawer({ open: false, summons: null })}
-          sx={{ mt: 3 }}
+          sx={{ mt: 2 }}
         >
           Done
         </Button>

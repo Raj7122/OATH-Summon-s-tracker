@@ -23,6 +23,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import dayjs, { Dayjs } from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
+import isoWeek from 'dayjs/plugin/isoWeek';
 import {
   Box,
   Typography,
@@ -64,6 +65,9 @@ import ArchiveIcon from '@mui/icons-material/Archive';
 import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
+import DownloadIcon from '@mui/icons-material/Download';
+import DescriptionIcon from '@mui/icons-material/Description';
+import DateRangeIcon from '@mui/icons-material/DateRange';
 import { generateClient } from 'aws-amplify/api';
 
 // Components
@@ -72,17 +76,31 @@ import SimpleSummonsTable from '../components/SimpleSummonsTable';
 
 // GraphQL
 import { listSummons } from '../graphql/queries';
+import { listClientsWithPlateFilter } from '../graphql/customQueries';
 import { updateSummons } from '../graphql/mutations';
 
 // Types
-import { Summons, isNewRecord, isUpdatedRecord, ActivityLogEntry } from '../types/summons';
+import { Summons, Client, isNewRecord, isUpdatedRecord, ActivityLogEntry } from '../types/summons';
+
+// Plate filtering
+import { applyPlateFilters } from '../lib/plateFilter';
 
 // Theme colors
 import { horizonColors } from '../theme';
 
+// CSV Export
+import { generateCSV, downloadCSV } from '../lib/csvExport';
+
+// Notice of Appearance DOCX
+import { generateNoticeOfAppearance } from '../utils/noticeOfAppearance';
+
+// Week utilities
+import { getISOWeekRange } from '../utils/weekFilters';
+
 // Configure dayjs
 dayjs.extend(utc);
 dayjs.extend(timezone);
+dayjs.extend(isoWeek);
 
 const NYC_TIMEZONE = 'America/New_York';
 
@@ -220,10 +238,14 @@ const CalendarDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [summonses, setSummonses] = useState<Summons[]>([]);
   const [selectedDate, setSelectedDate] = useState<Dayjs | null>(null);
+  // Week mode state: selectedDate and selectedWeek are mutually exclusive
+  const [weekMode, setWeekMode] = useState(false);
+  const [selectedWeek, setSelectedWeek] = useState<{ start: Dayjs; end: Dayjs } | null>(null);
+  const [weekStatusFilter, setWeekStatusFilter] = useState<string | null>(null);
   const [activityFilter, setActivityFilter] = useState<'all' | 'updated' | 'new'>('all');
   // Horizon System filter for header chip clicks (Critical/Approaching/Future)
-  // Also supports 'new' for NEW badge filter
-  const [horizonFilter, setHorizonFilter] = useState<'critical' | 'approaching' | 'future' | 'new' | null>(null);
+  // Also supports 'new' for NEW badge filter and 'has_evidence' for evidence filter
+  const [horizonFilter, setHorizonFilter] = useState<'critical' | 'approaching' | 'future' | 'new' | 'has_evidence' | null>(null);
 
   // OVERRIDE C: Archive toggle removed from main dashboard.
   // The main dashboard is for active triage ONLY - always show 2022+ records.
@@ -287,7 +309,25 @@ const CalendarDashboard: React.FC = () => {
       }
 
       console.log('Loaded all summonses:', allSummonses.length);
-      setSummonses(allSummonses);
+
+      // Apply plate filtering (graceful degradation if client fetch fails)
+      let finalSummonses = allSummonses;
+      try {
+        let allClients: Client[] = [];
+        let clientNextToken: string | null = null;
+        do {
+          const clientResult = await client.graphql({
+            query: listClientsWithPlateFilter,
+            variables: { limit: 100, nextToken: clientNextToken },
+          }) as { data: { listClients: { items: Client[]; nextToken: string | null } } };
+          allClients = [...allClients, ...clientResult.data.listClients.items];
+          clientNextToken = clientResult.data.listClients.nextToken;
+        } while (clientNextToken);
+        finalSummonses = applyPlateFilters(allSummonses, allClients);
+      } catch (plateError) {
+        console.warn('Plate filter skipped (client fetch failed):', plateError);
+      }
+      setSummonses(finalSummonses);
     } catch (error) {
       console.error('Error loading summonses:', error);
       setSnackbar({
@@ -393,10 +433,36 @@ const CalendarDashboard: React.FC = () => {
       });
     } else if (horizonFilter === 'new') {
       filtered = filtered.filter(isNewRecord);
+    } else if (horizonFilter === 'has_evidence') {
+      // Has Evidence: Summonses with file attachments
+      filtered = filtered.filter((s) => {
+        if (!s.attachments) return false;
+        let parsed: unknown[] = [];
+        if (typeof s.attachments === 'string') {
+          try {
+            parsed = JSON.parse(s.attachments);
+          } catch {
+            return false;
+          }
+        } else if (Array.isArray(s.attachments)) {
+          parsed = s.attachments;
+        }
+        return parsed.length > 0;
+      });
     }
 
-    // Then apply date filter
-    if (selectedDate) {
+    // Date filters are mutually exclusive: week takes priority over single date
+    if (selectedWeek) {
+      // Week range filter (Mon-Sun)
+      const weekStartStr = selectedWeek.start.format('YYYY-MM-DD');
+      const weekEndStr = selectedWeek.end.format('YYYY-MM-DD');
+      filtered = filtered.filter((s) => {
+        if (!s.hearing_date) return false;
+        const key = dayjs.utc(s.hearing_date).format('YYYY-MM-DD');
+        return key >= weekStartStr && key <= weekEndStr;
+      });
+    } else if (selectedDate) {
+      // Single date filter
       const dateKey = selectedDate.format('YYYY-MM-DD');
       filtered = filtered.filter((s) => {
         if (!s.hearing_date) return false;
@@ -407,35 +473,77 @@ const CalendarDashboard: React.FC = () => {
     }
 
     return filtered;
-  }, [globallyFilteredSummonses, selectedDate, horizonFilter]);
+  }, [globallyFilteredSummonses, selectedDate, selectedWeek, horizonFilter]);
 
   /**
    * Handle Horizon System chip click (toggle behavior)
-   * Filters: critical (Red), approaching (Orange), future (Green), new
+   * Filters: critical (Red), approaching (Orange), future (Green), new, has_evidence (Purple)
    */
-  const handleHorizonFilterClick = useCallback((filter: 'critical' | 'approaching' | 'future' | 'new') => {
+  const handleHorizonFilterClick = useCallback((filter: 'critical' | 'approaching' | 'future' | 'new' | 'has_evidence') => {
     // Toggle: if clicking the same filter, clear it; otherwise set it
     setHorizonFilter((prev) => (prev === filter ? null : filter));
-    // Clear date selection when using horizon filter for better UX
+    // Clear date/week selection when using horizon filter for better UX
     if (horizonFilter !== filter) {
       setSelectedDate(null);
+      setSelectedWeek(null);
+      setWeekStatusFilter(null);
+      setWeekMode(false);
     }
   }, [horizonFilter]);
+
+  /**
+   * Handle week mode toggle from the Command Center "Week" button.
+   * Turning ON: compute the ISO week around selectedDate (or today) and apply it.
+   * Turning OFF: clear week state.
+   */
+  const handleWeekModeToggle = useCallback(() => {
+    setWeekMode((prev) => {
+      if (!prev) {
+        // Turning ON — use selectedDate as anchor, fall back to today
+        const anchor = selectedDate || dayjs().tz(NYC_TIMEZONE);
+        const { start, end } = getISOWeekRange(anchor);
+        setSelectedWeek({ start, end });
+        setHorizonFilter(null);
+        setWeekStatusFilter(null);
+        // Keep selectedDate for calendar visual feedback
+      } else {
+        // Turning OFF — clear week-related state
+        setSelectedWeek(null);
+        setWeekStatusFilter(null);
+      }
+      return !prev;
+    });
+  }, [selectedDate]);
 
   /**
    * Handle date selection from calendar
    */
   const handleDateSelect = useCallback((date: Dayjs | null) => {
-    setSelectedDate(date);
-    // Clear horizon filter when selecting a date for cleaner UX
-    if (date) {
+    if (weekMode && date) {
+      // Week mode: shift the week range to the clicked date's Mon-Sun
+      const { start, end } = getISOWeekRange(date);
+      setSelectedWeek({ start, end });
+      setSelectedDate(date); // Keep for calendar visual highlight
+      setWeekStatusFilter(null); // Reset status sub-filter on new week
       setHorizonFilter(null);
+    } else if (weekMode && !date) {
+      // Week mode "Clear": exit week mode entirely
+      setWeekMode(false);
+      setSelectedWeek(null);
+      setSelectedDate(null);
+      setWeekStatusFilter(null);
+    } else {
+      // Single-date mode
+      setSelectedDate(date);
+      setSelectedWeek(null);
+      setWeekStatusFilter(null);
+      if (date) setHorizonFilter(null);
     }
     // On mobile, switch to grid view when a date is selected
     if (isMobile && date) {
       setMobileView('grid');
     }
-  }, [isMobile]);
+  }, [isMobile, weekMode]);
 
   /**
    * Handle activity filter change
@@ -453,29 +561,17 @@ const CalendarDashboard: React.FC = () => {
 
   /**
    * Handle summons field update via GraphQL mutation
-   * Attribution fields (_attr suffix) fail silently until schema is deployed
    */
-  const handleSummonsUpdate = useCallback(async (id: string, field: string, value: unknown) => {
-    // Check if this is an attribution field (not yet in deployed schema)
-    const isAttributionField = field.endsWith('_attr');
-
+  const handleSummonsUpdate = useCallback(async (id: string, field: string, value: unknown, extraFields?: Record<string, unknown>) => {
     try {
       console.log(`Updating ${field} = ${value} for summons ${id}...`);
 
-      // Build the update input
+      // Build the update input — merge extraFields for consolidated mutations
       const updateInput: Record<string, unknown> = {
         id,
         [field]: value,
+        ...extraFields,
       };
-
-      // If checking "evidence_requested" and it's being set to true,
-      // auto-set the date if not already set
-      if (field === 'evidence_requested' && value === true) {
-        const summons = summonses.find(s => s.id === id);
-        if (summons && !summons.evidence_requested_date) {
-          updateInput.evidence_requested_date = new Date().toISOString();
-        }
-      }
 
       // Execute GraphQL mutation
       await client.graphql({
@@ -488,12 +584,23 @@ const CalendarDashboard: React.FC = () => {
       console.log(`Successfully updated ${field}`);
 
       // Update local state optimistically
+      // For AWSJSON fields like attachments, parse back to array for local state
+      let localValue = value;
+      if ((field === 'attachments' || field === 'notes_comments') && typeof value === 'string') {
+        try {
+          localValue = JSON.parse(value);
+        } catch {
+          localValue = [];
+        }
+      }
+
       setSummonses((prev) =>
         prev.map((s) => {
           if (s.id === id) {
             return {
               ...s,
-              [field]: value,
+              [field]: localValue,
+              ...extraFields,
               updatedAt: new Date().toISOString(),
             };
           }
@@ -510,29 +617,12 @@ const CalendarDashboard: React.FC = () => {
         });
       }
     } catch (error) {
-      // Silently fail for attribution fields (schema not deployed yet)
-      if (isAttributionField) {
-        console.log(`Attribution field ${field} not yet in schema - update skipped`);
-        // Still update local state for UI responsiveness
-        setSummonses((prev) =>
-          prev.map((s) => {
-            if (s.id === id) {
-              return {
-                ...s,
-                [field]: value,
-              };
-            }
-            return s;
-          })
-        );
-      } else {
-        console.error('Error updating summons:', error);
-        setSnackbar({
-          open: true,
-          message: `Failed to update ${field}. Please try again.`,
-          severity: 'error',
-        });
-      }
+      console.error('Error updating summons:', error);
+      setSnackbar({
+        open: true,
+        message: `Failed to update ${field}. Please try again.`,
+        severity: 'error',
+      });
     }
   }, [summonses]);
 
@@ -594,6 +684,22 @@ const CalendarDashboard: React.FC = () => {
     const newCount = globallyFilteredSummonses.filter(isNewRecord).length;
     const updatedCount = globallyFilteredSummonses.filter(isUpdatedRecord).length;
 
+    // Has Evidence: Summonses with file attachments
+    const hasEvidenceCount = globallyFilteredSummonses.filter((s) => {
+      if (!s.attachments) return false;
+      let parsed: unknown[] = [];
+      if (typeof s.attachments === 'string') {
+        try {
+          parsed = JSON.parse(s.attachments);
+        } catch {
+          return false;
+        }
+      } else if (Array.isArray(s.attachments)) {
+        parsed = s.attachments;
+      }
+      return parsed.length > 0;
+    }).length;
+
     // Count of Pre-2022 records (for archive indicator)
     const archivedCount = summonses.filter((s) => !isActiveEra(s) && isIdlingViolation(s)).length;
 
@@ -603,10 +709,94 @@ const CalendarDashboard: React.FC = () => {
       futureCount,
       newCount,
       updatedCount,
+      hasEvidenceCount,
       total: globallyFilteredSummonses.length,
       archivedCount,
     };
   }, [globallyFilteredSummonses, summonses]);
+
+  /**
+   * Secondary memo: applies status filter on top of week-filtered data.
+   * This drives both the grid display and CSV export when in week mode.
+   */
+  const weeklyFilteredSummonses = useMemo(() => {
+    if (!selectedWeek || !weekStatusFilter) return filteredByDate;
+    return filteredByDate.filter((s) =>
+      (s.status || '').toUpperCase().includes(weekStatusFilter.toUpperCase())
+    );
+  }, [filteredByDate, selectedWeek, weekStatusFilter]);
+
+  /**
+   * Export the currently displayed week data as CSV.
+   * Respects the status filter — only exports what Jackie sees in the grid.
+   */
+  const handleExportWeekCSV = useCallback(() => {
+    if (!selectedWeek) return;
+    const data = weeklyFilteredSummonses;
+    if (data.length === 0) {
+      setSnackbar({ open: true, message: 'No hearings to export for this week.', severity: 'error' });
+      return;
+    }
+
+    const config = {
+      columns: ['hearing_date', 'respondent_name', 'summons_number', 'license_plate', 'status', 'violation_date', 'amount_due'],
+      dateFormat: 'us' as const,
+      includeHistorical: true,
+    };
+
+    const csv = generateCSV(data, config);
+    const filename = `WeeklyDocket_${selectedWeek.start.format('MMMDD')}-${selectedWeek.end.format('MMMDD')}_${selectedWeek.end.format('YYYY')}.csv`;
+    downloadCSV(csv, filename);
+    setSnackbar({ open: true, message: `Exported ${data.length} hearing${data.length !== 1 ? 's' : ''} to CSV.`, severity: 'success' });
+  }, [selectedWeek, weeklyFilteredSummonses]);
+
+  /**
+   * Generate Notice of Appearance DOCX for the selected single date.
+   */
+  const handleGenerateNoticeDay = useCallback(async () => {
+    if (!selectedDate || filteredByDate.length === 0) {
+      setSnackbar({ open: true, message: 'No hearings for this date.', severity: 'error' });
+      return;
+    }
+    const dateLabel = selectedDate.format('dddd, MMMM D, YYYY');
+    try {
+      await generateNoticeOfAppearance(filteredByDate, dateLabel);
+      setSnackbar({ open: true, message: `Notice of Appearance generated for ${dateLabel}.`, severity: 'success' });
+    } catch (err) {
+      console.error('Notice of Appearance generation failed:', err);
+      setSnackbar({ open: true, message: 'Failed to generate Notice of Appearance.', severity: 'error' });
+    }
+  }, [selectedDate, filteredByDate]);
+
+  /**
+   * Generate Notice of Appearance DOCX(s) for the selected week — one per hearing day.
+   */
+  const handleGenerateNoticeWeek = useCallback(async () => {
+    if (!selectedWeek || weeklyFilteredSummonses.length === 0) {
+      setSnackbar({ open: true, message: 'No hearings to generate notices for this week.', severity: 'error' });
+      return;
+    }
+    // Group summonses by hearing date (YYYY-MM-DD)
+    const byDate = new Map<string, Summons[]>();
+    for (const s of weeklyFilteredSummonses) {
+      const key = s.hearing_date ? dayjs.utc(s.hearing_date).format('YYYY-MM-DD') : 'unknown';
+      if (!byDate.has(key)) byDate.set(key, []);
+      byDate.get(key)!.push(s);
+    }
+    try {
+      let count = 0;
+      for (const [dateKey, daySummonses] of byDate) {
+        if (dateKey === 'unknown') continue;
+        const dateLabel = dayjs.utc(dateKey).format('dddd, MMMM D, YYYY');
+        await generateNoticeOfAppearance(daySummonses, dateLabel);
+        count++;
+      }
+      setSnackbar({ open: true, message: `Generated ${count} Notice${count !== 1 ? 's' : ''} of Appearance.`, severity: 'success' });
+    } catch (err) {
+      console.error('Notice of Appearance generation failed:', err);
+      setSnackbar({ open: true, message: 'Failed to generate Notice of Appearance.', severity: 'error' });
+    }
+  }, [selectedWeek, weeklyFilteredSummonses]);
 
   /**
    * Close snackbar
@@ -892,6 +1082,22 @@ const CalendarDashboard: React.FC = () => {
             />
           )}
 
+          {/* Week filter indicator */}
+          {selectedWeek && (
+            <Chip
+              icon={<DateRangeIcon sx={{ fontSize: 16 }} />}
+              label={`Week: ${selectedWeek.start.format('MMM D')}–${selectedWeek.end.format('MMM D')}`}
+              color="primary"
+              variant="outlined"
+              onDelete={() => { setSelectedWeek(null); setWeekStatusFilter(null); setWeekMode(false); setSelectedDate(null); }}
+              sx={{
+                fontWeight: 600,
+                borderRadius: 2,
+                borderWidth: '1.5px',
+              }}
+            />
+          )}
+
           {/* Search filter indicator */}
           {dashboardSearch && (
             <Chip
@@ -1011,8 +1217,12 @@ const CalendarDashboard: React.FC = () => {
                   approachingCount: stats.approachingCount,
                   futureCount: stats.futureCount,
                   newCount: stats.newCount,
+                  hasEvidenceCount: stats.hasEvidenceCount,
                 }}
                 onHorizonFilterClick={handleHorizonFilterClick}
+                weekMode={weekMode}
+                onWeekModeToggle={handleWeekModeToggle}
+                selectedWeek={selectedWeek}
               />
             )}
           </Grid>
@@ -1036,8 +1246,8 @@ const CalendarDashboard: React.FC = () => {
                   borderColor: 'divider',
                 }}
               >
-                {/* Selected Date Header (when filtering) */}
-                {selectedDate && (
+                {/* Selected Date Header (when filtering by single date, not week) */}
+                {selectedDate && !selectedWeek && (
                   <Alert
                     severity="info"
                     sx={{
@@ -1045,14 +1255,33 @@ const CalendarDashboard: React.FC = () => {
                       '& .MuiAlert-message': { width: '100%' },
                     }}
                     action={
-                      <Button
-                        color="inherit"
-                        size="small"
-                        onClick={() => setSelectedDate(null)}
-                        sx={{ fontWeight: 600 }}
-                      >
-                        Show All
-                      </Button>
+                      <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="secondary"
+                          startIcon={<DescriptionIcon />}
+                          onClick={handleGenerateNoticeDay}
+                          sx={{
+                            height: 32,
+                            textTransform: 'none',
+                            fontWeight: 600,
+                            borderRadius: 2,
+                            boxShadow: 'none',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Notice of Appearance
+                        </Button>
+                        <Button
+                          color="inherit"
+                          size="small"
+                          onClick={() => setSelectedDate(null)}
+                          sx={{ fontWeight: 600 }}
+                        >
+                          Show All
+                        </Button>
+                      </Box>
                     }
                   >
                     <Typography variant="body2">
@@ -1063,9 +1292,85 @@ const CalendarDashboard: React.FC = () => {
                   </Alert>
                 )}
 
+                {/* Weekly View Banner (when filtering by week) */}
+                {selectedWeek && (
+                  <Alert
+                    severity="info"
+                    icon={<DateRangeIcon />}
+                    sx={{
+                      borderRadius: 0,
+                      '& .MuiAlert-message': { width: '100%' },
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
+                      <Typography variant="body2" sx={{ mr: 'auto' }}>
+                        Showing {weeklyFilteredSummonses.length} hearing{weeklyFilteredSummonses.length !== 1 ? 's' : ''} for{' '}
+                        <strong>
+                          week of {selectedWeek.start.format('MMM D')}–{selectedWeek.end.format('MMM D, YYYY')}
+                        </strong>
+                      </Typography>
+                      <FormControl size="small" sx={{ minWidth: 150 }}>
+                        <Select
+                          value={weekStatusFilter || ''}
+                          displayEmpty
+                          onChange={(e) => setWeekStatusFilter(e.target.value || null)}
+                          sx={{ height: 32, fontSize: '0.8rem' }}
+                        >
+                          <MenuItem value="">All Statuses</MenuItem>
+                          <MenuItem value="SCHEDULED">Scheduled</MenuItem>
+                          <MenuItem value="DEFAULT">Default</MenuItem>
+                          <MenuItem value="HEARING">Hearing Complete</MenuItem>
+                          <MenuItem value="DISMISSED">Dismissed</MenuItem>
+                          <MenuItem value="PAID">Paid</MenuItem>
+                          <MenuItem value="DOCKETED">Docketed</MenuItem>
+                        </Select>
+                      </FormControl>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        startIcon={<DownloadIcon />}
+                        onClick={handleExportWeekCSV}
+                        sx={{
+                          height: 32,
+                          textTransform: 'none',
+                          fontWeight: 600,
+                          borderRadius: 2,
+                          boxShadow: 'none',
+                        }}
+                      >
+                        Export Week
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="secondary"
+                        startIcon={<DescriptionIcon />}
+                        onClick={handleGenerateNoticeWeek}
+                        sx={{
+                          height: 32,
+                          textTransform: 'none',
+                          fontWeight: 600,
+                          borderRadius: 2,
+                          boxShadow: 'none',
+                        }}
+                      >
+                        Notice of Appearance
+                      </Button>
+                      <Button
+                        color="inherit"
+                        size="small"
+                        onClick={() => { setSelectedWeek(null); setWeekStatusFilter(null); setWeekMode(false); setSelectedDate(null); }}
+                        sx={{ fontWeight: 600, height: 32 }}
+                      >
+                        Show All
+                      </Button>
+                    </Box>
+                  </Alert>
+                )}
+
                 {/* Summons Table with Attached Filters and Search */}
                 <SimpleSummonsTable
-                  summonses={filteredByDate}
+                  summonses={selectedWeek ? weeklyFilteredSummonses : filteredByDate}
                   onUpdate={handleSummonsUpdate}
                   activeFilter={activityFilter}
                   onFilterChange={handleFilterChange}

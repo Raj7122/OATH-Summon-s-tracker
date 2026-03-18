@@ -10,13 +10,16 @@ import {
   DialogContent,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import DownloadIcon from '@mui/icons-material/Download';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { DataGrid, GridColDef, GridActionsCellItem, GridToolbar } from '@mui/x-data-grid';
 import { generateClient } from 'aws-amplify/api';
 import { listClients } from '../graphql/queries';
 import { createClient, updateClient, deleteClient } from '../graphql/mutations';
+import { updateClientPlateFilter } from '../graphql/customQueries';
 import ClientForm from '../components/ClientForm';
+import { escapeCSVValue, downloadCSV } from '../lib/csvExport';
 
 const client = generateClient();
 
@@ -30,6 +33,8 @@ interface Client {
   contact_email1?: string;
   contact_phone2?: string;
   contact_email2?: string;
+  plate_filter_enabled?: boolean;
+  plate_filter_list?: string[];
 }
 
 const Clients = () => {
@@ -82,9 +87,11 @@ const Clients = () => {
 
   const handleSave = async (clientData: Partial<Client>) => {
     try {
+      let savedClientId: string;
+
       if (editingClient) {
-        // Update existing client - filter out read-only fields
-        const { createdAt, updatedAt, owner, summonses, __typename, ...cleanData } = clientData as any;
+        // Update existing client - filter out read-only and plate filter fields
+        const { createdAt, updatedAt, owner, summonses, __typename, plate_filter_enabled, plate_filter_list, ...cleanData } = clientData as any;
         const result = await client.graphql({
           query: updateClient,
           variables: {
@@ -95,17 +102,36 @@ const Clients = () => {
           },
         });
         console.log('Update result:', result);
+        savedClientId = editingClient.id;
       } else {
-        // Create new client - filter out read-only fields
-        const { createdAt, updatedAt, owner, summonses, __typename, ...cleanData } = clientData as any;
+        // Create new client - filter out read-only and plate filter fields
+        const { createdAt, updatedAt, owner, summonses, __typename, plate_filter_enabled, plate_filter_list, ...cleanData } = clientData as any;
         const result = await client.graphql({
           query: createClient,
           variables: {
             input: cleanData,
           },
-        });
+        }) as any;
         console.log('Create result:', result);
+        savedClientId = result.data.createClient.id;
       }
+
+      // Attempt to save plate filter fields separately (graceful degradation)
+      const { plate_filter_enabled, plate_filter_list } = clientData as any;
+      if (plate_filter_enabled !== undefined || plate_filter_list !== undefined) {
+        try {
+          const plateInput: any = { id: savedClientId };
+          if (plate_filter_enabled !== undefined) plateInput.plate_filter_enabled = plate_filter_enabled;
+          if (plate_filter_list !== undefined) plateInput.plate_filter_list = plate_filter_list;
+          await client.graphql({
+            query: updateClientPlateFilter,
+            variables: { input: plateInput },
+          });
+        } catch (plateErr) {
+          console.warn('Plate filter fields not yet deployed to AppSync — skipping plate filter save:', plateErr);
+        }
+      }
+
       setDialogOpen(false);
       loadClients();
     } catch (error: any) {
@@ -117,6 +143,29 @@ const Clients = () => {
         alert('Failed to save client. Check console for details.');
       }
     }
+  };
+
+  const handleExportClientList = () => {
+    if (clients.length === 0) return;
+
+    const headers = ['Client Name', 'AKAs', 'Contact Name', 'Email', 'Phone', 'Address'];
+    const headerRow = headers.map(escapeCSVValue).join(',');
+
+    const dataRows = clients
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((c) => [
+        escapeCSVValue(c.name || ''),
+        escapeCSVValue((c.akas || []).join('; ')),
+        escapeCSVValue(c.contact_name || ''),
+        escapeCSVValue(c.contact_email1 || ''),
+        escapeCSVValue(c.contact_phone1 || ''),
+        escapeCSVValue(c.contact_address || ''),
+      ].join(','));
+
+    const csv = [headerRow, ...dataRows].join('\n');
+    const date = new Date().toISOString().split('T')[0];
+    downloadCSV(csv, `ClientRoster_${date}.csv`);
   };
 
   const columns: GridColDef[] = [
@@ -161,9 +210,19 @@ const Clients = () => {
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4">Client Management</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={handleAdd}>
-          Add Client
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            startIcon={<DownloadIcon />}
+            onClick={handleExportClientList}
+            disabled={clients.length === 0}
+          >
+            Export Client List
+          </Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={handleAdd}>
+            Add Client
+          </Button>
+        </Box>
       </Box>
 
       {loading ? (
@@ -179,6 +238,9 @@ const Clients = () => {
             initialState={{
               pagination: {
                 paginationModel: { pageSize: 25 },
+              },
+              sorting: {
+                sortModel: [{ field: 'name', sort: 'asc' }],
               },
             }}
             slots={{

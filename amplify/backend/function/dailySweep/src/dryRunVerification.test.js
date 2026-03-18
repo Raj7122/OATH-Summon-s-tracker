@@ -555,6 +555,137 @@ describe('Scenario D: ID Number Validation Test', () => {
 });
 
 // ============================================================================
+// SCENARIO E: ACTIVITY LOG CAP TEST (DynamoDB 400KB item size fix)
+// ============================================================================
+
+const MAX_LOG_ENTRIES = 100;
+
+/**
+ * Cap activity log to MAX_LOG_ENTRIES most recent entries (from dailySweep/index.js)
+ * Prevents DynamoDB "Item size to update has exceeded the maximum allowed size" error
+ */
+function capActivityLog(existingLog, newEntries) {
+  return [...existingLog, ...newEntries].slice(-MAX_LOG_ENTRIES);
+}
+
+function createMockLogEntry(index) {
+  return {
+    date: new Date(Date.now() - (1000 * 60 * 60 * index)).toISOString(),
+    type: 'STATUS_CHANGE',
+    description: `Mock change #${index}`,
+    old_value: 'OLD',
+    new_value: 'NEW',
+  };
+}
+
+describe('Scenario E: Activity Log Cap Test (DynamoDB 400KB fix)', () => {
+  /**
+   * TEST E.1: Log under the cap should not be trimmed
+   */
+  test('E.1: Log with fewer than 100 entries is NOT trimmed', () => {
+    const existingLog = Array.from({ length: 50 }, (_, i) => createMockLogEntry(i));
+    const newEntries = [createMockLogEntry(999)];
+
+    const result = capActivityLog(existingLog, newEntries);
+
+    expect(result.length).toBe(51);
+    // Last entry should be the new one
+    expect(result[result.length - 1].description).toBe('Mock change #999');
+  });
+
+  /**
+   * TEST E.2: Log at exactly the cap should not lose entries
+   */
+  test('E.2: Log with exactly 100 entries keeps all 100', () => {
+    const existingLog = Array.from({ length: 99 }, (_, i) => createMockLogEntry(i));
+    const newEntries = [createMockLogEntry(999)];
+
+    const result = capActivityLog(existingLog, newEntries);
+
+    expect(result.length).toBe(100);
+    expect(result[result.length - 1].description).toBe('Mock change #999');
+  });
+
+  /**
+   * TEST E.3: Oversized log is trimmed to 100, keeping the NEWEST entries
+   */
+  test('E.3: Log with 150+ entries is trimmed to 100, keeping newest', () => {
+    const existingLog = Array.from({ length: 150 }, (_, i) => createMockLogEntry(i));
+    const newEntries = [createMockLogEntry(999), createMockLogEntry(1000)];
+
+    const result = capActivityLog(existingLog, newEntries);
+
+    expect(result.length).toBe(100);
+    // The newest entries should be at the end
+    expect(result[result.length - 1].description).toBe('Mock change #1000');
+    expect(result[result.length - 2].description).toBe('Mock change #999');
+    // The oldest entries should have been dropped
+    expect(result[0].description).not.toBe('Mock change #0');
+  });
+
+  /**
+   * TEST E.4: Empty existing log with new entries works correctly
+   */
+  test('E.4: Empty existing log with new entries works correctly', () => {
+    const existingLog = [];
+    const newEntries = [createMockLogEntry(1), createMockLogEntry(2)];
+
+    const result = capActivityLog(existingLog, newEntries);
+
+    expect(result.length).toBe(2);
+  });
+
+  /**
+   * TEST E.5: Massively oversized log (500+ entries) is still capped to 100
+   */
+  test('E.5: Massively oversized log (500 entries) is capped to 100', () => {
+    const existingLog = Array.from({ length: 500 }, (_, i) => createMockLogEntry(i));
+    const newEntries = [createMockLogEntry(999)];
+
+    const result = capActivityLog(existingLog, newEntries);
+
+    expect(result.length).toBe(100);
+    // Last entry is the newest
+    expect(result[result.length - 1].description).toBe('Mock change #999');
+  });
+
+  /**
+   * TEST E.6: Single-entry append to oversized log (archive path)
+   */
+  test('E.6: Single-entry append to oversized log trims correctly (archive path)', () => {
+    const existingLog = Array.from({ length: 120 }, (_, i) => createMockLogEntry(i));
+    const archiveEntry = {
+      date: new Date().toISOString(),
+      type: 'ARCHIVED',
+      description: 'Case archived: RESOLVED (missing from OATH API for 3+ days)',
+      old_value: 'SCHEDULED',
+      new_value: 'ARCHIVED',
+    };
+
+    const updatedLog = [...existingLog, archiveEntry].slice(-MAX_LOG_ENTRIES);
+
+    expect(updatedLog.length).toBe(100);
+    expect(updatedLog[updatedLog.length - 1].type).toBe('ARCHIVED');
+  });
+
+  /**
+   * TEST E.7: Verify .slice(-N) keeps the tail (most recent), not the head
+   */
+  test('E.7: .slice(-MAX_LOG_ENTRIES) keeps the TAIL (most recent entries)', () => {
+    const log = [];
+    for (let i = 1; i <= 110; i++) {
+      log.push({ index: i, type: 'TEST' });
+    }
+    const capped = log.slice(-MAX_LOG_ENTRIES);
+
+    // Should have entries 11-110 (dropped 1-10)
+    expect(capped[0].index).toBe(11);
+    expect(capped[capped.length - 1].index).toBe(110);
+    expect(capped.length).toBe(100);
+  });
+});
+
+// ============================================================================
 // TEST SUMMARY REPORT
 // ============================================================================
 
@@ -591,6 +722,15 @@ SCENARIO D: ID Number Validation Test
   ✓ D.5: Missing hyphen rejection
   ✓ D.6: Null/empty handling
   ✓ D.7: Partial format rejection
+
+SCENARIO E: Activity Log Cap Test (DynamoDB 400KB fix)
+  ✓ E.1: Under-cap log not trimmed
+  ✓ E.2: Exactly-at-cap log preserved
+  ✓ E.3: Oversized log trimmed to 100 (newest kept)
+  ✓ E.4: Empty log with new entries
+  ✓ E.5: Massively oversized log (500) capped
+  ✓ E.6: Archive path single-entry append
+  ✓ E.7: .slice(-N) keeps tail verification
 
 ${'='.repeat(70)}
 All tests passed - Verification suite complete

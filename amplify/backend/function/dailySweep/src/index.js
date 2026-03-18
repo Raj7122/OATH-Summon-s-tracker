@@ -51,6 +51,7 @@ const CLIENTS_TABLE = process.env.CLIENTS_TABLE || 'Client-dev';
 const SUMMONS_TABLE = process.env.SUMMONS_TABLE || 'Summons-dev';
 const SYNC_STATUS_TABLE = process.env.SYNC_STATUS_TABLE || 'SyncStatus-dev';
 const NYC_API_TOKEN = process.env.NYC_OPEN_DATA_APP_TOKEN;
+const NYC_API_TOKEN_2 = process.env.NYC_OPEN_DATA_APP_TOKEN_2 || NYC_API_TOKEN; // Second token for parallel rate-limit buckets
 const DATA_EXTRACTOR_FUNCTION = process.env.DATA_EXTRACTOR_FUNCTION;
 
 // NYC Open Data API Configuration
@@ -58,14 +59,20 @@ const NYC_API_URL = 'https://data.cityofnewyork.us/resource/jz4z-kudi.json';
 
 // Priority Queue Configuration
 const MAX_OCR_REQUESTS_PER_DAY = 500;
+
+// Activity log size cap to prevent DynamoDB 400KB item size limit
+const MAX_LOG_ENTRIES = 100;
 const OCR_THROTTLE_MS = 2000; // 2 seconds between requests
 const MAX_OCR_FAILURES = 3; // Max retry attempts before giving up
 const GHOST_GRACE_DAYS = 3; // Days before archiving missing records
+const API_CONCURRENCY = 8; // Max parallel NYC API requests (4 per token with dual tokens)
+const PHASE1_TIMEOUT_BUFFER_MS = 120000; // 2 min buffer before Lambda timeout
+const FETCH_TIMEOUT_MS = 30000; // 30s per-request timeout to prevent slow Socrata queries from blocking batches
 
 /**
  * Main handler for the daily sweep Lambda function
  */
-exports.handler = async (event) => {
+exports.handler = async (event, context) => {
   console.log('='.repeat(60));
   console.log('DAILY SWEEP - INCREMENTAL SYNC WITH PRIORITY QUEUING v2.0');
   console.log('Started:', new Date().toISOString());
@@ -91,19 +98,46 @@ exports.handler = async (event) => {
     console.log('PHASE 1: METADATA SYNC (Unlimited Cost)');
     console.log('='.repeat(60));
 
-    const phase1Results = await executePhase1MetadataSync();
+    const phase1Results = await executePhase1MetadataSync(context);
     console.log('\nPhase 1 Complete:', phase1Results);
 
     // Update SyncStatus with Phase 1 results
     await updateSyncStatus({
       phase1_status: phase1Results.errors > 0 ? 'partial' : 'success',
       phase1_completed_at: new Date().toISOString(),
+      phase1_clients_processed: phase1Results.clientsProcessed,
+      phase1_cases_from_api: phase1Results.casesFromAPI,
       phase1_new_records: phase1Results.newRecordsCreated,
       phase1_updated_records: phase1Results.recordsUpdated,
       phase1_unchanged_records: phase1Results.recordsSkipped,
+      phase1_flagged_for_ocr: phase1Results.recordsFlaggedForOCR,
+      phase1_records_archived: phase1Results.recordsArchived,
+      phase1_error_count: phase1Results.errors,
       oath_api_reachable: true,
       oath_api_last_check: new Date().toISOString(),
+      oath_api_error: null,  // Clear any stale error from previous failed runs
     });
+
+    // Check if Phase 1 timed out or we're running low on time — skip Phase 2 if so
+    if (phase1Results.timedOut || context.getRemainingTimeInMillis() < 90000) {
+      console.log('\n⚠️ Phase 1 timed out or insufficient time remaining — skipping Phase 2');
+      console.log(`  Remaining time: ${Math.round(context.getRemainingTimeInMillis() / 1000)}s`);
+      await updateSyncStatus({
+        phase1_status: phase1Results.timedOut ? 'partial_timeout' : (phase1Results.errors > 0 ? 'partial' : 'success'),
+        phase2_status: 'skipped_timeout',
+        phase2_completed_at: new Date().toISOString(),
+        sync_in_progress: false,
+        last_successful_sync: new Date().toISOString(),
+      });
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          message: 'Daily sweep completed (Phase 2 skipped due to timeout)',
+          phase1: phase1Results,
+          phase2: 'skipped_timeout',
+        }),
+      };
+    }
 
     // ========================================================================
     // PHASE 2: PRIORITY QUEUE OCR
@@ -112,10 +146,13 @@ exports.handler = async (event) => {
     console.log('PHASE 2: PRIORITY QUEUE OCR (Smart 500)');
     console.log('='.repeat(60));
 
+    // One-time reset: give permanently-failed records (ocr_failure_count >= 3) another chance
+    await resetPermanentlyFailedRecords();
+
     const remainingQuota = MAX_OCR_REQUESTS_PER_DAY - ocrCounter.ocr_processed_today;
     console.log(`Remaining OCR quota for today: ${remainingQuota}`);
 
-    const phase2Results = await executePhase2PriorityOCR(remainingQuota);
+    const phase2Results = await executePhase2PriorityOCR(remainingQuota, context);
     console.log('\nPhase 2 Complete:', phase2Results);
 
     // Update SyncStatus with Phase 2 results
@@ -125,6 +162,12 @@ exports.handler = async (event) => {
       phase2_ocr_processed: phase2Results.ocrSuccess,
       phase2_ocr_remaining: phase2Results.pendingRecords - phase2Results.recordsProcessed,
       phase2_ocr_failed: phase2Results.ocrFailed,
+      phase2_ocr_healed: phase2Results.ocrHealed,
+      phase2_ocr_skipped: phase2Results.ocrSkipped,
+      phase2_excluded_max_failures: phase2Results.ocrExcludedMaxFailures,
+      phase2_excluded_old_hearings: phase2Results.ocrExcludedOldHearings,
+      phase2_graceful_exit: phase2Results.gracefulExit,
+      phase2_rate_limit_hits: phase2Results.rateLimitHits,
       ocr_processed_today: ocrCounter.ocr_processed_today + phase2Results.ocrSuccess,
     });
 
@@ -141,6 +184,7 @@ exports.handler = async (event) => {
     await updateSyncStatus({
       sync_in_progress: false,
       last_successful_sync: new Date().toISOString(),
+      oath_api_error: null,  // Clear any stale error from previous failed runs
     });
 
     console.log('\n' + '='.repeat(60));
@@ -188,7 +232,7 @@ exports.handler = async (event) => {
  * - Flags new/incomplete records with ocr_status = 'pending'
  * - Detects "ghost" records missing from API for 3+ days
  */
-async function executePhase1MetadataSync() {
+async function executePhase1MetadataSync(context) {
   const results = {
     clientsProcessed: 0,
     casesFromAPI: 0,
@@ -198,6 +242,7 @@ async function executePhase1MetadataSync() {
     recordsFlaggedForOCR: 0,
     recordsArchived: 0,
     errors: 0,
+    timedOut: false,
   };
 
   const syncTime = new Date().toISOString();
@@ -217,18 +262,60 @@ async function executePhase1MetadataSync() {
   const clientNameMap = buildClientNameMap(clients);
   console.log(`Built name map with ${clientNameMap.size} unique names`);
 
-  // Step 3: Fetch all summonses from NYC API
-  const apiSummonses = await fetchNYCDataForClients(clients);
+  // Step 3: Fetch all summonses from NYC API (parallelized with timeout awareness)
+  const apiSummonses = await fetchNYCDataForClients(clients, context);
   results.casesFromAPI = apiSummonses.length;
   console.log(`Fetched ${apiSummonses.length} summonses from NYC API`);
 
-  // Step 4: Process each summons - UPDATE METADATA ONLY
+  // Step 3b: Pre-load all existing summons into a Map for O(1) lookups
+  // This avoids ~3600 individual DB queries during processing
+  const allExisting = await fetchAllActiveSummons();
+  const existingSummonsMap = new Map();
+  for (const record of allExisting) {
+    if (record.summons_number) {
+      existingSummonsMap.set(record.summons_number, record);
+    }
+  }
+  console.log(`Pre-loaded ${existingSummonsMap.size} existing summons for fast lookup`);
+
+  // Step 3c: Trim any oversized activity_log arrays to prevent DynamoDB 400KB limit
+  let trimmedCount = 0;
+  for (const record of allExisting) {
+    if (record.activity_log && record.activity_log.length > MAX_LOG_ENTRIES) {
+      const trimmedLog = record.activity_log.slice(-MAX_LOG_ENTRIES);
+      await dynamodb.update({
+        TableName: SUMMONS_TABLE,
+        Key: { id: record.id },
+        UpdateExpression: 'SET activity_log = :log, updatedAt = :updatedAt',
+        ExpressionAttributeValues: {
+          ':log': trimmedLog,
+          ':updatedAt': syncTime,
+        },
+      }).promise();
+      // Update the cached record so downstream processing uses the trimmed log
+      record.activity_log = trimmedLog;
+      trimmedCount++;
+    }
+  }
+  if (trimmedCount > 0) {
+    console.log(`Trimmed oversized activity_log on ${trimmedCount} records (cap: ${MAX_LOG_ENTRIES})`);
+  }
+
+  // Step 4: Process each summons - UPDATE METADATA ONLY (with timeout guard)
+  let phase1TimedOut = false;
   for (const apiSummons of apiSummonses) {
+    // Timeout guard: break if less than 60s remaining
+    if (context.getRemainingTimeInMillis() < 60000) {
+      console.warn(`⚠️ Phase 1 timeout guard triggered — ${Math.round(context.getRemainingTimeInMillis() / 1000)}s remaining, stopping processing`);
+      phase1TimedOut = true;
+      break;
+    }
+
     try {
       const ticketNumber = apiSummons.ticket_number;
       seenSummonsNumbers.add(ticketNumber);
 
-      const processResult = await processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime);
+      const processResult = await processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime, existingSummonsMap);
 
       if (processResult.action === 'created') {
         results.newRecordsCreated++;
@@ -247,11 +334,16 @@ async function executePhase1MetadataSync() {
     }
   }
 
-  // Step 5: Ghost Detection - Find records missing from API
-  console.log('\nRunning Ghost Detection...');
-  const ghostResults = await detectAndHandleGhostSummons(seenSummonsNumbers, syncTime);
-  results.recordsArchived = ghostResults.archived;
-  console.log(`Ghost Detection: ${ghostResults.warnings} warnings, ${ghostResults.archived} archived`);
+  // Step 5: Ghost Detection - skip if timed out (incomplete data would cause false positives)
+  if (phase1TimedOut) {
+    console.log('\nSkipping Ghost Detection — Phase 1 timed out (incomplete API data)');
+    results.timedOut = true;
+  } else {
+    console.log('\nRunning Ghost Detection...');
+    const ghostResults = await detectAndHandleGhostSummons(seenSummonsNumbers, syncTime);
+    results.recordsArchived = ghostResults.archived;
+    console.log(`Ghost Detection: ${ghostResults.warnings} warnings, ${ghostResults.archived} archived`);
+  }
 
   return results;
 }
@@ -260,7 +352,7 @@ async function executePhase1MetadataSync() {
  * Process a single summons - UPDATE METADATA ONLY (no OCR trigger)
  * Now includes Activity Log for audit trail and last_metadata_sync tracking
  */
-async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime) {
+async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime, existingSummonsMap) {
   const ticketNumber = apiSummons.ticket_number;
   const respondentFirstName = apiSummons.respondent_first_name || '';
   const respondentLastName = apiSummons.respondent_last_name || '';
@@ -270,17 +362,42 @@ async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime) {
     return { action: 'skipped', reason: 'no respondent name' };
   }
 
-  // Match to client
-  const normalizedName = normalizeCompanyName(respondentFullName);
-  const noSpaceName = normalizedName.replace(/\s/g, '');
-  let matchedClient = clientNameMap.get(normalizedName) || clientNameMap.get(noSpaceName);
+  // Match to client using multiple strategies
+  let matchedClient = matchRespondentToClient(respondentFirstName, respondentLastName, clientNameMap);
 
   if (!matchedClient) {
     return { action: 'skipped', reason: 'no client match' };
   }
 
-  // Check if summons already exists
-  const existingSummons = await findExistingSummons(ticketNumber);
+  // Plate filter: If client has plate filtering enabled, only accept
+  // summonses whose plate (from violation_details) matches the filter list.
+  // This runs before the DB lookup to reject non-matching plates cheaply.
+  if (matchedClient.plate_filter_enabled && matchedClient.plate_filter_list?.length > 0) {
+    const detailsPlate = extractPlateFromViolationDetails(apiSummons.violation_details || '');
+    if (!detailsPlate) {
+      return { action: 'skipped', reason: 'plate filter active but no plate in details' };
+    }
+    const normalizedPlate = detailsPlate.replace(/[^A-Z0-9]/g, '');
+    const plateList = matchedClient.plate_filter_list.map(p => p.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+    if (!plateList.includes(normalizedPlate)) {
+      return { action: 'skipped', reason: `plate ${detailsPlate} not in filter` };
+    }
+  }
+
+  // Check if summons already exists (O(1) Map lookup, with DB fallback to prevent duplicates)
+  let existingSummons = existingSummonsMap
+    ? existingSummonsMap.get(ticketNumber) || null
+    : null;
+
+  // Dedup guard: if the pre-loaded map missed this record (stale/incomplete scan),
+  // do a direct DB query before creating a duplicate. This catches edge cases where
+  // the full-table scan in fetchAllActiveSummons() returned partial results.
+  if (!existingSummons) {
+    existingSummons = await findExistingSummons(ticketNumber);
+    if (existingSummons) {
+      console.log(`⚠ Dedup guard caught existing record for ${ticketNumber} (missed by pre-loaded map)`);
+    }
+  }
 
   // Extract and normalize NYC API data
   const incomingData = extractAPIMetadata(apiSummons);
@@ -296,9 +413,9 @@ async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime) {
       // Determine if record needs OCR (has no violation_narrative)
       const needsOCR = !existingSummons.violation_narrative && existingSummons.ocr_status !== 'complete';
 
-      // Get existing activity log and append new entries
+      // Get existing activity log and append new entries (capped to prevent DynamoDB 400KB limit)
       const existingLog = existingSummons.activity_log || [];
-      const updatedLog = [...existingLog, ...changeResult.activityEntries];
+      const updatedLog = [...existingLog, ...changeResult.activityEntries].slice(-MAX_LOG_ENTRIES);
 
       await updateSummonsMetadataWithLog(
         existingSummons.id,
@@ -536,7 +653,7 @@ async function detectAndHandleGhostSummons(seenSummonsNumbers, syncTime) {
           description: `Case archived: ${archiveReason} (missing from OATH API for ${GHOST_GRACE_DAYS}+ days)`,
           old_value: dbSummons.status || 'Unknown',
           new_value: 'ARCHIVED',
-        }];
+        }].slice(-MAX_LOG_ENTRIES);
 
         await dynamodb.update({
           TableName: SUMMONS_TABLE,
@@ -612,7 +729,7 @@ async function fetchAllActiveSummons() {
  * - Sorts by priority score (lower = higher priority)
  * - Processes up to remaining daily quota with throttling
  */
-async function executePhase2PriorityOCR(remainingQuota = MAX_OCR_REQUESTS_PER_DAY) {
+async function executePhase2PriorityOCR(remainingQuota = MAX_OCR_REQUESTS_PER_DAY, context) {
   const results = {
     pendingRecords: 0,
     recordsProcessed: 0,
@@ -682,6 +799,14 @@ async function executePhase2PriorityOCR(remainingQuota = MAX_OCR_REQUESTS_PER_DA
 
   // Step 4: Process with throttling
   for (let i = 0; i < recordsToProcess.length; i++) {
+    // Timeout guard: stop if < 30 seconds remain to allow cleanup
+    // (sync_in_progress = false, last_successful_sync update)
+    if (context && typeof context.getRemainingTimeInMillis === 'function' && context.getRemainingTimeInMillis() < 30000) {
+      console.log(`TIMEOUT GUARD: ${context.getRemainingTimeInMillis()}ms remaining. Exiting Phase 2 after ${i} records.`);
+      results.gracefulExit = true;
+      break;
+    }
+
     const record = recordsToProcess[i];
     results.recordsProcessed++;
 
@@ -822,8 +947,8 @@ function calculateTieredPriorityScore(summons) {
  * This includes:
  * 1. Records with ocr_status = 'pending' (new records awaiting OCR)
  * 2. Records with no ocr_status and no violation_narrative (legacy records)
- * 3. SELF-HEALING: Records with ocr_status = 'complete' but missing id_number
- *    (these have partial OCR data and need re-processing)
+ * 3. SELF-HEALING: Records with ocr_status = 'complete' but missing any critical OCR field
+ *    (id_number, license_plate_ocr, idling_duration_ocr, vehicle_type_ocr, prior_offense_status, name_on_summons_ocr)
  */
 async function fetchPendingOCRRecords() {
   const allRecords = [];
@@ -849,7 +974,7 @@ async function fetchPendingOCRRecords() {
     lastEvaluatedKey = result.LastEvaluatedKey;
   } while (lastEvaluatedKey);
 
-  // Second scan: Get self-healing candidates (complete but missing id_number)
+  // Second scan: Get self-healing candidates (complete but missing critical OCR fields)
   const selfHealingRecords = await fetchSelfHealingCandidates();
 
   // Track counts for logging
@@ -892,8 +1017,8 @@ async function fetchSelfHealingCandidates() {
   do {
     const params = {
       TableName: SUMMONS_TABLE,
-      // Records marked complete but missing id_number (have violation_narrative)
-      FilterExpression: 'ocr_status = :complete AND attribute_exists(violation_narrative) AND attribute_not_exists(id_number) AND (is_archived <> :archived OR attribute_not_exists(is_archived))',
+      // Records marked complete but missing any critical OCR field (have violation_narrative)
+      FilterExpression: 'ocr_status = :complete AND attribute_exists(violation_narrative) AND (attribute_not_exists(id_number) OR attribute_not_exists(license_plate_ocr) OR attribute_not_exists(idling_duration_ocr) OR attribute_not_exists(vehicle_type_ocr) OR attribute_not_exists(prior_offense_status) OR attribute_not_exists(name_on_summons_ocr)) AND (is_archived <> :archived OR attribute_not_exists(is_archived))',
       ExpressionAttributeValues: {
         ':complete': 'complete',
         ':archived': true,
@@ -984,6 +1109,82 @@ async function incrementOCRFailureCount(id, errorReason) {
 }
 
 /**
+ * One-time reset of permanently-failed OCR records (ocr_failure_count >= 3).
+ * Gated by last_ocr_reset on SyncStatus — only runs if never run before or
+ * if last_ocr_reset is cleared manually to re-trigger.
+ */
+async function resetPermanentlyFailedRecords() {
+  try {
+    // Check SyncStatus for last_ocr_reset flag
+    const syncResult = await dynamodb.get({
+      TableName: SYNC_STATUS_TABLE,
+      Key: { id: 'GLOBAL' },
+    }).promise();
+
+    const syncStatus = syncResult.Item;
+    if (syncStatus && syncStatus.last_ocr_reset) {
+      console.log(`OCR failure reset already performed on ${syncStatus.last_ocr_reset}. Skipping.`);
+      return;
+    }
+
+    // Scan for records with ocr_failure_count >= 3
+    const failedRecords = [];
+    let lastEvaluatedKey = null;
+
+    do {
+      const params = {
+        TableName: SUMMONS_TABLE,
+        FilterExpression: 'ocr_failure_count >= :maxFailures AND (is_archived <> :archived OR attribute_not_exists(is_archived))',
+        ExpressionAttributeValues: {
+          ':maxFailures': 3,
+          ':archived': true,
+        },
+      };
+
+      if (lastEvaluatedKey) {
+        params.ExclusiveStartKey = lastEvaluatedKey;
+      }
+
+      const result = await dynamodb.scan(params).promise();
+      failedRecords.push(...(result.Items || []));
+      lastEvaluatedKey = result.LastEvaluatedKey;
+    } while (lastEvaluatedKey);
+
+    console.log(`Found ${failedRecords.length} permanently-failed OCR records (failure_count >= 3)`);
+
+    if (failedRecords.length === 0) {
+      // Still mark as done so we don't scan again
+      await updateSyncStatus({ last_ocr_reset: new Date().toISOString() });
+      return;
+    }
+
+    // Reset failure counts in batches of 25 (DynamoDB batch limit)
+    let resetCount = 0;
+    for (const record of failedRecords) {
+      await dynamodb.update({
+        TableName: SUMMONS_TABLE,
+        Key: { id: record.id },
+        UpdateExpression: 'SET ocr_failure_count = :zero, ocr_status = :pending, updatedAt = :updatedAt REMOVE ocr_failure_reason',
+        ExpressionAttributeValues: {
+          ':zero': 0,
+          ':pending': 'pending',
+          ':updatedAt': new Date().toISOString(),
+        },
+      }).promise();
+      resetCount++;
+    }
+
+    console.log(`Reset ${resetCount} permanently-failed OCR records for retry`);
+
+    // Write the flag so this doesn't run again
+    await updateSyncStatus({ last_ocr_reset: new Date().toISOString() });
+  } catch (error) {
+    console.error('Error resetting permanently-failed OCR records:', error);
+    // Non-fatal — don't block Phase 2
+  }
+}
+
+/**
  * Check if record already has OCR data (safety check)
  */
 function hasExistingOCRData(record) {
@@ -1001,8 +1202,12 @@ function needsOCRHealing(record) {
   const hasNarrative = record.violation_narrative && record.violation_narrative.length > 0;
   const missingIdNumber = !record.id_number;
   const missingLicensePlate = !record.license_plate_ocr;
+  const missingIdlingDuration = !record.idling_duration_ocr;
+  const missingVehicleType = !record.vehicle_type_ocr;
+  const missingPriorOffense = !record.prior_offense_status;
+  const missingNameOnSummons = !record.name_on_summons_ocr;
 
-  return hasNarrative && (missingIdNumber || missingLicensePlate);
+  return hasNarrative && (missingIdNumber || missingLicensePlate || missingIdlingDuration || missingVehicleType || missingPriorOffense || missingNameOnSummons);
 }
 
 /**
@@ -1090,9 +1295,161 @@ function normalizeCompanyName(name) {
   return name
     .toLowerCase()
     .trim()
-    .replace(/\s+/g, ' ')
+    .replace(/[&\-]/g, ' ')                 // normalize ampersand and hyphen to space (e.g., "COCA-COLA" -> "COCA COLA")
+    .replace(/\s+/g, ' ')                  // collapse multiple spaces
     .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '')
     .trim();
+}
+
+/**
+ * SUFFIX FRAGMENTS - Common business suffixes and their truncation fragments
+ *
+ * NYC Open Data API sometimes splits company names in unexpected ways, putting
+ * the tail end of "LLC", "INC", "CORP" etc. into the first_name field.
+ *
+ * Example: "CERCONE EXTERIOR RESTORATION CORP" becomes:
+ *   first_name: "ORP"  (the tail of "CORP")
+ *   last_name: "CERCONE EXTERIOR RESTORATION C"
+ *
+ * This array contains both full suffixes and their common truncation fragments.
+ */
+const SUFFIX_FRAGMENTS = [
+  // Full suffixes (lowercase for comparison)
+  'llc', 'inc', 'corp', 'co', 'ltd',
+  // Fragments from CORP truncation
+  'orp', 'rp', 'p',
+  // Fragments from INC truncation
+  'nc', 'c',
+  // Fragments from LLC truncation
+  'lc', 'l',
+  // Fragments from LTD truncation
+  'td', 'd',
+];
+
+/**
+ * Check if a firstName looks like a truncated business suffix fragment
+ *
+ * Returns true if:
+ * - firstName is a known suffix fragment (e.g., "ORP", "C", "LLC")
+ * - firstName is very short (3 chars or less) - likely a split artifact
+ *
+ * @param {string} firstName - The first_name from NYC API
+ * @returns {boolean} True if this looks like a suffix fragment
+ */
+function looksLikeSuffixFragment(firstName) {
+  if (!firstName) return false;
+  const lower = firstName.toLowerCase().trim();
+  // Check if it's a known suffix fragment OR very short (likely split artifact)
+  return SUFFIX_FRAGMENTS.includes(lower) || lower.length <= 3;
+}
+
+/**
+ * Extract license plate number from the violation_details API field.
+ * The field often contains text like "LICENSE PLATE # 41168PF" or similar patterns.
+ *
+ * @param {string} violationDetails - Raw violation_details text from NYC API
+ * @returns {string|null} Uppercase plate string or null if not found
+ */
+function extractPlateFromViolationDetails(violationDetails) {
+  if (!violationDetails) return null;
+  // Match patterns like "LICENSE PLATE # ABC1234", "LICENSE PLATE #ABC1234", "LICENSE PLATE ABC1234"
+  const match = violationDetails.match(/LICENSE\s+PLATE\s*#?\s*([A-Z0-9]+)/i);
+  return match ? match[1].toUpperCase() : null;
+}
+
+/**
+ * Match respondent name to a client using multiple strategies
+ *
+ * MATCHING STRATEGIES (in order of priority):
+ * 1. Direct match: Full name (first + last) normalized
+ * 2. Suffix Fragment fix: If first_name looks like a truncated business suffix
+ *    (e.g., "ORP" from "CORP", "C" from "INC"), try matching with just last_name
+ *    (handles NYC API's quirky name splitting for company names)
+ * 3. Partial word match: Check if normalized respondent name starts with any client name
+ *    (handles cases like "SPRAGUE OPERATING" matching "SPRAGUE OPERATING RESOURCES")
+ * 4. Fallback lastName-only match: If no match found and lastName alone is substantial,
+ *    try matching with just lastName (catches partial company names like "CERCONE")
+ *
+ * @param {string} firstName - Respondent first name from API
+ * @param {string} lastName - Respondent last name from API
+ * @param {Map} clientNameMap - Map of normalized names to client objects
+ * @returns {Object|null} Matched client or null
+ */
+function matchRespondentToClient(firstName, lastName, clientNameMap) {
+  const fullName = `${firstName} ${lastName}`.trim();
+
+  if (!fullName) return null;
+
+  // Strategy 1: Direct match with full name
+  const normalizedFull = normalizeCompanyName(fullName);
+  const noSpaceFull = normalizedFull.replace(/\s/g, '');
+
+  let match = clientNameMap.get(normalizedFull) || clientNameMap.get(noSpaceFull);
+  if (match) return match;
+
+  // Strategy 2: Suffix Fragment fix - detect if firstName looks like a truncated
+  // business suffix (e.g., "ORP" from "CORP", "C" from "INC", "LC" from "LLC")
+  // NYC API sometimes splits "CERCONE EXTERIOR RESTORATION CORP" into:
+  //   first_name: "ORP", last_name: "CERCONE EXTERIOR RESTORATION C"
+  // Try matching with just the last name in these cases
+  if (firstName && looksLikeSuffixFragment(firstName) && lastName) {
+    const normalizedLast = normalizeCompanyName(lastName);
+    const noSpaceLast = normalizedLast.replace(/\s/g, '');
+
+    match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
+    if (match) {
+      console.log(`  Suffix Fragment Match: "${fullName}" → "${match.name}" (firstName "${firstName}" looks like suffix fragment)`);
+      return match;
+    }
+  }
+
+  // Strategy 3: Partial word match - check if any client name starts with or
+  // is contained in the respondent name (handles truncated/variant names)
+  // This catches "SPRAGUE OPERATING" matching client AKA "SPRAGUE OPERATING RESOURCES"
+  for (const [clientNormName, client] of clientNameMap.entries()) {
+    // Check if respondent name starts with client name (respondent is more specific)
+    if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) {
+      console.log(`  Partial Match (respondent contains client): "${fullName}" → "${client.name}"`);
+      return client;
+    }
+    // Check if client name starts with respondent name (client is more specific)
+    // But only if respondent name is substantial (at least 10 chars after normalization)
+    if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) {
+      console.log(`  Partial Match (client contains respondent): "${fullName}" → "${client.name}"`);
+      return client;
+    }
+  }
+
+  // Strategy 4: Fallback lastName-only match - if lastName alone is substantial,
+  // try matching it directly. This catches cases like:
+  //   first_name: "", last_name: "CERCONE" (partial company name only)
+  // The lastName must be at least 5 chars to avoid false positives
+  if (lastName && lastName.length >= 5) {
+    const normalizedLast = normalizeCompanyName(lastName);
+    const noSpaceLast = normalizedLast.replace(/\s/g, '');
+
+    match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
+    if (match) {
+      console.log(`  Fallback lastName Match: "${fullName}" → "${match.name}" (using lastName "${lastName}" only)`);
+      return match;
+    }
+
+    // Also check partial matches with lastName only
+    for (const [clientNormName, client] of clientNameMap.entries()) {
+      // Check if lastName starts with client name (rare but possible)
+      if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) {
+        console.log(`  Fallback Partial Match (lastName contains client): "${lastName}" → "${client.name}"`);
+        return client;
+      }
+      // Check if any client name starts with lastName
+      if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) {
+        console.log(`  Fallback Partial Match (client contains lastName): "${lastName}" → "${client.name}"`);
+        return client;
+      }
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -1131,69 +1488,137 @@ function buildClientNameMap(clients) {
  *   - IDLING violations only (charge_1_code_description or charge_2_code_description contains 'IDLING')
  *   - Hearing date >= 2022-01-01 (per TRD requirements)
  */
-async function fetchNYCDataForClients(clients) {
+async function fetchNYCDataForClients(clients, context) {
   const allSummonses = [];
   const seenTickets = new Set();
-
-  const headers = {
-    'X-App-Token': NYC_API_TOKEN,
-    'Content-Type': 'application/json',
-  };
 
   // Build unique search terms from client names and AKAs
   const searchTerms = new Set();
   clients.forEach(client => {
-    const mainName = client.name.replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '').trim();
+    const mainName = client.name
+      .replace(/&/g, ' ')                              // strip ampersand for API LIKE matching (keep hyphens — LIKE is literal)
+      .replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (mainName.length > 3) searchTerms.add(mainName.toUpperCase());
 
     if (client.akas && Array.isArray(client.akas)) {
       client.akas.forEach(aka => {
-        const akaMain = aka.replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '').trim();
+        const akaMain = aka
+          .replace(/&/g, ' ')                          // strip ampersand for API LIKE matching (keep hyphens — LIKE is literal)
+          .replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '')
+          .replace(/\s+/g, ' ')
+          .trim();
         if (akaMain.length > 3) searchTerms.add(akaMain.toUpperCase());
       });
     }
   });
 
-  console.log(`Searching for ${searchTerms.size} unique client name patterns...`);
+  console.log(`Searching for ${searchTerms.size} unique client name patterns (concurrency: ${API_CONCURRENCY})...`);
   console.log('FILTERS: IDLING violations only, hearing_date >= 2022-01-01');
 
-  for (const searchTerm of searchTerms) {
-    try {
+  // Pagination constants: fetch 500 per page, cap at 5000 per search term
+  const PAGE_SIZE = 500;
+  const MAX_PER_TERM = 5000;
+
+  // Dual-token array for round-robin distribution across Socrata rate-limit buckets
+  const tokens = [NYC_API_TOKEN, NYC_API_TOKEN_2];
+
+  // Inner function to fetch all pages for a single search term
+  // Accepts apiToken to distribute requests across independent rate-limit buckets
+  async function fetchForTerm(searchTerm, apiToken) {
+    const termSummonses = [];
+    const escapedTerm = searchTerm.replace(/'/g, "''");
+
+    const termHeaders = {
+      'X-App-Token': apiToken,
+      'Content-Type': 'application/json',
+    };
+
+    // CRITICAL FILTERS:
+    // 1. Match client name in respondent_last_name
+    // 2. IDLING violations only (check both charge fields)
+    // 3. Hearing date >= 2022-01-01
+    const whereClause = [
+      `upper(respondent_last_name) like '%${escapedTerm}%'`,
+      `(upper(charge_1_code_description) like '%IDLING%' OR upper(charge_2_code_description) like '%IDLING%')`,
+      `hearing_date >= '2022-01-01T00:00:00'`
+    ].join(' AND ');
+
+    let offset = 0;
+    let pageData;
+    let termTotal = 0;
+
+    do {
       const url = new URL(NYC_API_URL);
-      url.searchParams.append('$limit', 500);
-      const escapedTerm = searchTerm.replace(/'/g, "''");
-
-      // CRITICAL FILTERS:
-      // 1. Match client name in respondent_last_name
-      // 2. IDLING violations only (check both charge fields)
-      // 3. Hearing date >= 2022-01-01
-      const whereClause = [
-        `upper(respondent_last_name) like '%${escapedTerm}%'`,
-        `(upper(charge_1_code_description) like '%IDLING%' OR upper(charge_2_code_description) like '%IDLING%')`,
-        `hearing_date >= '2022-01-01T00:00:00'`
-      ].join(' AND ');
-
+      url.searchParams.append('$limit', PAGE_SIZE);
+      url.searchParams.append('$offset', offset);
       url.searchParams.append('$where', whereClause);
 
-      const response = await fetch(url.toString(), { headers });
+      // AbortController enforces per-request timeout so one slow Socrata query
+      // can't block the entire batch for minutes
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+      let response;
+      try {
+        response = await fetch(url.toString(), { headers: termHeaders, signal: controller.signal });
+      } catch (err) {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {
+          console.warn(`  ⏱️ Timeout (${FETCH_TIMEOUT_MS / 1000}s) for "${searchTerm}" (offset ${offset}) — skipping remaining pages`);
+        } else {
+          console.error(`  Fetch error for "${searchTerm}" (offset ${offset}):`, err.message);
+        }
+        break;
+      }
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
-        console.error(`NYC API error for "${searchTerm}": ${response.status}`);
-        continue;
+        const errorBody = await response.text().catch(() => '');
+        console.error(`NYC API error for "${searchTerm}" (offset ${offset}): ${response.status} - ${errorBody}`);
+        break;
       }
 
-      const data = await response.json();
+      pageData = await response.json();
+      termSummonses.push(...pageData);
+      termTotal += pageData.length;
+      offset += pageData.length;
+    } while (pageData.length === PAGE_SIZE && offset < MAX_PER_TERM);
 
-      for (const summons of data) {
-        if (!seenTickets.has(summons.ticket_number)) {
-          seenTickets.add(summons.ticket_number);
-          allSummonses.push(summons);
+    console.log(`  Found ${termTotal} IDLING (2022+) for "${searchTerm}"${termTotal >= MAX_PER_TERM ? ' (capped)' : ''}`);
+    return termSummonses;
+  }
+
+  // Process search terms in parallel chunks of API_CONCURRENCY
+  // Round-robin token assignment: 4 requests per token per batch
+  const termsArray = Array.from(searchTerms);
+  for (let i = 0; i < termsArray.length; i += API_CONCURRENCY) {
+    // Timeout guard: stop fetching if running low on time
+    if (context.getRemainingTimeInMillis() < PHASE1_TIMEOUT_BUFFER_MS) {
+      console.warn(`⚠️ fetchNYCDataForClients timeout guard — ${Math.round(context.getRemainingTimeInMillis() / 1000)}s remaining, processed ${i}/${termsArray.length} terms`);
+      break;
+    }
+
+    const chunk = termsArray.slice(i, i + API_CONCURRENCY);
+    const batchNum = Math.floor(i / API_CONCURRENCY) + 1;
+    const totalBatches = Math.ceil(termsArray.length / API_CONCURRENCY);
+    console.log(`\n  Batch ${batchNum}/${totalBatches}: fetching ${chunk.length} terms in parallel...`);
+
+    const settled = await Promise.allSettled(chunk.map((term, idx) => fetchForTerm(term, tokens[idx % tokens.length])));
+
+    // Dedup results from this batch into the global collections
+    for (const result of settled) {
+      if (result.status === 'fulfilled') {
+        for (const summons of result.value) {
+          if (!seenTickets.has(summons.ticket_number)) {
+            seenTickets.add(summons.ticket_number);
+            allSummonses.push(summons);
+          }
         }
+      } else {
+        console.error(`  Batch term failed:`, result.reason?.message || result.reason);
       }
-
-      console.log(`  Found ${data.length} IDLING (2022+) for "${searchTerm}"`);
-    } catch (error) {
-      console.error(`Error querying for "${searchTerm}":`, error.message);
     }
   }
 
@@ -1381,6 +1806,15 @@ function calculateChangesWithActivityLog(existingRecord, incomingData) {
     activityEntries,
   };
 }
+
+// Export internal functions for testing
+exports._testExports = {
+  normalizeCompanyName,
+  looksLikeSuffixFragment,
+  matchRespondentToClient,
+  buildClientNameMap,
+  extractPlateFromViolationDetails,
+};
 
 /**
  * Generate a UUID

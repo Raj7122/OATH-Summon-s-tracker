@@ -28,11 +28,6 @@ const dynamodb = new AWS.DynamoDB.DocumentClient();
 const SUMMONS_TABLE = process.env.SUMMONS_TABLE || 'Summons-dev';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Retry configuration for NYC PDF server (often rate-limits or times out)
-const MAX_FETCH_RETRIES = 3;
-const INITIAL_RETRY_DELAY_MS = 1000; // Start with 1 second
-const MAX_RETRY_DELAY_MS = 10000; // Cap at 10 seconds
-
 // Initialize Google Gemini AI
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
@@ -50,6 +45,13 @@ exports.handler = async (event) => {
     if (event.Records && event.Records.length > 0) {
       // DynamoDB Stream trigger format
       const record = event.Records[0];
+
+      // Skip REMOVE events — no NewImage to process
+      if (record.eventName === 'REMOVE') {
+        console.log('Skipping REMOVE event — no NewImage available');
+        return { statusCode: 200, body: JSON.stringify({ message: 'Skipped REMOVE event' }) };
+      }
+
       const newImage = record.dynamodb.NewImage;
 
       // Unmarshall DynamoDB attribute values
@@ -75,11 +77,13 @@ exports.handler = async (event) => {
     // This prevents wasting OCR credits on already-processed records
     const existingRecord = await fetchExistingRecord(summons_id);
 
-    // Check if record needs healing (has violation_narrative but missing key OCR fields)
+    // Check if record needs healing (has violation_narrative but missing any critical OCR field)
     const needsHealing = existingRecord &&
       existingRecord.violation_narrative &&
       existingRecord.violation_narrative.length > 0 &&
-      (!existingRecord.id_number || !existingRecord.license_plate_ocr);
+      (!existingRecord.id_number || !existingRecord.license_plate_ocr ||
+       !existingRecord.idling_duration_ocr || !existingRecord.vehicle_type_ocr ||
+       !existingRecord.prior_offense_status || !existingRecord.name_on_summons_ocr);
 
     // Skip if already fully OCR'd, UNLESS healing mode is enabled for partial records
     if (existingRecord && existingRecord.violation_narrative && existingRecord.violation_narrative.length > 0) {
@@ -88,6 +92,10 @@ exports.handler = async (event) => {
         console.log(`HEALING MODE: ${summons_number} has partial OCR data, re-extracting...`);
         console.log(`  - Missing id_number: ${!existingRecord.id_number}`);
         console.log(`  - Missing license_plate_ocr: ${!existingRecord.license_plate_ocr}`);
+        console.log(`  - Missing idling_duration_ocr: ${!existingRecord.idling_duration_ocr}`);
+        console.log(`  - Missing vehicle_type_ocr: ${!existingRecord.vehicle_type_ocr}`);
+        console.log(`  - Missing prior_offense_status: ${!existingRecord.prior_offense_status}`);
+        console.log(`  - Missing name_on_summons_ocr: ${!existingRecord.name_on_summons_ocr}`);
       } else if (healingMode && !needsHealing) {
         // Healing mode but record is already complete
         console.log(`SKIPPED (healing): ${summons_number} already fully OCR'd`);
@@ -207,8 +215,7 @@ exports.handler = async (event) => {
  */
 async function scrapeVideoPage(videoUrl) {
   try {
-    // Use retry logic for video page fetch as well
-    const response = await fetchWithRetry(videoUrl);
+    const response = await fetch(videoUrl);
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -245,73 +252,6 @@ async function scrapeVideoPage(videoUrl) {
 }
 
 /**
- * Fetch with retry and exponential backoff
- * Handles connection resets and rate limiting from NYC PDF server
- *
- * @param {string} url - URL to fetch
- * @param {Object} options - Fetch options
- * @param {number} maxRetries - Maximum number of retries
- * @returns {Promise<Response>} Fetch response
- */
-async function fetchWithRetry(url, options = {}, maxRetries = MAX_FETCH_RETRIES) {
-  let lastError;
-  let delay = INITIAL_RETRY_DELAY_MS;
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      // Add timeout to prevent hanging
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-
-      const response = await fetch(url, {
-        ...options,
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        return response;
-      }
-
-      // Non-retryable HTTP error (4xx)
-      if (response.status >= 400 && response.status < 500) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      // Server error (5xx) - retryable
-      lastError = new Error(`HTTP ${response.status}: ${response.statusText}`);
-      console.log(`Fetch attempt ${attempt}/${maxRetries} failed with ${response.status}, retrying in ${delay}ms...`);
-    } catch (error) {
-      lastError = error;
-
-      // Check if this is a retryable error
-      const isRetryable =
-        error.code === 'ECONNRESET' ||
-        error.code === 'ETIMEDOUT' ||
-        error.code === 'ENOTFOUND' ||
-        error.code === 'ECONNREFUSED' ||
-        error.type === 'system' ||
-        error.name === 'AbortError' ||
-        error.message.includes('socket hang up') ||
-        error.message.includes('network');
-
-      if (!isRetryable || attempt === maxRetries) {
-        throw lastError;
-      }
-
-      console.log(`Fetch attempt ${attempt}/${maxRetries} failed: ${error.message}, retrying in ${delay}ms...`);
-    }
-
-    // Wait before retry with exponential backoff
-    await new Promise(resolve => setTimeout(resolve, delay));
-    delay = Math.min(delay * 2, MAX_RETRY_DELAY_MS); // Exponential backoff capped at max
-  }
-
-  throw lastError;
-}
-
-/**
  * Extract structured data from PDF using Google Gemini API
  *
  * @param {string} pdfUrl - URL of the PDF summons
@@ -319,8 +259,8 @@ async function fetchWithRetry(url, options = {}, maxRetries = MAX_FETCH_RETRIES)
  */
 async function extractPDFData(pdfUrl) {
   try {
-    // Fetch the PDF as a buffer with retry logic
-    const response = await fetchWithRetry(pdfUrl);
+    // Fetch the PDF as a buffer
+    const response = await fetch(pdfUrl);
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -331,8 +271,7 @@ async function extractPDFData(pdfUrl) {
     // Convert PDF buffer to base64 for Gemini API
     const pdfBase64 = pdfBuffer.toString('base64');
 
-    // Initialize Gemini model for OCR
-    // Using gemini-2.5-flash - best accuracy, no rate limit issues on this account
+    // Initialize Gemini model
     const model = genAI.getGenerativeModel({
       model: 'gemini-2.5-flash'
     });
@@ -342,7 +281,7 @@ async function extractPDFData(pdfUrl) {
     const prompt = `You are an expert legal assistant analyzing a NYC OATH summons PDF for an idling violation. Extract the following fields and return ONLY a valid JSON object with no additional text or formatting:
 
 {
-  "license_plate_ocr": "license plate number",
+  "license_plate_ocr": "The vehicle's license plate number (digits and letters only, no state prefix). IMPORTANT: The plate may NOT be in a dedicated labeled field. Search ALL of these locations: (1) A 'License Plate' or 'Plate No' labeled field near the top, (2) The 'EQUIPMENT / APPARATUS IN VIOLATION' line (e.g., 'NY License Plate # 41168PF'), (3) Inside the 'DESCRIPTION OF VIOLATION' narrative text (e.g., 'License Plate # 41168PF idling'). Return ONLY the alphanumeric plate value (e.g., '41168PF'), not the state.",
   "id_number": "Look for the field labeled 'ID Number:' on the document. Format is YYYY-NNNNN or YYYY-NNNNNN (4-digit year, hyphen, then 5 or 6 digits). Examples: '2025-30846', '2025-030846'. CRITICAL: Only look for 'ID Number:' label - do NOT use any other field.",
   "vehicle_type_ocr": "vehicle type (e.g., truck, van, car)",
   "prior_offense_status": "first offense, repeat offense, or unknown",
@@ -441,8 +380,9 @@ async function updateSummonsWithExtractedDataAndLog(summonsId, extractedData, ac
     const existingRecord = await fetchExistingRecord(summonsId);
     const existingLog = existingRecord?.activity_log || [];
 
-    // Append the new activity entry
-    const updatedLog = [...existingLog, activityEntry];
+    // Append the new activity entry (capped to prevent DynamoDB 400KB limit)
+    const MAX_LOG_ENTRIES = 100;
+    const updatedLog = [...existingLog, activityEntry].slice(-MAX_LOG_ENTRIES);
 
     // Build update expression dynamically based on available data
     const updateExpressions = [];

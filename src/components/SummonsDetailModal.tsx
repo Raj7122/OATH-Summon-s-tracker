@@ -78,12 +78,22 @@ import AddCircleIcon from '@mui/icons-material/AddCircle';
 import WarningIcon from '@mui/icons-material/Warning';
 import PersonIcon from '@mui/icons-material/Person';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
+import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
+import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
+import ReceiptIcon from '@mui/icons-material/Receipt';
+
+// Import invoice context
+import { useInvoice } from '../contexts/InvoiceContext';
+import { SummonsForInvoice } from '../types/invoice';
 
 // Import shared types
-import { Summons, getStatusColor, ActivityLogEntry, AttributionData, DepFileDateAttribution, NoteComment, InternalStatusAttribution } from '../types/summons';
+import { Summons, getStatusColor, ActivityLogEntry, AttributionData, DepFileDateAttribution, NoteComment, InternalStatusAttribution, Attachment } from '../types/summons';
+import FileUploadSection from './FileUploadSection';
 import { isNewRecord, isUpdatedRecord } from '../types/summons';
 import { useAuth } from '../contexts/AuthContext';
 import { v4 as uuidv4 } from 'uuid';
+import { isInvoiced as isInvoicedLocally, getInvoiceDate as getInvoiceDateLocally, unmarkAsInvoiced } from '../utils/invoiceTracking';
 
 /**
  * Props for SummonsDetailModal component
@@ -96,7 +106,7 @@ interface SummonsDetailModalProps {
   /** Callback when modal is closed */
   onClose: () => void;
   /** Callback when data is updated (for refreshing parent) */
-  onUpdate: (id: string, field: string, value: unknown) => void;
+  onUpdate: (id: string, field: string, value: unknown, extraFields?: Record<string, unknown>) => void;
 }
 
 // Internal status options per TRD v1.8
@@ -126,6 +136,8 @@ function getActivityColor(type: ActivityLogEntry['type']): string {
       return '#607d8b'; // Blue-gray - document scan
     case 'ARCHIVED':
       return '#757575'; // Gray - archived/closed
+    case 'EVIDENCE_UPLOADED':
+      return '#9c27b0'; // Purple - evidence file uploaded
     default:
       return '#9e9e9e'; // Gray - unknown
   }
@@ -155,6 +167,8 @@ function getActivityIcon(type: ActivityLogEntry['type']): React.ReactNode {
       return <DocumentScannerIcon sx={iconSx} />;
     case 'ARCHIVED':
       return <HistoryIcon sx={iconSx} />;
+    case 'EVIDENCE_UPLOADED':
+      return <AttachFileIcon sx={{ ...iconSx, color: '#9C27B0' }} />; // Purple
     default:
       return <UpdateIcon sx={iconSx} />;
   }
@@ -183,6 +197,8 @@ function formatActivityType(type: ActivityLogEntry['type']): string {
       return 'Scanned';
     case 'ARCHIVED':
       return 'Archived';
+    case 'EVIDENCE_UPLOADED':
+      return 'Evidence';
     default:
       return type;
   }
@@ -266,6 +282,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const { userInfo } = useAuth();
+  const { addToCart, removeFromCart, isInCart } = useInvoice();
 
   // Get current user info (with fallback for safety)
   const currentUser = {
@@ -285,6 +302,12 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   const [evidenceRequestedAttr, setEvidenceRequestedAttr] = useState<AttributionData>({ completed: false });
   const [evidenceReceivedAttr, setEvidenceReceivedAttr] = useState<AttributionData>({ completed: false });
   const [evidenceRequestedDate, setEvidenceRequestedDate] = useState<string | null>(null);
+  const [evidenceReceivedDate, setEvidenceReceivedDate] = useState<string | null>(null);
+  const [evidenceReviewedDate, setEvidenceReviewedDate] = useState<string | null>(null);
+  const [addedToCalendarDate, setAddedToCalendarDate] = useState<string | null>(null);
+
+  // File attachments
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   // DEP File Date with attribution
   const [depFileDateAttr, setDepFileDateAttr] = useState<DepFileDateAttribution>({});
@@ -299,6 +322,25 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   ): AttributionData => {
     if (attrField) return attrField;
     return { completed: legacyField };
+  };
+
+  // Helper: parse AWSJSON _attr field (may arrive as JSON string, double-stringified, or already-parsed object)
+  const parseAttr = <T,>(raw: unknown, fallback: T): T => {
+    if (!raw) return fallback;
+    // Already an object (Amplify v6 may auto-parse AWSJSON)
+    if (typeof raw === 'object' && raw !== null) return raw as T;
+    if (typeof raw === 'string') {
+      try {
+        let parsed = JSON.parse(raw);
+        // Handle double-stringified AWSJSON: parse again if result is still a string
+        if (typeof parsed === 'string') {
+          try { parsed = JSON.parse(parsed); } catch { /* use first parse result */ }
+        }
+        if (parsed && typeof parsed === 'object') return parsed as T;
+        return fallback;
+      } catch { return fallback; }
+    }
+    return fallback;
   };
 
   // Initialize local state when summons changes
@@ -320,22 +362,65 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       setComments(loadedComments);
       setNewComment('');
 
-      // Internal status with attribution
+      // Internal status with attribution (parse AWSJSON string)
       setInternalStatus(summons.internal_status || 'New');
-      setInternalStatusAttr(summons.internal_status_attr || {});
+      setInternalStatusAttr(parseAttr<InternalStatusAttribution>(summons.internal_status_attr, {}));
 
-      // Sync checkbox states with attribution
-      setEvidenceReviewedAttr(getAttrFromSummons(summons.evidence_reviewed_attr, summons.evidence_reviewed || false));
-      setAddedToCalendarAttr(getAttrFromSummons(summons.added_to_calendar_attr, summons.added_to_calendar || false));
-      setEvidenceRequestedAttr(getAttrFromSummons(summons.evidence_requested_attr, summons.evidence_requested || false));
-      setEvidenceReceivedAttr(getAttrFromSummons(summons.evidence_received_attr, summons.evidence_received || false));
+      // Sync checkbox states with attribution (parse AWSJSON strings)
+      setEvidenceReviewedAttr(getAttrFromSummons(parseAttr(summons.evidence_reviewed_attr, undefined), summons.evidence_reviewed || false));
+      setAddedToCalendarAttr(getAttrFromSummons(parseAttr(summons.added_to_calendar_attr, undefined), summons.added_to_calendar || false));
+      setEvidenceRequestedAttr(getAttrFromSummons(parseAttr(summons.evidence_requested_attr, undefined), summons.evidence_requested || false));
+      setEvidenceReceivedAttr(getAttrFromSummons(parseAttr(summons.evidence_received_attr, undefined), summons.evidence_received || false));
       setEvidenceRequestedDate(summons.evidence_requested_date || null);
-      // DEP File Date
-      setDepFileDateAttr(summons.dep_file_date_attr || {});
+      setEvidenceReceivedDate(summons.evidence_received_date || null);
+      setEvidenceReviewedDate(summons.evidence_reviewed_date || null);
+      setAddedToCalendarDate(summons.added_to_calendar_date || null);
+      // DEP File Date (parse AWSJSON string)
+      setDepFileDateAttr(parseAttr<DepFileDateAttribution>(summons.dep_file_date_attr, {}));
+      // Load attachments (parse if JSON string, or use as array)
+      let loadedAttachments: Attachment[] = [];
+      if (summons.attachments) {
+        if (typeof summons.attachments === 'string') {
+          try {
+            loadedAttachments = JSON.parse(summons.attachments);
+          } catch {
+            loadedAttachments = [];
+          }
+        } else if (Array.isArray(summons.attachments)) {
+          loadedAttachments = summons.attachments;
+        }
+      }
+      setAttachments(loadedAttachments);
     }
   }, [summons]);
   
   if (!summons) return null;
+
+  // Check if this summons is in the invoice cart
+  const inCart = isInCart(summons.id);
+
+  /**
+   * Toggle summons in/out of invoice cart
+   */
+  const handleCartToggle = () => {
+    if (inCart) {
+      removeFromCart(summons.id);
+    } else {
+      // Map Summons to SummonsForInvoice
+      const summonsForInvoice: SummonsForInvoice = {
+        id: summons.id,
+        summons_number: summons.summons_number,
+        respondent_name: summons.respondent_name,
+        clientID: summons.clientID,
+        violation_date: summons.violation_date,
+        hearing_date: summons.hearing_date,
+        hearing_result: summons.hearing_result || null,
+        status: summons.status,
+        amount_due: summons.amount_due,
+      };
+      addToCart(summonsForInvoice);
+    }
+  };
   
   /**
    * Handle checkbox changes for evidence tracking with attribution
@@ -350,30 +435,45 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       date: checked ? now : undefined,
     };
 
+    // Build extra fields for a single consolidated mutation
+    const extra: Record<string, unknown> = {
+      [`${field}_attr`]: JSON.stringify(newAttr),
+    };
+
     // Update local state immediately for responsive UI
     switch (field) {
       case 'evidence_reviewed':
         setEvidenceReviewedAttr(newAttr);
+        if (checked && !evidenceReviewedDate) {
+          setEvidenceReviewedDate(now);
+          extra.evidence_reviewed_date = now;
+        }
         break;
       case 'added_to_calendar':
         setAddedToCalendarAttr(newAttr);
+        if (checked && !addedToCalendarDate) {
+          setAddedToCalendarDate(now);
+          extra.added_to_calendar_date = now;
+        }
         break;
       case 'evidence_requested':
         setEvidenceRequestedAttr(newAttr);
-        // Auto-set evidence_requested_date when checking
         if (checked && !evidenceRequestedDate) {
           setEvidenceRequestedDate(now);
-          onUpdate(summons.id, 'evidence_requested_date', now);
+          extra.evidence_requested_date = now;
         }
         break;
       case 'evidence_received':
         setEvidenceReceivedAttr(newAttr);
+        if (checked && !evidenceReceivedDate) {
+          setEvidenceReceivedDate(now);
+          extra.evidence_received_date = now;
+        }
         break;
     }
 
-    // Persist both legacy boolean and new attribution to backend
-    onUpdate(summons.id, field, checked);
-    onUpdate(summons.id, `${field}_attr`, newAttr);
+    // Single consolidated mutation: legacy boolean + attribution + date in one call
+    onUpdate(summons.id, field, checked, extra);
   };
 
   /**
@@ -388,7 +488,8 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       date: now,
     };
     setDepFileDateAttr(newAttr);
-    onUpdate(summons.id, 'dep_file_date_attr', newAttr);
+    // AWSJSON fields require JSON.stringify — raw objects are silently dropped by AppSync
+    onUpdate(summons.id, 'dep_file_date_attr', JSON.stringify(newAttr));
   };
 
   /**
@@ -411,7 +512,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     setNewComment('');
 
     // Persist to backend
-    onUpdate(summons.id, 'notes_comments', updatedComments);
+    onUpdate(summons.id, 'notes_comments', JSON.stringify(updatedComments));
   };
 
   /**
@@ -420,7 +521,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   const handleDeleteComment = (commentId: string) => {
     const updatedComments = comments.filter(c => c.id !== commentId);
     setComments(updatedComments);
-    onUpdate(summons.id, 'notes_comments', updatedComments);
+    onUpdate(summons.id, 'notes_comments', JSON.stringify(updatedComments));
   };
 
   /**
@@ -430,8 +531,9 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   const calculateDelayDays = (): number | null => {
     if (!depFileDateAttr.value || !summons.violation_date) return null;
 
-    const violationDate = dayjs(summons.violation_date);
-    const depFileDate = dayjs(depFileDateAttr.value);
+    // Use dayjs.utc() to avoid timezone shift on date-only fields stored as UTC midnight
+    const violationDate = dayjs.utc(summons.violation_date);
+    const depFileDate = dayjs.utc(depFileDateAttr.value);
 
     return depFileDate.diff(violationDate, 'day');
   };
@@ -470,9 +572,10 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     setInternalStatus(value);
     setInternalStatusAttr(newAttr);
 
-    // Persist both legacy field and attribution
-    onUpdate(summons.id, 'internal_status', value);
-    onUpdate(summons.id, 'internal_status_attr', newAttr);
+    // Single consolidated mutation: legacy field + attribution
+    onUpdate(summons.id, 'internal_status', value, {
+      internal_status_attr: JSON.stringify(newAttr),
+    });
   };
   
   /**
@@ -483,7 +586,85 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     setEvidenceRequestedDate(dateValue);
     onUpdate(summons.id, 'evidence_requested_date', dateValue);
   };
-  
+
+  /**
+   * Handle evidence received date change
+   */
+  const handleReceivedDateChange = (date: dayjs.Dayjs | null) => {
+    const dateValue = date?.toISOString() || null;
+    setEvidenceReceivedDate(dateValue);
+    onUpdate(summons.id, 'evidence_received_date', dateValue);
+  };
+
+  /**
+   * Handle evidence reviewed date change
+   */
+  const handleReviewedDateChange = (date: dayjs.Dayjs | null) => {
+    const dateValue = date?.toISOString() || null;
+    setEvidenceReviewedDate(dateValue);
+    onUpdate(summons.id, 'evidence_reviewed_date', dateValue);
+  };
+
+  /**
+   * Handle added to calendar date change
+   */
+  const handleCalendarDateChange = (date: dayjs.Dayjs | null) => {
+    const dateValue = date?.toISOString() || null;
+    setAddedToCalendarDate(dateValue);
+    onUpdate(summons.id, 'added_to_calendar_date', dateValue);
+  };
+
+  /**
+   * Handle attachments change (upload/delete)
+   * AWSJSON fields require JSON string, not raw array
+   */
+  const handleAttachmentsChange = (newAttachments: Attachment[]) => {
+    setAttachments(newAttachments);
+    // Serialize to JSON string for AWSJSON field type
+    onUpdate(summons.id, 'attachments', JSON.stringify(newAttachments));
+  };
+
+  /**
+   * Handle evidence file upload for audit trail logging
+   * Creates an EVIDENCE_UPLOADED activity log entry when a file is uploaded
+   */
+  const handleEvidenceUploaded = (attachment: Attachment) => {
+    // Get attachment type label for the log entry
+    const typeLabels: Record<string, string> = {
+      'summons_pdf': 'Summons PDF',
+      'client_statement': 'Client Statement',
+      'evidence_package': 'Evidence Package',
+    };
+    const typeLabel = typeLabels[attachment.type] || attachment.type;
+
+    // Create activity log entry
+    const activityEntry: ActivityLogEntry = {
+      date: new Date().toISOString(),
+      type: 'EVIDENCE_UPLOADED',
+      description: `${currentUser.name} uploaded: ${attachment.name}`,
+      old_value: null,
+      new_value: `${typeLabel}: ${attachment.name}`,
+    };
+
+    // Get existing activity log (parse if JSON string)
+    let existingLog: ActivityLogEntry[] = [];
+    if (summons.activity_log) {
+      if (typeof summons.activity_log === 'string') {
+        try {
+          existingLog = JSON.parse(summons.activity_log);
+        } catch {
+          existingLog = [];
+        }
+      } else if (Array.isArray(summons.activity_log)) {
+        existingLog = summons.activity_log;
+      }
+    }
+
+    // Append the new entry and save
+    const updatedLog = [...existingLog, activityEntry];
+    onUpdate(summons.id, 'activity_log', JSON.stringify(updatedLog));
+  };
+
   return (
     <Dialog
       open={open}
@@ -530,6 +711,22 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                 size="small"
                 sx={{ fontWeight: 'bold', fontSize: '0.7rem' }}
               />
+            )}
+            {/* Check both DB value and localStorage fallback for invoiced status */}
+            {(summons.is_invoiced || isInvoicedLocally(summons.id)) && (
+              <Tooltip title={`Invoiced on ${dayjs(summons.invoice_date || getInvoiceDateLocally(summons.id)).format('MMM D, YYYY h:mm A')} — click ✕ to cancel`}>
+                <Chip
+                  label="INVOICED"
+                  icon={<ReceiptIcon />}
+                  color="success"
+                  size="small"
+                  sx={{ fontWeight: 'bold', fontSize: '0.7rem' }}
+                  onDelete={() => {
+                    onUpdate(summons.id, 'is_invoiced', false, { invoice_date: null });
+                    unmarkAsInvoiced([summons.id]);
+                  }}
+                />
+              </Tooltip>
             )}
           </Box>
           <Typography variant="subtitle1" color="text.secondary">
@@ -696,9 +893,27 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                 {(summons.penalty_imposed ?? 0) > 0 && (
                   <InfoRow label="Penalty Imposed" value={`$${summons.penalty_imposed?.toFixed(2)}`} />
                 )}
+                {/* Check both DB value and localStorage fallback for invoiced status */}
+                {(summons.is_invoiced || isInvoicedLocally(summons.id)) && (
+                  <InfoRow
+                    label="Invoiced"
+                    value={
+                      <Chip
+                        label={dayjs(summons.invoice_date || getInvoiceDateLocally(summons.id)).format('MMM D, YYYY')}
+                        size="small"
+                        color="success"
+                        variant="outlined"
+                        onDelete={() => {
+                          onUpdate(summons.id, 'is_invoiced', false, { invoice_date: null });
+                          unmarkAsInvoiced([summons.id]);
+                        }}
+                      />
+                    }
+                  />
+                )}
               </CardContent>
             </Card>
-            
+
             {/* Evidence Tracking with Attribution */}
             <Card variant="outlined" sx={{ mb: 2 }}>
               <CardContent>
@@ -767,6 +982,22 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                     )}
                   </Box>
 
+                  {/* Evidence Received Date Picker */}
+                  {evidenceReceivedAttr.completed && (
+                    <Box sx={{ ml: 4, mb: 1 }}>
+                      <LocalizationProvider dateAdapter={AdapterDayjs}>
+                        <DatePicker
+                          label="Received Date"
+                          value={evidenceReceivedDate ? dayjs(evidenceReceivedDate) : null}
+                          onChange={handleReceivedDateChange}
+                          slotProps={{
+                            textField: { size: 'small', fullWidth: true },
+                          }}
+                        />
+                      </LocalizationProvider>
+                    </Box>
+                  )}
+
                   {/* Evidence Reviewed */}
                   <Box>
                     <FormControlLabel
@@ -789,6 +1020,22 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                     )}
                   </Box>
 
+                  {/* Evidence Reviewed Date Picker */}
+                  {evidenceReviewedAttr.completed && (
+                    <Box sx={{ ml: 4, mb: 1 }}>
+                      <LocalizationProvider dateAdapter={AdapterDayjs}>
+                        <DatePicker
+                          label="Reviewed Date"
+                          value={evidenceReviewedDate ? dayjs(evidenceReviewedDate) : null}
+                          onChange={handleReviewedDateChange}
+                          slotProps={{
+                            textField: { size: 'small', fullWidth: true },
+                          }}
+                        />
+                      </LocalizationProvider>
+                    </Box>
+                  )}
+
                   {/* Added to Calendar */}
                   <Box>
                     <FormControlLabel
@@ -810,6 +1057,22 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                       </Box>
                     )}
                   </Box>
+
+                  {/* Added to Calendar Date Picker */}
+                  {addedToCalendarAttr.completed && (
+                    <Box sx={{ ml: 4, mb: 1 }}>
+                      <LocalizationProvider dateAdapter={AdapterDayjs}>
+                        <DatePicker
+                          label="Calendar Date"
+                          value={addedToCalendarDate ? dayjs(addedToCalendarDate) : null}
+                          onChange={handleCalendarDateChange}
+                          slotProps={{
+                            textField: { size: 'small', fullWidth: true },
+                          }}
+                        />
+                      </LocalizationProvider>
+                    </Box>
+                  )}
                 </Box>
 
                 {/* DEP File Creation Date */}
@@ -906,6 +1169,18 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                     </Button>
                   </Tooltip>
                 </Box>
+
+                {/* Uploaded Evidence Files */}
+                <Divider sx={{ my: 2 }} />
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  Uploaded Evidence Files
+                </Typography>
+                <FileUploadSection
+                  summonsId={summons.id}
+                  attachments={attachments}
+                  onAttachmentsChange={handleAttachmentsChange}
+                  onEvidenceUploaded={handleEvidenceUploaded}
+                />
               </CardContent>
             </Card>
             
@@ -1039,12 +1314,12 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   title="Case History"
                 />
 
-                {/* Activity Log Timeline - Only show entries older than 72 hours */}
+                {/* Activity Log Timeline - Only show entries older than 1 week (168 hours) */}
                 {(() => {
-                  // Filter activity log to only show entries older than 72 hours
+                  // Filter activity log to only show entries older than 1 week (168 hours)
                   // This ensures the UPDATED chip expires before showing in history
                   const now = new Date();
-                  const seventyTwoHoursAgo = new Date(now.getTime() - 72 * 60 * 60 * 1000);
+                  const oneWeekAgo = new Date(now.getTime() - 168 * 60 * 60 * 1000);
 
                   // Parse activity_log if it's a JSON string, otherwise use as array
                   let activityLog: ActivityLogEntry[] = [];
@@ -1061,8 +1336,8 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   }
 
                   const filteredLog = activityLog
-                    // Only show entries older than 72 hours
-                    .filter((entry) => new Date(entry.date) < seventyTwoHoursAgo)
+                    // Only show entries older than 1 week (168 hours)
+                    .filter((entry) => new Date(entry.date) < oneWeekAgo)
                     // Filter out duplicate entries (same date, type, and description)
                     .filter((entry, index, self) =>
                       index === self.findIndex((e) =>
@@ -1083,7 +1358,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   if (filteredLog.length === 0) {
                     return (
                       <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                        No historical changes to display. Recent changes (within 72 hours) are shown via the UPDATED badge.
+                        No historical changes to display. Recent changes (within 1 week) are shown via the UPDATED badge.
                       </Typography>
                     );
                   }
@@ -1198,9 +1473,31 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       </DialogContent>
       
       <DialogActions sx={{ px: 3, py: 2, borderTop: 1, borderColor: 'divider' }}>
-        <Typography variant="caption" color="text.secondary" sx={{ mr: 'auto' }}>
-          Last Updated: {summons.updatedAt ? dayjs.utc(summons.updatedAt).tz(NYC_TIMEZONE).format('MMM D, YYYY h:mm A') : 'Unknown'}
-        </Typography>
+        <Tooltip
+          title={summons.last_change_summary || 'No change details recorded'}
+          arrow
+          placement="top"
+        >
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ mr: 'auto', cursor: summons.last_change_at ? 'help' : 'default' }}
+          >
+            {summons.last_change_at
+              ? `Last Changed: ${dayjs.utc(summons.last_change_at).tz(NYC_TIMEZONE).format('MMM D, YYYY h:mm A')}`
+              : `Created: ${summons.createdAt ? dayjs.utc(summons.createdAt).tz(NYC_TIMEZONE).format('MMM D, YYYY h:mm A') : 'Unknown'}`
+            }
+          </Typography>
+        </Tooltip>
+        <Button
+          onClick={handleCartToggle}
+          variant={inCart ? 'contained' : 'outlined'}
+          color={inCart ? 'success' : 'primary'}
+          startIcon={inCart ? <ShoppingCartIcon /> : <AddShoppingCartIcon />}
+          sx={{ mr: 1 }}
+        >
+          {inCart ? 'In Invoice Cart' : 'Add to Invoice'}
+        </Button>
         <Button onClick={onClose} variant="contained">
           Close
         </Button>

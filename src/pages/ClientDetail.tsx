@@ -47,15 +47,23 @@ import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import GavelIcon from '@mui/icons-material/Gavel';
 import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
+import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
+import RemoveShoppingCartIcon from '@mui/icons-material/RemoveShoppingCart';
 import { generateClient } from 'aws-amplify/api';
 
 import { getClient, listSummons } from '../graphql/queries';
+import { getClientWithPlateFilter } from '../graphql/customQueries';
 import { updateSummons } from '../graphql/mutations';
 import { Client, Summons, isNewRecord, isUpdatedRecord } from '../types/summons';
+import { applyClientPlateFilter } from '../lib/plateFilter';
 import SummonsDetailModal from '../components/SummonsDetailModal';
 import ExportConfigurationModal from '../components/ExportConfigurationModal';
 import { useCSVExport } from '../hooks/useCSVExport';
 import { ExportConfig } from '../lib/csvExport';
+import { isInvoiced as isInvoicedLocally, getInvoiceDate as getInvoiceDateLocally, unmarkAsInvoiced } from '../utils/invoiceTracking';
+import { useInvoice } from '../contexts/InvoiceContext';
+import { SummonsForInvoice } from '../types/invoice';
 
 const apiClient = generateClient();
 
@@ -100,6 +108,9 @@ function formatChangeDate(dateString: string | undefined): string {
 const ClientDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+
+  // Invoice Cart
+  const { addToCart, removeFromCart, isInCart } = useInvoice();
 
   // Core State
   const [client, setClient] = useState<Client | null>(null);
@@ -229,7 +240,25 @@ const ClientDetail: React.FC = () => {
       }
 
       setNextToken(currentToken);
-      setSummonses(allSummonses);
+      // Apply per-client plate filter (graceful degradation if schema not deployed)
+      let plateFiltered = allSummonses;
+      try {
+        const pfResult = await apiClient.graphql({
+          query: getClientWithPlateFilter,
+          variables: { id },
+        }) as { data: { getClient: { id: string; plate_filter_enabled?: boolean; plate_filter_list?: string[] } } };
+        const pfData = pfResult.data.getClient;
+        if (pfData?.plate_filter_enabled) {
+          plateFiltered = applyClientPlateFilter(allSummonses, {
+            ...client,
+            plate_filter_enabled: pfData.plate_filter_enabled,
+            plate_filter_list: pfData.plate_filter_list,
+          });
+        }
+      } catch (plateError) {
+        console.warn('Plate filter skipped (schema not deployed):', plateError);
+      }
+      setSummonses(plateFiltered);
 
     } catch (err) {
       console.error('Error loading summonses:', err);
@@ -313,12 +342,8 @@ const ClientDetail: React.FC = () => {
 
   /**
    * Handle summons update from modal
-   * Attribution fields (_attr suffix) fail silently until schema is deployed
    */
-  const handleSummonsUpdate = useCallback(async (summonsId: string, field: string, value: unknown) => {
-    // Check if this is an attribution field (not yet in deployed schema)
-    const isAttributionField = field.endsWith('_attr');
-
+  const handleSummonsUpdate = useCallback(async (summonsId: string, field: string, value: unknown, extraFields?: Record<string, unknown>) => {
     try {
       await apiClient.graphql({
         query: updateSummons,
@@ -326,25 +351,17 @@ const ClientDetail: React.FC = () => {
           input: {
             id: summonsId,
             [field]: value,
+            ...extraFields,
           },
         },
       });
 
       // Update local state
       setSummonses((prev) =>
-        prev.map((s) => (s.id === summonsId ? { ...s, [field]: value } : s))
+        prev.map((s) => (s.id === summonsId ? { ...s, [field]: value, ...extraFields } : s))
       );
     } catch (err) {
-      // Silently fail for attribution fields (schema not deployed yet)
-      if (isAttributionField) {
-        console.log(`Attribution field ${field} not yet in schema - update skipped`);
-        // Still update local state for UI responsiveness
-        setSummonses((prev) =>
-          prev.map((s) => (s.id === summonsId ? { ...s, [field]: value } : s))
-        );
-      } else {
-        console.error('Error updating summons:', err);
-      }
+      console.error('Error updating summons:', err);
     }
   }, []);
 
@@ -391,6 +408,23 @@ const ClientDetail: React.FC = () => {
         const isNew = isNewRecord(summons);
         const isUpdated = isUpdatedRecord(summons);
 
+        // Check if summons has attachments
+        // AWSJSON fields may be stored as JSON strings, so parse before checking length
+        let parsedAttachments: Array<unknown> = [];
+        if (summons.attachments) {
+          if (typeof summons.attachments === 'string') {
+            try {
+              parsedAttachments = JSON.parse(summons.attachments);
+            } catch {
+              parsedAttachments = [];
+            }
+          } else if (Array.isArray(summons.attachments)) {
+            parsedAttachments = summons.attachments;
+          }
+        }
+        const hasAttachments = parsedAttachments.length > 0;
+        const attachmentCount = parsedAttachments.length;
+
         // Build tooltip content for UPDATED badge
         const changeTooltip = summons.last_change_summary
           ? `${summons.last_change_summary} (${formatChangeDate(summons.last_change_at)})`
@@ -398,6 +432,19 @@ const ClientDetail: React.FC = () => {
 
         return (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            {/* Attachment Indicator */}
+            {hasAttachments && (
+              <Tooltip title={`${attachmentCount} file${attachmentCount > 1 ? 's' : ''} attached`} arrow placement="top">
+                <AttachFileIcon
+                  sx={{
+                    fontSize: 14,
+                    color: 'text.secondary',
+                    transform: 'rotate(45deg)',
+                  }}
+                />
+              </Tooltip>
+            )}
+
             {/* NEW badge */}
             {isNew && (
               <Chip
@@ -493,9 +540,10 @@ const ClientDetail: React.FC = () => {
       field: 'license_plate',
       headerName: 'Plate',
       width: 100,
+      valueGetter: (params) => params.row.license_plate_ocr || params.row.license_plate || '',
       renderCell: (params) => (
         <Typography variant="body2" color="text.secondary">
-          {params.row.license_plate_ocr || params.row.license_plate || '—'}
+          {params.value || '—'}
         </Typography>
       ),
     },
@@ -541,15 +589,96 @@ const ClientDetail: React.FC = () => {
       width: 80,
       align: 'center',
       headerAlign: 'center',
-      renderCell: (params) => (
-        params.value ? (
-          <ReceiptLongIcon sx={{ color: 'success.main', fontSize: 18 }} />
-        ) : (
+      renderCell: (params) => {
+        // Check both DB value and localStorage fallback
+        const summonsId = params.row.id;
+        const invoiced = params.value || isInvoicedLocally(summonsId);
+        if (invoiced) {
+          // Get invoice date from DB or localStorage
+          const invoiceDate = params.row.invoice_date || getInvoiceDateLocally(summonsId);
+          const formattedDate = invoiceDate
+            ? dayjs(invoiceDate).format('MMM D, YYYY')
+            : 'Date unknown';
+          return (
+            <Tooltip title={`Invoiced: ${formattedDate}. Click to cancel.`} arrow placement="top">
+              <IconButton
+                size="small"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSummonsUpdate(summonsId, 'is_invoiced', false);
+                  handleSummonsUpdate(summonsId, 'invoice_date', null);
+                  unmarkAsInvoiced([summonsId]);
+                }}
+                sx={{ p: 0.5 }}
+              >
+                <ReceiptLongIcon sx={{ color: 'success.main', fontSize: 18 }} />
+              </IconButton>
+            </Tooltip>
+          );
+        }
+        return (
           <Box sx={{ width: 16, height: 16, borderRadius: '50%', border: '1.5px solid', borderColor: 'grey.300' }} />
-        )
-      ),
+        );
+      },
     },
-  ], []);
+    {
+      field: 'cart',
+      headerName: 'Cart',
+      width: 60,
+      align: 'center',
+      headerAlign: 'center',
+      sortable: false,
+      filterable: false,
+      disableColumnMenu: true,
+      renderCell: (params) => {
+        const summons = params.row as Summons;
+        const inCart = isInCart(summons.id);
+
+        const handleCartClick = (e: React.MouseEvent) => {
+          // Stop propagation so row click (detail modal) doesn't fire
+          e.stopPropagation();
+
+          if (inCart) {
+            removeFromCart(summons.id);
+          } else {
+            const item: SummonsForInvoice = {
+              id: summons.id,
+              summons_number: summons.summons_number,
+              respondent_name: summons.respondent_name || null,
+              clientID: summons.clientID,
+              violation_date: summons.violation_date || null,
+              hearing_date: summons.hearing_date || null,
+              hearing_result: summons.hearing_result || null,
+              status: summons.status || null,
+              amount_due: summons.amount_due ?? null,
+            };
+            addToCart(item);
+          }
+        };
+
+        return (
+          <Tooltip title={inCart ? 'Remove from invoice cart' : 'Add to invoice cart'} arrow placement="top">
+            <IconButton
+              size="small"
+              onClick={handleCartClick}
+              sx={{
+                color: inCart ? 'primary.main' : 'text.disabled',
+                '&:hover': {
+                  color: inCart ? 'error.main' : 'primary.main',
+                },
+              }}
+            >
+              {inCart ? (
+                <RemoveShoppingCartIcon sx={{ fontSize: 18 }} />
+              ) : (
+                <AddShoppingCartIcon sx={{ fontSize: 18 }} />
+              )}
+            </IconButton>
+          </Tooltip>
+        );
+      },
+    },
+  ], [isInCart, addToCart, removeFromCart]);
 
   /**
    * Handle row click to open detail modal

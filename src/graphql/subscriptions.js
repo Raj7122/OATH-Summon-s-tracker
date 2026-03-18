@@ -13,6 +13,8 @@ export const onCreateClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      plate_filter_enabled
+      plate_filter_list
       summonses {
         nextToken
         __typename
@@ -35,6 +37,8 @@ export const onUpdateClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      plate_filter_enabled
+      plate_filter_list
       summonses {
         nextToken
         __typename
@@ -57,6 +61,8 @@ export const onDeleteClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      plate_filter_enabled
+      plate_filter_list
       summonses {
         nextToken
         __typename
@@ -82,6 +88,8 @@ export const onCreateSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        plate_filter_enabled
+        plate_filter_list
         createdAt
         updatedAt
         __typename
@@ -112,8 +120,17 @@ export const onCreateSummons = /* GraphQL */ `
       evidence_requested
       evidence_requested_date
       evidence_received
+      evidence_received_date
+      evidence_reviewed_date
+      added_to_calendar_date
+      attachments
       internal_status
       internal_status_attr
+      evidence_reviewed_attr
+      added_to_calendar_attr
+      evidence_requested_attr
+      evidence_received_attr
+      dep_file_date_attr
       offense_level
       agency_id_number
       last_change_summary
@@ -135,6 +152,8 @@ export const onCreateSummons = /* GraphQL */ `
       is_archived
       archived_at
       archived_reason
+      is_invoiced
+      invoice_date
       activity_log
       createdAt
       updatedAt
@@ -157,6 +176,8 @@ export const onUpdateSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        plate_filter_enabled
+        plate_filter_list
         createdAt
         updatedAt
         __typename
@@ -187,8 +208,17 @@ export const onUpdateSummons = /* GraphQL */ `
       evidence_requested
       evidence_requested_date
       evidence_received
+      evidence_received_date
+      evidence_reviewed_date
+      added_to_calendar_date
+      attachments
       internal_status
       internal_status_attr
+      evidence_reviewed_attr
+      added_to_calendar_attr
+      evidence_requested_attr
+      evidence_received_attr
+      dep_file_date_attr
       offense_level
       agency_id_number
       last_change_summary
@@ -210,6 +240,8 @@ export const onUpdateSummons = /* GraphQL */ `
       is_archived
       archived_at
       archived_reason
+      is_invoiced
+      invoice_date
       activity_log
       createdAt
       updatedAt
@@ -232,6 +264,8 @@ export const onDeleteSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        plate_filter_enabled
+        plate_filter_list
         createdAt
         updatedAt
         __typename
@@ -262,8 +296,17 @@ export const onDeleteSummons = /* GraphQL */ `
       evidence_requested
       evidence_requested_date
       evidence_received
+      evidence_received_date
+      evidence_reviewed_date
+      added_to_calendar_date
+      attachments
       internal_status
       internal_status_attr
+      evidence_reviewed_attr
+      added_to_calendar_attr
+      evidence_requested_attr
+      evidence_received_attr
+      dep_file_date_attr
       offense_level
       agency_id_number
       last_change_summary
@@ -285,6 +328,8 @@ export const onDeleteSummons = /* GraphQL */ `
       is_archived
       archived_at
       archived_reason
+      is_invoiced
+      invoice_date
       activity_log
       createdAt
       updatedAt
@@ -303,15 +348,26 @@ export const onCreateSyncStatus = /* GraphQL */ `
       sync_in_progress
       phase1_status
       phase1_completed_at
+      phase1_clients_processed
+      phase1_cases_from_api
       phase1_new_records
       phase1_updated_records
       phase1_unchanged_records
+      phase1_flagged_for_ocr
+      phase1_records_archived
+      phase1_error_count
       phase1_errors
       phase2_status
       phase2_completed_at
       phase2_ocr_processed
       phase2_ocr_remaining
       phase2_ocr_failed
+      phase2_ocr_healed
+      phase2_ocr_skipped
+      phase2_excluded_max_failures
+      phase2_excluded_old_hearings
+      phase2_graceful_exit
+      phase2_rate_limit_hits
       ocr_processed_today
       ocr_processing_date
       oath_api_reachable
@@ -334,15 +390,26 @@ export const onUpdateSyncStatus = /* GraphQL */ `
       sync_in_progress
       phase1_status
       phase1_completed_at
+      phase1_clients_processed
+      phase1_cases_from_api
       phase1_new_records
       phase1_updated_records
       phase1_unchanged_records
+      phase1_flagged_for_ocr
+      phase1_records_archived
+      phase1_error_count
       phase1_errors
       phase2_status
       phase2_completed_at
       phase2_ocr_processed
       phase2_ocr_remaining
       phase2_ocr_failed
+      phase2_ocr_healed
+      phase2_ocr_skipped
+      phase2_excluded_max_failures
+      phase2_excluded_old_hearings
+      phase2_graceful_exit
+      phase2_rate_limit_hits
       ocr_processed_today
       ocr_processing_date
       oath_api_reachable
@@ -365,15 +432,26 @@ export const onDeleteSyncStatus = /* GraphQL */ `
       sync_in_progress
       phase1_status
       phase1_completed_at
+      phase1_clients_processed
+      phase1_cases_from_api
       phase1_new_records
       phase1_updated_records
       phase1_unchanged_records
+      phase1_flagged_for_ocr
+      phase1_records_archived
+      phase1_error_count
       phase1_errors
       phase2_status
       phase2_completed_at
       phase2_ocr_processed
       phase2_ocr_remaining
       phase2_ocr_failed
+      phase2_ocr_healed
+      phase2_ocr_skipped
+      phase2_excluded_max_failures
+      phase2_excluded_old_hearings
+      phase2_graceful_exit
+      phase2_rate_limit_hits
       ocr_processed_today
       ocr_processing_date
       oath_api_reachable
