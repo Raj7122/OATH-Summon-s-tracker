@@ -61,9 +61,10 @@ describe('Daily Sweep Lambda Function', () => {
       let normalized = name
         .toLowerCase()
         .trim()
-        .replace(/&/g, ' ')                    // normalize ampersand to space
+        .replace(/[&\-]/g, ' ')                // normalize ampersand and hyphen to space
+        .replace(/['.]/g, '')                  // strip apostrophes and periods
         .replace(/\s+/g, ' ')
-        .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '')
+        .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '')
         .trim();
       return normalized;
     };
@@ -97,7 +98,7 @@ describe('Daily Sweep Lambda Function', () => {
     });
 
     test('should handle company names with special characters', () => {
-      expect(normalizeCompanyName('G.C. Warehouse LLC')).toBe('g.c. warehouse');
+      expect(normalizeCompanyName('G.C. Warehouse LLC')).toBe('gc warehouse');
     });
 
     test('should normalize ampersand to space', () => {
@@ -115,6 +116,29 @@ describe('Daily Sweep Lambda Function', () => {
       expect(normalizeCompanyName('A & B Trucking LLC')).toBe('a b trucking');
       expect(normalizeCompanyName('Smith & Sons')).toBe('smith sons');
       expect(normalizeCompanyName('R&D Corp')).toBe('r d');
+    });
+
+    test('should strip apostrophes from company names', () => {
+      expect(normalizeCompanyName("MARSALA'S MAIL SERVICE INC")).toBe('marsalas mail service');
+      expect(normalizeCompanyName("Marsalas Mail Service")).toBe('marsalas mail service');
+      expect(normalizeCompanyName("MARSALA'S MAIL SERVICE")).toBe('marsalas mail service');
+    });
+
+    test('should match apostrophe name against non-apostrophe name after normalization', () => {
+      // NYC Open Data has "MARSALA'S", client entered "Marsalas" — both normalize the same
+      const clientNorm = normalizeCompanyName("Marsalas Mail Service");
+      const apiNorm = normalizeCompanyName("MARSALA'S MAIL SERVICE INC");
+      expect(clientNorm).toBe(apiNorm);
+    });
+
+    test('should normalize hyphenated names', () => {
+      expect(normalizeCompanyName('WALL STREET MAIL PICK-UP SERVI')).toBe('wall street mail pick up servi');
+      expect(normalizeCompanyName('Wall Street Mail')).toBe('wall street mail');
+    });
+
+    test('should strip periods from names (L.L.C., abbreviations)', () => {
+      expect(normalizeCompanyName('A.B.C. Transport L.L.C.')).toBe('abc transport');
+      expect(normalizeCompanyName("O'Brien's Trucking Inc")).toBe('obriens trucking');
     });
   });
 
@@ -204,8 +228,11 @@ describe('Daily Sweep Lambda Function', () => {
 
     const normalizeCompanyName = (name) => {
       if (!name) return '';
-      return name.toLowerCase().trim().replace(/\s+/g, ' ')
-        .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '').trim();
+      return name.toLowerCase().trim()
+        .replace(/[&\-]/g, ' ')
+        .replace(/['.]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
     const buildClientNameMap = (clients) => {
@@ -365,6 +392,143 @@ describe('Daily Sweep Lambda Function', () => {
     });
   });
 
+  describe('matchRespondentToClient - Marsalas & Wall Street Mail Edge Cases', () => {
+    const SUFFIX_FRAGMENTS = [
+      'llc', 'inc', 'corp', 'co', 'ltd',
+      'orp', 'rp', 'p', 'nc', 'c', 'lc', 'l', 'td', 'd',
+    ];
+
+    const looksLikeSuffixFragment = (firstName) => {
+      if (!firstName) return false;
+      const lower = firstName.toLowerCase().trim();
+      return SUFFIX_FRAGMENTS.includes(lower) || lower.length <= 3;
+    };
+
+    const normalizeCompanyName = (name) => {
+      if (!name) return '';
+      return name.toLowerCase().trim()
+        .replace(/[&\-]/g, ' ')
+        .replace(/['.]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
+    };
+
+    const buildClientNameMap = (clients) => {
+      const nameMap = new Map();
+      clients.forEach((client) => {
+        const primaryName = normalizeCompanyName(client.name);
+        nameMap.set(primaryName, client);
+        const noSpaceName = primaryName.replace(/\s/g, '');
+        if (noSpaceName !== primaryName) nameMap.set(noSpaceName, client);
+        if (client.akas && Array.isArray(client.akas)) {
+          client.akas.forEach((aka) => {
+            const akaName = normalizeCompanyName(aka);
+            nameMap.set(akaName, client);
+            const akaNoSpace = akaName.replace(/\s/g, '');
+            if (akaNoSpace !== akaName) nameMap.set(akaNoSpace, client);
+          });
+        }
+      });
+      return nameMap;
+    };
+
+    const matchRespondentToClient = (firstName, lastName, clientNameMap) => {
+      const fullName = `${firstName} ${lastName}`.trim();
+      if (!fullName) return null;
+      const normalizedFull = normalizeCompanyName(fullName);
+      const noSpaceFull = normalizedFull.replace(/\s/g, '');
+      let match = clientNameMap.get(normalizedFull) || clientNameMap.get(noSpaceFull);
+      if (match) return match;
+      if (firstName && looksLikeSuffixFragment(firstName) && lastName) {
+        const normalizedLast = normalizeCompanyName(lastName);
+        const noSpaceLast = normalizedLast.replace(/\s/g, '');
+        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
+        if (match) return match;
+      }
+      for (const [clientNormName, client] of clientNameMap.entries()) {
+        if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) return client;
+        if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) return client;
+      }
+      if (lastName && lastName.length >= 5) {
+        const normalizedLast = normalizeCompanyName(lastName);
+        const noSpaceLast = normalizedLast.replace(/\s/g, '');
+        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
+        if (match) return match;
+        for (const [clientNormName, client] of clientNameMap.entries()) {
+          if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) return client;
+          if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) return client;
+        }
+      }
+      return null;
+    };
+
+    const marsalasClient = {
+      id: 'marsalas-1',
+      name: 'Marsalas Mail Service',
+      akas: [],
+    };
+
+    const wallStreetClient = {
+      id: 'wallst-1',
+      name: 'Wall Street Mail',
+      akas: [],
+    };
+
+    test('should match "MARSALA\'S MAIL SERVICE INC" to client "Marsalas Mail Service" (apostrophe mismatch)', () => {
+      const clients = [marsalasClient];
+      const clientNameMap = buildClientNameMap(clients);
+      // API returns: lastName="MARSALA'S MAIL SERVICE INC", firstName=""
+      const match = matchRespondentToClient('', "MARSALA'S MAIL SERVICE INC", clientNameMap);
+      expect(match).not.toBeNull();
+      expect(match.id).toBe('marsalas-1');
+    });
+
+    test('should match "MARSALA\'S MAIL SERVICE" without INC suffix', () => {
+      const clients = [marsalasClient];
+      const clientNameMap = buildClientNameMap(clients);
+      const match = matchRespondentToClient('', "MARSALA'S MAIL SERVICE", clientNameMap);
+      expect(match).not.toBeNull();
+      expect(match.id).toBe('marsalas-1');
+    });
+
+    test('should match Wall Street Mail with truncated + split name', () => {
+      const clients = [wallStreetClient];
+      const clientNameMap = buildClientNameMap(clients);
+      // API returns: lastName="WALL STREET MAIL PICK-UP SERVI", firstName="CE"
+      const match = matchRespondentToClient('CE', 'WALL STREET MAIL PICK-UP SERVI', clientNameMap);
+      expect(match).not.toBeNull();
+      expect(match.id).toBe('wallst-1');
+    });
+
+    test('should match Wall Street Mail without hyphen variation', () => {
+      const clients = [wallStreetClient];
+      const clientNameMap = buildClientNameMap(clients);
+      // API sometimes has no hyphen: "WALL STREET MAIL PICK UP SERVI"
+      const match = matchRespondentToClient('CE', 'WALL STREET MAIL PICK UP SERVI', clientNameMap);
+      expect(match).not.toBeNull();
+      expect(match.id).toBe('wallst-1');
+    });
+
+    test('should match Wall Street Mail via firstName="CE INC"', () => {
+      const clients = [wallStreetClient];
+      const clientNameMap = buildClientNameMap(clients);
+      const match = matchRespondentToClient('CE INC', 'WALL STREET MAIL PICK-UP SERVI', clientNameMap);
+      expect(match).not.toBeNull();
+      expect(match.id).toBe('wallst-1');
+    });
+
+    test('should not cross-match between Marsalas and Wall Street Mail', () => {
+      const clients = [marsalasClient, wallStreetClient];
+      const clientNameMap = buildClientNameMap(clients);
+
+      const marsalasMatch = matchRespondentToClient('', "MARSALA'S MAIL SERVICE INC", clientNameMap);
+      expect(marsalasMatch.id).toBe('marsalas-1');
+
+      const wallStMatch = matchRespondentToClient('CE', 'WALL STREET MAIL PICK-UP SERVI', clientNameMap);
+      expect(wallStMatch.id).toBe('wallst-1');
+    });
+  });
+
   /**
    * Real NYC API Name Patterns - Regression Prevention Tests
    *
@@ -394,8 +558,11 @@ describe('Daily Sweep Lambda Function', () => {
 
     const normalizeCompanyName = (name) => {
       if (!name) return '';
-      return name.toLowerCase().trim().replace(/\s+/g, ' ')
-        .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '').trim();
+      return name.toLowerCase().trim()
+        .replace(/[&\-]/g, ' ')
+        .replace(/['.]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
     const buildClientNameMap = (clients) => {
@@ -585,8 +752,11 @@ describe('Daily Sweep Lambda Function', () => {
 
     const normalizeCompanyName = (name) => {
       if (!name) return '';
-      return name.toLowerCase().trim().replace(/\s+/g, ' ')
-        .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '').trim();
+      return name.toLowerCase().trim()
+        .replace(/[&\-]/g, ' ')
+        .replace(/['.]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
     const buildClientNameMap = (clients) => {
@@ -798,8 +968,11 @@ describe('Daily Sweep Lambda Function', () => {
 
     const normalizeCompanyName = (name) => {
       if (!name) return '';
-      return name.toLowerCase().trim().replace(/\s+/g, ' ')
-        .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '').trim();
+      return name.toLowerCase().trim()
+        .replace(/[&\-]/g, ' ')
+        .replace(/['.]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
     const buildClientNameMap = (clients) => {
@@ -1031,8 +1204,11 @@ describe('Daily Sweep Lambda Function', () => {
 
     const normalizeCompanyName = (name) => {
       if (!name) return '';
-      return name.toLowerCase().trim().replace(/\s+/g, ' ')
-        .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '').trim();
+      return name.toLowerCase().trim()
+        .replace(/[&\-]/g, ' ')
+        .replace(/['.]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
     const buildClientNameMap = (clients) => {
@@ -1194,8 +1370,11 @@ describe('Daily Sweep Lambda Function', () => {
       const nameMap = new Map();
       const normalizeCompanyName = (name) => {
         if (!name) return '';
-        return name.toLowerCase().trim().replace(/\s+/g, ' ')
-          .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '').trim();
+        return name.toLowerCase().trim()
+          .replace(/[&\-]/g, ' ')
+          .replace(/['.]/g, '')
+          .replace(/\s+/g, ' ')
+          .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
       };
 
       clients.forEach((client) => {

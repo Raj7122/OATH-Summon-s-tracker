@@ -1296,8 +1296,9 @@ function normalizeCompanyName(name) {
     .toLowerCase()
     .trim()
     .replace(/[&\-]/g, ' ')                 // normalize ampersand and hyphen to space (e.g., "COCA-COLA" -> "COCA COLA")
+    .replace(/['.]/g, '')                  // strip apostrophes and periods ("MARSALA'S" -> "MARSALAS", "L.L.C." -> "LLC")
     .replace(/\s+/g, ' ')                  // collapse multiple spaces
-    .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '')
+    .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '')
     .trim();
 }
 
@@ -1497,7 +1498,8 @@ async function fetchNYCDataForClients(clients, context) {
   clients.forEach(client => {
     const mainName = client.name
       .replace(/&/g, ' ')                              // strip ampersand for API LIKE matching (keep hyphens — LIKE is literal)
-      .replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '')
+      .replace(/['.]/g, '')                            // strip apostrophes/periods for API LIKE matching ("MARSALA'S" -> "MARSALAS")
+      .replace(/\s+(llc|inc|corp|co|ltd)$/i, '')       // suffix regex simplified (periods already stripped)
       .replace(/\s+/g, ' ')
       .trim();
     if (mainName.length > 3) searchTerms.add(mainName.toUpperCase());
@@ -1506,7 +1508,8 @@ async function fetchNYCDataForClients(clients, context) {
       client.akas.forEach(aka => {
         const akaMain = aka
           .replace(/&/g, ' ')                          // strip ampersand for API LIKE matching (keep hyphens — LIKE is literal)
-          .replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '')
+          .replace(/['.]/g, '')                        // strip apostrophes/periods for API LIKE matching
+          .replace(/\s+(llc|inc|corp|co|ltd)$/i, '')   // suffix regex simplified (periods already stripped)
           .replace(/\s+/g, ' ')
           .trim();
         if (akaMain.length > 3) searchTerms.add(akaMain.toUpperCase());
@@ -1536,11 +1539,14 @@ async function fetchNYCDataForClients(clients, context) {
     };
 
     // CRITICAL FILTERS:
-    // 1. Match client name in respondent_last_name
+    // 1. Match client name in respondent_last_name OR respondent_first_name,
+    //    also try with apostrophes stripped via SoQL replace() to catch
+    //    names like "MARSALA'S" when searching "MARSALAS"
     // 2. IDLING violations only (check both charge fields)
     // 3. Hearing date >= 2022-01-01
+    const nameClause = `(upper(respondent_last_name) like '%${escapedTerm}%' OR upper(respondent_first_name) like '%${escapedTerm}%' OR upper(replace(respondent_last_name, '''', '')) like '%${escapedTerm}%')`;
     const whereClause = [
-      `upper(respondent_last_name) like '%${escapedTerm}%'`,
+      nameClause,
       `(upper(charge_1_code_description) like '%IDLING%' OR upper(charge_2_code_description) like '%IDLING%')`,
       `hearing_date >= '2022-01-01T00:00:00'`
     ].join(' AND ');
