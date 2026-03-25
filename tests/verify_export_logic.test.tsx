@@ -357,6 +357,17 @@ describe('Date Formatting', () => {
   it('should handle invalid date strings', () => {
     expect(formatDate('not-a-date', 'us')).toBe('');
   });
+
+  it('should format midnight UTC dates correctly in US format (no timezone shift)', () => {
+    // Dates stored as midnight UTC must not shift back a day in US Eastern timezone
+    const result = formatDate('2026-06-11T00:00:00.000Z', 'us');
+    expect(result).toBe('06/11/2026');
+  });
+
+  it('should format midnight UTC dates correctly in ISO format', () => {
+    const result = formatDate('2026-06-11T00:00:00.000Z', 'iso');
+    expect(result).toBe('2026-06-11');
+  });
 });
 
 // ============================================================================

@@ -278,9 +278,10 @@ export function formatDate(value: string | undefined | null, format: 'iso' | 'us
       return date.toISOString().split('T')[0];
     } else {
       // MM/DD/YYYY
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      const year = date.getFullYear();
+      // Use UTC methods to avoid timezone shift on date-only fields stored as midnight UTC
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(date.getUTCDate()).padStart(2, '0');
+      const year = date.getUTCFullYear();
       return `${month}/${day}/${year}`;
     }
   } catch {
