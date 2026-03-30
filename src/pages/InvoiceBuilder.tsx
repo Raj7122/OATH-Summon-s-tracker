@@ -319,7 +319,14 @@ const InvoiceBuilder = () => {
         },
       });
 
+      // Check for GraphQL errors in the response
+      if (invoiceResult.errors) {
+        console.error('GraphQL errors creating invoice:', invoiceResult.errors);
+      }
+
       const createdInvoiceId = invoiceResult.data?.createInvoice?.id;
+      console.log('Invoice created with ID:', createdInvoiceId);
+
       if (createdInvoiceId) {
         // Create join records linking each summons to the invoice
         await Promise.all(cartItems.map(item =>
@@ -336,10 +343,12 @@ const InvoiceBuilder = () => {
             },
           })
         ));
+        console.log(`Created ${cartItems.length} InvoiceSummons join records`);
+      } else {
+        console.error('Invoice creation returned no ID — record may not have been saved');
       }
     } catch (error) {
-      // Gracefully degrade if Invoice tables not yet deployed
-      console.log('Invoice record creation skipped (tables not deployed yet):', error);
+      console.error('Invoice record creation failed:', error);
     }
 
     return true;

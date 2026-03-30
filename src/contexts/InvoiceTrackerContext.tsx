@@ -53,6 +53,11 @@ export const InvoiceTrackerProvider: React.FC<{ children: React.ReactNode }> = (
           },
         });
 
+        // Check for GraphQL errors in the response (partial errors don't throw)
+        if (result.errors && result.errors.length > 0) {
+          console.error('GraphQL errors in listInvoices response:', result.errors);
+        }
+
         const items = result.data?.listInvoices?.items || [];
         allInvoices.push(...items);
         currentToken = result.data?.listInvoices?.nextToken || null;
@@ -61,6 +66,7 @@ export const InvoiceTrackerProvider: React.FC<{ children: React.ReactNode }> = (
         if (!currentToken) break;
       }
 
+      console.log(`Invoice Tracker: fetched ${allInvoices.length} invoices`);
       setInvoices(allInvoices);
     } catch (err: any) {
       // Log the full error for debugging

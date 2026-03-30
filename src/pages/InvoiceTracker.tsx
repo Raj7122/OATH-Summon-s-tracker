@@ -8,7 +8,7 @@
  * @module pages/InvoiceTracker
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   Box,
   Grid,
@@ -43,6 +43,7 @@ const InvoiceTracker = () => {
     invoices,
     loading,
     error,
+    fetchInvoices,
     markAsPaid,
     markAsUnpaid,
     updateAlertDeadline,
@@ -50,6 +51,11 @@ const InvoiceTracker = () => {
     deleteInvoice,
     getHorizonStats,
   } = useInvoiceTracker();
+
+  // Re-fetch invoices every time the user navigates to this page
+  useEffect(() => {
+    fetchInvoices();
+  }, [fetchInvoices]);
 
   // Calendar state
   const [selectedDate, setSelectedDate] = useState<Dayjs | null>(null);
