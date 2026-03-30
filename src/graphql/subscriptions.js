@@ -463,3 +463,198 @@ export const onDeleteSyncStatus = /* GraphQL */ `
     }
   }
 `;
+export const onCreateInvoice = /* GraphQL */ `
+  subscription OnCreateInvoice($filter: ModelSubscriptionInvoiceFilterInput) {
+    onCreateInvoice(filter: $filter) {
+      id
+      invoice_number
+      invoice_date
+      recipient_company
+      recipient_attention
+      recipient_address
+      recipient_email
+      total_legal_fees
+      total_fines_due
+      item_count
+      payment_status
+      payment_date
+      alert_deadline
+      notes
+      clientID
+      items {
+        nextToken
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const onUpdateInvoice = /* GraphQL */ `
+  subscription OnUpdateInvoice($filter: ModelSubscriptionInvoiceFilterInput) {
+    onUpdateInvoice(filter: $filter) {
+      id
+      invoice_number
+      invoice_date
+      recipient_company
+      recipient_attention
+      recipient_address
+      recipient_email
+      total_legal_fees
+      total_fines_due
+      item_count
+      payment_status
+      payment_date
+      alert_deadline
+      notes
+      clientID
+      items {
+        nextToken
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const onDeleteInvoice = /* GraphQL */ `
+  subscription OnDeleteInvoice($filter: ModelSubscriptionInvoiceFilterInput) {
+    onDeleteInvoice(filter: $filter) {
+      id
+      invoice_number
+      invoice_date
+      recipient_company
+      recipient_attention
+      recipient_address
+      recipient_email
+      total_legal_fees
+      total_fines_due
+      item_count
+      payment_status
+      payment_date
+      alert_deadline
+      notes
+      clientID
+      items {
+        nextToken
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const onCreateInvoiceSummons = /* GraphQL */ `
+  subscription OnCreateInvoiceSummons(
+    $filter: ModelSubscriptionInvoiceSummonsFilterInput
+  ) {
+    onCreateInvoiceSummons(filter: $filter) {
+      id
+      invoiceID
+      summonsID
+      summons_number
+      legal_fee
+      amount_due
+      invoice {
+        id
+        invoice_number
+        invoice_date
+        recipient_company
+        recipient_attention
+        recipient_address
+        recipient_email
+        total_legal_fees
+        total_fines_due
+        item_count
+        payment_status
+        payment_date
+        alert_deadline
+        notes
+        clientID
+        createdAt
+        updatedAt
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const onUpdateInvoiceSummons = /* GraphQL */ `
+  subscription OnUpdateInvoiceSummons(
+    $filter: ModelSubscriptionInvoiceSummonsFilterInput
+  ) {
+    onUpdateInvoiceSummons(filter: $filter) {
+      id
+      invoiceID
+      summonsID
+      summons_number
+      legal_fee
+      amount_due
+      invoice {
+        id
+        invoice_number
+        invoice_date
+        recipient_company
+        recipient_attention
+        recipient_address
+        recipient_email
+        total_legal_fees
+        total_fines_due
+        item_count
+        payment_status
+        payment_date
+        alert_deadline
+        notes
+        clientID
+        createdAt
+        updatedAt
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const onDeleteInvoiceSummons = /* GraphQL */ `
+  subscription OnDeleteInvoiceSummons(
+    $filter: ModelSubscriptionInvoiceSummonsFilterInput
+  ) {
+    onDeleteInvoiceSummons(filter: $filter) {
+      id
+      invoiceID
+      summonsID
+      summons_number
+      legal_fee
+      amount_due
+      invoice {
+        id
+        invoice_number
+        invoice_date
+        recipient_company
+        recipient_attention
+        recipient_address
+        recipient_email
+        total_legal_fees
+        total_fines_due
+        item_count
+        payment_status
+        payment_date
+        alert_deadline
+        notes
+        clientID
+        createdAt
+        updatedAt
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;

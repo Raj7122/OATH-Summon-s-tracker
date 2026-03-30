@@ -35,6 +35,8 @@
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.682.0",
     "@aws-sdk/lib-dynamodb": "^3.682.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/file-saver": "^2.0.7",
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",

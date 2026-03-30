@@ -173,3 +173,35 @@ type SyncStatus @model @auth(rules: [{ allow: private }]) {
   oath_api_last_check: AWSDateTime
   oath_api_error: String
 }
+
+# Invoice Tracker - Persistent invoice records with payment tracking
+type Invoice @model @auth(rules: [{ allow: private }]) {
+  id: ID!
+  invoice_number: String!
+  invoice_date: AWSDateTime!
+  recipient_company: String!
+  recipient_attention: String
+  recipient_address: String
+  recipient_email: String
+  total_legal_fees: Float!
+  total_fines_due: Float!
+  item_count: Int!
+  payment_status: String! @default(value: "unpaid")  # "paid" | "unpaid"
+  payment_date: AWSDateTime
+  alert_deadline: AWSDateTime!
+  notes: String
+  clientID: ID @index(name: "invoiceByClient")
+  items: [InvoiceSummons] @hasMany(indexName: "byInvoice", fields: ["id"])
+}
+
+# Join table for many-to-many Invoice <-> Summons relationship
+# One summons can appear on multiple invoices; one invoice has many summonses
+type InvoiceSummons @model @auth(rules: [{ allow: private }]) {
+  id: ID!
+  invoiceID: ID! @index(name: "byInvoice", sortKeyFields: ["summonsID"])
+  summonsID: ID! @index(name: "bySummonsInvoice")
+  summons_number: String!
+  legal_fee: Float!
+  amount_due: Float
+  invoice: Invoice @belongsTo(fields: ["invoiceID"])
+}

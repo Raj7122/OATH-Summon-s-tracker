@@ -7,6 +7,7 @@ import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import MenuIcon from '@mui/icons-material/Menu';
 import GavelIcon from '@mui/icons-material/Gavel';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import SyncStatusBadge from './SyncStatusBadge';
 
 const Header = () => {
@@ -198,6 +199,27 @@ const Header = () => {
           >
             Invoice
           </Button>
+          <Button
+            onClick={() => handleNavigate('/invoice-tracker')}
+            startIcon={<ReceiptLongIcon sx={{ fontSize: 20 }} />}
+            sx={{
+              fontWeight: 600,
+              color: '#FFFFFF',
+              backgroundColor: isActive('/invoice-tracker')
+                ? 'rgba(255, 255, 255, 0.18)'
+                : 'transparent',
+              borderRadius: 2,
+              px: 2.5,
+              py: 1,
+              textTransform: 'none',
+              fontSize: '0.95rem',
+              '&:hover': {
+                backgroundColor: 'rgba(255, 255, 255, 0.25)',
+              },
+            }}
+          >
+            Tracker
+          </Button>
         </Box>
 
         {/* Mobile Navigation */}
@@ -225,6 +247,10 @@ const Header = () => {
                 <ShoppingCartIcon sx={{ fontSize: 20 }} />
               </Badge>
               Invoice {cartCount > 0 && `(${cartCount})`}
+            </MenuItem>
+            <MenuItem onClick={() => handleNavigate('/invoice-tracker')}>
+              <ReceiptLongIcon sx={{ fontSize: 20, mr: 1 }} />
+              Invoice Tracker
             </MenuItem>
           </Menu>
         </Box>

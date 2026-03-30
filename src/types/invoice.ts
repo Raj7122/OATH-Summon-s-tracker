@@ -60,6 +60,7 @@ export interface SummonsForInvoice {
 export interface InvoiceContextState {
   cartItems: InvoiceCartItem[];
   recipient: InvoiceRecipient;
+  alertDeadline: string | null;
 }
 
 /**
@@ -77,6 +78,7 @@ export interface InvoiceContextActions {
   getCartCount: () => number;
   getTotalLegalFees: () => number;
   getTotalFinesDue: () => number;
+  setAlertDeadline: (date: string | null) => void;
 }
 
 export type InvoiceContextType = InvoiceContextState & InvoiceContextActions;

@@ -38,9 +38,17 @@ import {
   DialogContentText,
   DialogActions,
 } from '@mui/material';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { generateClient } from 'aws-amplify/api';
 import { getClient, getSummons } from '../graphql/queries';
 import { updateSummons } from '../graphql/mutations';
+import {
+  createInvoiceRecord,
+  createInvoiceSummonsRecord,
+  invoiceSummonsItemsBySummons,
+} from '../graphql/customQueries';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import DescriptionIcon from '@mui/icons-material/Description';
@@ -60,6 +68,7 @@ import { useInvoice } from '../contexts/InvoiceContext';
 import { generatePDF, generateDOCX } from '../utils/invoiceGenerator';
 import { FOOTER_TEXT } from '../constants/invoiceDefaults';
 import { markAsInvoiced } from '../utils/invoiceTracking';
+import { computeAlertDeadline, generateInvoiceNumber } from '../utils/invoiceTrackerHelpers';
 
 const apiClient = generateClient();
 
@@ -93,6 +102,7 @@ const InvoiceBuilder = () => {
   const {
     cartItems,
     recipient,
+    alertDeadline,
     updateRecipientField,
     setRecipient,
     removeFromCart,
@@ -102,6 +112,7 @@ const InvoiceBuilder = () => {
     getCartCount,
     getTotalLegalFees,
     getTotalFinesDue,
+    setAlertDeadline,
   } = useInvoice();
 
   const [generating, setGenerating] = useState(false);
@@ -119,6 +130,49 @@ const InvoiceBuilder = () => {
 
   // Post-generation dialog state (asks user to keep or clear cart)
   const [successDialogOpen, setSuccessDialogOpen] = useState(false);
+
+  // Previously-invoiced status for each summons in cart
+  // Maps summonsID -> { invoiceDate, paymentStatus, paymentDate }
+  const [invoiceHistory, setInvoiceHistory] = useState<Record<string, { invoiceDate: string; paymentStatus: string; paymentDate?: string | null }[]>>({});
+
+  // Fetch invoice history for cart items
+  useEffect(() => {
+    const fetchInvoiceHistory = async () => {
+      if (cartItems.length === 0) {
+        setInvoiceHistory({});
+        return;
+      }
+
+      const history: Record<string, { invoiceDate: string; paymentStatus: string; paymentDate?: string | null }[]> = {};
+      try {
+        await Promise.all(cartItems.map(async (item) => {
+          try {
+            const result: any = await apiClient.graphql({
+              query: invoiceSummonsItemsBySummons,
+              variables: { summonsID: item.id, limit: 100 },
+            });
+            const items = result.data?.invoiceSummonsesBySummonsID?.items || [];
+            if (items.length > 0) {
+              history[item.id] = items
+                .filter((i: any) => i.invoice)
+                .map((i: any) => ({
+                  invoiceDate: i.invoice.invoice_date,
+                  paymentStatus: i.invoice.payment_status,
+                  paymentDate: i.invoice.payment_date,
+                }));
+            }
+          } catch {
+            // Gracefully degrade if InvoiceSummons table doesn't exist yet
+          }
+        }));
+        setInvoiceHistory(history);
+      } catch {
+        // Gracefully degrade
+      }
+    };
+
+    fetchInvoiceHistory();
+  }, [cartItems]);
 
   // State for editable footer fields
   const [paymentInstructions, setPaymentInstructions] = useState(FOOTER_TEXT.payment);
@@ -217,6 +271,7 @@ const InvoiceBuilder = () => {
    */
   const markItemsAsInvoiced = async (): Promise<boolean> => {
     const invoiceDate = new Date().toISOString();
+    const deadline = alertDeadline || computeAlertDeadline(invoiceDate);
 
     // Save to localStorage immediately (works before schema deployment)
     markAsInvoiced(cartItems.map(item => item.id));
@@ -236,8 +291,55 @@ const InvoiceBuilder = () => {
         })
       ));
     } catch (error) {
-      // Expected to fail until schema is deployed - localStorage handles it
       console.log('DB update for invoice status skipped (schema not deployed yet):', error);
+    }
+
+    // Create persistent Invoice record with linked InvoiceSummons items
+    try {
+      const invoiceNumber = generateInvoiceNumber(recipient.companyName, invoiceDate);
+      const clientID = cartItems[0]?.clientID || null;
+
+      const invoiceResult: any = await apiClient.graphql({
+        query: createInvoiceRecord,
+        variables: {
+          input: {
+            invoice_number: invoiceNumber,
+            invoice_date: invoiceDate,
+            recipient_company: recipient.companyName,
+            recipient_attention: recipient.attention || null,
+            recipient_address: recipient.address || null,
+            recipient_email: recipient.email || null,
+            total_legal_fees: getTotalLegalFees(),
+            total_fines_due: getTotalFinesDue(),
+            item_count: cartItems.length,
+            payment_status: 'unpaid',
+            alert_deadline: deadline,
+            clientID,
+          },
+        },
+      });
+
+      const createdInvoiceId = invoiceResult.data?.createInvoice?.id;
+      if (createdInvoiceId) {
+        // Create join records linking each summons to the invoice
+        await Promise.all(cartItems.map(item =>
+          apiClient.graphql({
+            query: createInvoiceSummonsRecord,
+            variables: {
+              input: {
+                invoiceID: createdInvoiceId,
+                summonsID: item.id,
+                summons_number: item.summons_number,
+                legal_fee: item.legal_fee,
+                amount_due: item.amount_due,
+              },
+            },
+          })
+        ));
+      }
+    } catch (error) {
+      // Gracefully degrade if Invoice tables not yet deployed
+      console.log('Invoice record creation skipped (tables not deployed yet):', error);
     }
 
     return true;
@@ -486,6 +588,21 @@ const InvoiceBuilder = () => {
                                 <CircularProgress size={12} sx={{ ml: 0.5 }} />
                               )}
                             </Box>
+                            {/* Previously invoiced/paid indicator */}
+                            {invoiceHistory[item.id]?.map((hist, idx) => (
+                              <Chip
+                                key={idx}
+                                label={
+                                  hist.paymentStatus === 'paid'
+                                    ? `Paid ${formatDate(hist.paymentDate || hist.invoiceDate)}`
+                                    : `Invoiced ${formatDate(hist.invoiceDate)}`
+                                }
+                                size="small"
+                                color={hist.paymentStatus === 'paid' ? 'success' : 'warning'}
+                                variant="outlined"
+                                sx={{ ml: 0.5, mt: 0.5, fontSize: '0.65rem', height: 20 }}
+                              />
+                            ))}
                           </TableCell>
                           <TableCell>{formatDate(item.violation_date)}</TableCell>
                           <TableCell>{item.status || '—'}</TableCell>
@@ -621,7 +738,34 @@ const InvoiceBuilder = () => {
                   </Box>
                 </Box>
 
-                <Divider sx={{ my: 3 }} />
+                <Divider sx={{ my: 2 }} />
+
+                {/* Alert Deadline Picker */}
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Payment Alert Deadline
+                  </Typography>
+                  <LocalizationProvider dateAdapter={AdapterDayjs}>
+                    <DatePicker
+                      value={alertDeadline ? dayjs.utc(alertDeadline) : null}
+                      onChange={(newValue) => {
+                        setAlertDeadline(newValue ? newValue.toISOString() : null);
+                      }}
+                      slotProps={{
+                        textField: {
+                          size: 'small',
+                          fullWidth: true,
+                          helperText: alertDeadline
+                            ? undefined
+                            : 'Defaults to 7 days after invoice date',
+                          placeholder: 'Select deadline...',
+                        },
+                      }}
+                    />
+                  </LocalizationProvider>
+                </Box>
+
+                <Divider sx={{ my: 2 }} />
 
                 {/* Action Buttons */}
                 <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>

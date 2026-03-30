@@ -21,6 +21,9 @@ export const InvoiceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   });
 
+  // Alert deadline for invoice tracking (null = use default 7 days)
+  const [alertDeadline, setAlertDeadline] = useState<string | null>(null);
+
   // Initialize recipient from LocalStorage with migration for new email field
   const [recipient, setRecipientState] = useState<InvoiceRecipient>(() => {
     try {
@@ -112,6 +115,7 @@ export const InvoiceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const clearCart = useCallback(() => {
     setCartItems([]);
     setRecipientState(DEFAULT_RECIPIENT);
+    setAlertDeadline(null);
   }, []);
 
   // Check if a summons is already in the cart
@@ -153,6 +157,7 @@ export const InvoiceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const value: InvoiceContextType = {
     cartItems,
     recipient,
+    alertDeadline,
     addToCart,
     removeFromCart,
     updateLegalFee,
@@ -164,6 +169,7 @@ export const InvoiceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     getCartCount,
     getTotalLegalFees,
     getTotalFinesDue,
+    setAlertDeadline,
   };
 
   return <InvoiceContext.Provider value={value}>{children}</InvoiceContext.Provider>;

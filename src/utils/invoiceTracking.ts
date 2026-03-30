@@ -1,6 +1,9 @@
 /**
  * Invoice Tracking Utility
  *
+ * @deprecated Use InvoiceTrackerContext for persistent invoice tracking via DynamoDB.
+ * This localStorage-based approach is kept as a fallback for backward compatibility.
+ *
  * Provides localStorage-based tracking for invoiced summonses.
  * This is a workaround until the backend schema with is_invoiced/invoice_date
  * fields is deployed. Once deployed, the DB-based tracking will take precedence.

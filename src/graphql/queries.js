@@ -309,6 +309,124 @@ export const listSyncStatuses = /* GraphQL */ `
     }
   }
 `;
+export const getInvoice = /* GraphQL */ `
+  query GetInvoice($id: ID!) {
+    getInvoice(id: $id) {
+      id
+      invoice_number
+      invoice_date
+      recipient_company
+      recipient_attention
+      recipient_address
+      recipient_email
+      total_legal_fees
+      total_fines_due
+      item_count
+      payment_status
+      payment_date
+      alert_deadline
+      notes
+      clientID
+      items {
+        nextToken
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const listInvoices = /* GraphQL */ `
+  query ListInvoices(
+    $filter: ModelInvoiceFilterInput
+    $limit: Int
+    $nextToken: String
+  ) {
+    listInvoices(filter: $filter, limit: $limit, nextToken: $nextToken) {
+      items {
+        id
+        invoice_number
+        invoice_date
+        recipient_company
+        recipient_attention
+        recipient_address
+        recipient_email
+        total_legal_fees
+        total_fines_due
+        item_count
+        payment_status
+        payment_date
+        alert_deadline
+        notes
+        clientID
+        createdAt
+        updatedAt
+        __typename
+      }
+      nextToken
+      __typename
+    }
+  }
+`;
+export const getInvoiceSummons = /* GraphQL */ `
+  query GetInvoiceSummons($id: ID!) {
+    getInvoiceSummons(id: $id) {
+      id
+      invoiceID
+      summonsID
+      summons_number
+      legal_fee
+      amount_due
+      invoice {
+        id
+        invoice_number
+        invoice_date
+        recipient_company
+        recipient_attention
+        recipient_address
+        recipient_email
+        total_legal_fees
+        total_fines_due
+        item_count
+        payment_status
+        payment_date
+        alert_deadline
+        notes
+        clientID
+        createdAt
+        updatedAt
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const listInvoiceSummons = /* GraphQL */ `
+  query ListInvoiceSummons(
+    $filter: ModelInvoiceSummonsFilterInput
+    $limit: Int
+    $nextToken: String
+  ) {
+    listInvoiceSummons(filter: $filter, limit: $limit, nextToken: $nextToken) {
+      items {
+        id
+        invoiceID
+        summonsID
+        summons_number
+        legal_fee
+        amount_due
+        createdAt
+        updatedAt
+        __typename
+      }
+      nextToken
+      __typename
+    }
+  }
+`;
 export const summonsByClientIDAndHearing_date = /* GraphQL */ `
   query SummonsByClientIDAndHearing_date(
     $clientID: ID!
@@ -566,6 +684,110 @@ export const summonsByOcrStatus = /* GraphQL */ `
         is_invoiced
         invoice_date
         activity_log
+        createdAt
+        updatedAt
+        __typename
+      }
+      nextToken
+      __typename
+    }
+  }
+`;
+export const invoicesByClientID = /* GraphQL */ `
+  query InvoicesByClientID(
+    $clientID: ID!
+    $sortDirection: ModelSortDirection
+    $filter: ModelInvoiceFilterInput
+    $limit: Int
+    $nextToken: String
+  ) {
+    invoicesByClientID(
+      clientID: $clientID
+      sortDirection: $sortDirection
+      filter: $filter
+      limit: $limit
+      nextToken: $nextToken
+    ) {
+      items {
+        id
+        invoice_number
+        invoice_date
+        recipient_company
+        recipient_attention
+        recipient_address
+        recipient_email
+        total_legal_fees
+        total_fines_due
+        item_count
+        payment_status
+        payment_date
+        alert_deadline
+        notes
+        clientID
+        createdAt
+        updatedAt
+        __typename
+      }
+      nextToken
+      __typename
+    }
+  }
+`;
+export const invoiceSummonsByInvoiceIDAndSummonsID = /* GraphQL */ `
+  query InvoiceSummonsByInvoiceIDAndSummonsID(
+    $invoiceID: ID!
+    $summonsID: ModelIDKeyConditionInput
+    $sortDirection: ModelSortDirection
+    $filter: ModelInvoiceSummonsFilterInput
+    $limit: Int
+    $nextToken: String
+  ) {
+    invoiceSummonsByInvoiceIDAndSummonsID(
+      invoiceID: $invoiceID
+      summonsID: $summonsID
+      sortDirection: $sortDirection
+      filter: $filter
+      limit: $limit
+      nextToken: $nextToken
+    ) {
+      items {
+        id
+        invoiceID
+        summonsID
+        summons_number
+        legal_fee
+        amount_due
+        createdAt
+        updatedAt
+        __typename
+      }
+      nextToken
+      __typename
+    }
+  }
+`;
+export const invoiceSummonsBySummonsID = /* GraphQL */ `
+  query InvoiceSummonsBySummonsID(
+    $summonsID: ID!
+    $sortDirection: ModelSortDirection
+    $filter: ModelInvoiceSummonsFilterInput
+    $limit: Int
+    $nextToken: String
+  ) {
+    invoiceSummonsBySummonsID(
+      summonsID: $summonsID
+      sortDirection: $sortDirection
+      filter: $filter
+      limit: $limit
+      nextToken: $nextToken
+    ) {
+      items {
+        id
+        invoiceID
+        summonsID
+        summons_number
+        legal_fee
+        amount_due
         createdAt
         updatedAt
         __typename
