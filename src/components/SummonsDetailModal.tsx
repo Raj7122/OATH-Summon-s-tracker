@@ -82,6 +82,7 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import ReceiptIcon from '@mui/icons-material/Receipt';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 
 // Import invoice context
 import { useInvoice } from '../contexts/InvoiceContext';
@@ -138,6 +139,10 @@ function getActivityColor(type: ActivityLogEntry['type']): string {
       return '#757575'; // Gray - archived/closed
     case 'EVIDENCE_UPLOADED':
       return '#9c27b0'; // Purple - evidence file uploaded
+    case 'INVOICE_CREATED':
+      return '#009688'; // Teal - invoice created
+    case 'INVOICE_DUE':
+      return '#e65100'; // Deep orange - invoice due
     default:
       return '#9e9e9e'; // Gray - unknown
   }
@@ -169,6 +174,10 @@ function getActivityIcon(type: ActivityLogEntry['type']): React.ReactNode {
       return <HistoryIcon sx={iconSx} />;
     case 'EVIDENCE_UPLOADED':
       return <AttachFileIcon sx={{ ...iconSx, color: '#9C27B0' }} />; // Purple
+    case 'INVOICE_CREATED':
+      return <ReceiptIcon sx={iconSx} />;
+    case 'INVOICE_DUE':
+      return <AccessTimeIcon sx={iconSx} />;
     default:
       return <UpdateIcon sx={iconSx} />;
   }

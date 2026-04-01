@@ -176,10 +176,12 @@ export interface Summons {
  * - OCR_COMPLETE: Document scan completed
  * - ARCHIVED: Record archived (missing from API or case closed)
  * - EVIDENCE_UPLOADED: User uploaded evidence file
+ * - INVOICE_CREATED: Summons added to an invoice
+ * - INVOICE_DUE: Invoice payment deadline set
  */
 export interface ActivityLogEntry {
   date: string;
-  type: 'CREATED' | 'STATUS_CHANGE' | 'RESCHEDULE' | 'RESULT_CHANGE' | 'AMOUNT_CHANGE' | 'PAYMENT' | 'AMENDMENT' | 'OCR_COMPLETE' | 'ARCHIVED' | 'EVIDENCE_UPLOADED';
+  type: 'CREATED' | 'STATUS_CHANGE' | 'RESCHEDULE' | 'RESULT_CHANGE' | 'AMOUNT_CHANGE' | 'PAYMENT' | 'AMENDMENT' | 'OCR_COMPLETE' | 'ARCHIVED' | 'EVIDENCE_UPLOADED' | 'INVOICE_CREATED' | 'INVOICE_DUE';
   description: string;
   old_value: string | null;
   new_value: string | null;

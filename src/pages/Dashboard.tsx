@@ -33,6 +33,8 @@ import DocumentScannerIcon from '@mui/icons-material/DocumentScanner';
 import ArchiveIcon from '@mui/icons-material/Archive';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import FilterAltIcon from '@mui/icons-material/FilterAlt';
+import ReceiptIcon from '@mui/icons-material/Receipt';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { generateClient } from 'aws-amplify/api';
 import { listSummons } from '../graphql/queries';
 import { listClientsWithPlateFilter } from '../graphql/customQueries';
@@ -46,7 +48,7 @@ const client = generateClient();
 // Activity Log Entry for Summons Lifecycle Audit
 interface ActivityLogEntry {
   date: string;
-  type: 'CREATED' | 'STATUS_CHANGE' | 'RESCHEDULE' | 'RESULT_CHANGE' | 'AMOUNT_CHANGE' | 'PAYMENT' | 'AMENDMENT' | 'OCR_COMPLETE' | 'ARCHIVED' | 'EVIDENCE_UPLOADED';
+  type: 'CREATED' | 'STATUS_CHANGE' | 'RESCHEDULE' | 'RESULT_CHANGE' | 'AMOUNT_CHANGE' | 'PAYMENT' | 'AMENDMENT' | 'OCR_COMPLETE' | 'ARCHIVED' | 'EVIDENCE_UPLOADED' | 'INVOICE_CREATED' | 'INVOICE_DUE';
   description: string;
   old_value: string | null;
   new_value: string | null;
@@ -203,6 +205,10 @@ function getActivityIcon(type: ActivityLogEntry['type']) {
       return <ArchiveIcon sx={{ color: '#757575' }} />;
     case 'EVIDENCE_UPLOADED':
       return <AttachFileIcon sx={{ color: '#9C27B0' }} />; // Purple
+    case 'INVOICE_CREATED':
+      return <ReceiptIcon sx={{ color: '#009688' }} />; // Teal
+    case 'INVOICE_DUE':
+      return <AccessTimeIcon sx={{ color: '#E65100' }} />; // Deep orange
     default:
       return <HistoryIcon />;
   }
@@ -751,6 +757,22 @@ const Dashboard = () => {
                 variant={auditTrailFilter === 'ARCHIVED' ? 'filled' : 'outlined'}
                 color={auditTrailFilter === 'ARCHIVED' ? 'primary' : 'default'}
                 onClick={() => setAuditTrailFilter('ARCHIVED')}
+                sx={{ cursor: 'pointer' }}
+              />
+              <Chip
+                label="Invoiced"
+                size="small"
+                variant={auditTrailFilter === 'INVOICE_CREATED' ? 'filled' : 'outlined'}
+                color={auditTrailFilter === 'INVOICE_CREATED' ? 'primary' : 'default'}
+                onClick={() => setAuditTrailFilter('INVOICE_CREATED')}
+                sx={{ cursor: 'pointer' }}
+              />
+              <Chip
+                label="Due"
+                size="small"
+                variant={auditTrailFilter === 'INVOICE_DUE' ? 'filled' : 'outlined'}
+                color={auditTrailFilter === 'INVOICE_DUE' ? 'warning' : 'default'}
+                onClick={() => setAuditTrailFilter('INVOICE_DUE')}
                 sx={{ cursor: 'pointer' }}
               />
             </Box>

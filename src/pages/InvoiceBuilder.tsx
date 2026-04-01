@@ -69,6 +69,7 @@ import { generatePDF, generateDOCX } from '../utils/invoiceGenerator';
 import { FOOTER_TEXT } from '../constants/invoiceDefaults';
 import { markAsInvoiced } from '../utils/invoiceTracking';
 import { computeAlertDeadline, generateInvoiceNumber } from '../utils/invoiceTrackerHelpers';
+import { appendInvoiceAuditEntries } from '../utils/invoiceAuditLog';
 
 const apiClient = generateClient();
 
@@ -276,27 +277,44 @@ const InvoiceBuilder = () => {
     // Save to localStorage immediately (works before schema deployment)
     markAsInvoiced(cartItems.map(item => item.id));
 
+    // Generate invoice number early so it can be used for both the Invoice record and audit entries
+    const invoiceNumber = generateInvoiceNumber(recipient.companyName, invoiceDate);
+
     // Also attempt DB update (fails silently until schema is deployed)
+    // Fetch each summons's existing activity_log, append invoice audit entries, and update
     try {
-      await Promise.all(cartItems.map(item =>
-        apiClient.graphql({
+      // Batch-fetch existing summons records to get their current activity_log
+      const summonsResults = await Promise.all(cartItems.map(item =>
+        apiClient.graphql({ query: getSummons, variables: { id: item.id } })
+      ));
+
+      await Promise.all(cartItems.map((item, idx) => {
+        const existing = (summonsResults[idx] as any)?.data?.getSummons;
+        const updatedLog = appendInvoiceAuditEntries(
+          existing?.activity_log,
+          invoiceNumber,
+          recipient.companyName,
+          invoiceDate,
+          deadline,
+        );
+        return apiClient.graphql({
           query: updateSummons,
           variables: {
             input: {
               id: item.id,
               is_invoiced: true,
               invoice_date: invoiceDate,
+              activity_log: updatedLog,
             }
           }
-        })
-      ));
+        });
+      }));
     } catch (error) {
       console.log('DB update for invoice status skipped (schema not deployed yet):', error);
     }
 
     // Create persistent Invoice record with linked InvoiceSummons items
     try {
-      const invoiceNumber = generateInvoiceNumber(recipient.companyName, invoiceDate);
       const clientID = cartItems[0]?.clientID || null;
 
       const invoiceResult: any = await apiClient.graphql({

@@ -68,6 +68,8 @@ import ClearAllIcon from '@mui/icons-material/ClearAll';
 import DownloadIcon from '@mui/icons-material/Download';
 import DescriptionIcon from '@mui/icons-material/Description';
 import DateRangeIcon from '@mui/icons-material/DateRange';
+import ReceiptIcon from '@mui/icons-material/Receipt';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { generateClient } from 'aws-amplify/api';
 
 // Components
@@ -826,6 +828,10 @@ const CalendarDashboard: React.FC = () => {
         return <EditIcon sx={{ color: 'text.secondary' }} />;
       case 'ARCHIVED':
         return <ArchiveIcon sx={{ color: 'text.disabled' }} />;
+      case 'INVOICE_CREATED':
+        return <ReceiptIcon sx={{ color: '#009688' }} />;
+      case 'INVOICE_DUE':
+        return <AccessTimeIcon sx={{ color: '#E65100' }} />;
       default:
         return <HistoryIcon color="action" />;
     }
@@ -1515,6 +1521,8 @@ const CalendarDashboard: React.FC = () => {
                     <MenuItem value="PAYMENT">Payment</MenuItem>
                     <MenuItem value="AMENDMENT">Amendment</MenuItem>
                     <MenuItem value="ARCHIVED">Archived</MenuItem>
+                    <MenuItem value="INVOICE_CREATED">Invoiced</MenuItem>
+                    <MenuItem value="INVOICE_DUE">Due</MenuItem>
                   </Select>
                 </FormControl>
               </Box>
