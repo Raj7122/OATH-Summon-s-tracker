@@ -191,6 +191,7 @@ type Invoice @model @auth(rules: [{ allow: private }]) {
   alert_deadline: AWSDateTime!
   notes: String
   clientID: ID @index(name: "invoiceByClient")
+  pdf_s3_key: String    # S3 key for the stored invoice file (PDF or DOCX)
   items: [InvoiceSummons] @hasMany(indexName: "byInvoice", fields: ["id"])
 }
 

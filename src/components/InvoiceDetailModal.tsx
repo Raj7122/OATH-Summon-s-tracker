@@ -26,14 +26,18 @@ import {
   TableRow,
   Paper,
   IconButton,
+  Tooltip,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import CircularProgress from '@mui/material/CircularProgress';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
+import { getUrl } from 'aws-amplify/storage';
 import { Invoice } from '../types/invoiceTracker';
 import { getInvoiceHorizonColor } from '../utils/invoiceTrackerHelpers';
 import { horizonColors } from '../theme';
@@ -77,6 +81,7 @@ const InvoiceDetailModal = ({
   const [notesValue, setNotesValue] = useState('');
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [loadingPdf, setLoadingPdf] = useState(false);
 
   if (!invoice) return null;
 
@@ -94,6 +99,22 @@ const InvoiceDetailModal = ({
         return { label: 'UNPAID', variant: 'outlined' as const, sx: {} };
     }
   })();
+
+  const handleViewInvoice = async () => {
+    if (!invoice?.pdf_s3_key) return;
+    setLoadingPdf(true);
+    try {
+      const urlResult = await getUrl({
+        key: invoice.pdf_s3_key,
+        options: { expiresIn: 3600 },
+      });
+      window.open(urlResult.url.toString(), '_blank');
+    } catch (error) {
+      console.error('Error getting invoice file URL:', error);
+    } finally {
+      setLoadingPdf(false);
+    }
+  };
 
   const handleMarkPaid = async () => {
     const dateStr = paymentDate ? paymentDate.toISOString() : new Date().toISOString();
@@ -135,6 +156,18 @@ const InvoiceDetailModal = ({
           <Chip size="small" {...statusChipProps} sx={{ ...statusChipProps.sx, fontWeight: 600 }} />
         </Box>
         <Box sx={{ display: 'flex', gap: 0.5 }}>
+          {invoice.pdf_s3_key && (
+            <Tooltip title="View saved invoice file">
+              <IconButton
+                onClick={handleViewInvoice}
+                size="small"
+                color="primary"
+                disabled={loadingPdf}
+              >
+                {loadingPdf ? <CircularProgress size={18} /> : <PictureAsPdfIcon />}
+              </IconButton>
+            </Tooltip>
+          )}
           <IconButton
             onClick={() => setDeleteConfirmOpen(true)}
             size="small"

@@ -327,6 +327,7 @@ export const getInvoice = /* GraphQL */ `
       alert_deadline
       notes
       clientID
+      pdf_s3_key
       items {
         nextToken
         __typename
@@ -360,6 +361,7 @@ export const listInvoices = /* GraphQL */ `
         alert_deadline
         notes
         clientID
+        pdf_s3_key
         createdAt
         updatedAt
         __typename
@@ -394,6 +396,7 @@ export const getInvoiceSummons = /* GraphQL */ `
         alert_deadline
         notes
         clientID
+        pdf_s3_key
         createdAt
         updatedAt
         __typename
@@ -724,6 +727,7 @@ export const invoicesByClientID = /* GraphQL */ `
         alert_deadline
         notes
         clientID
+        pdf_s3_key
         createdAt
         updatedAt
         __typename

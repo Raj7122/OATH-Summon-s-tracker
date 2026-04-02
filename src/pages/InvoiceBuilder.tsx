@@ -42,12 +42,14 @@ import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { generateClient } from 'aws-amplify/api';
+import { uploadData } from 'aws-amplify/storage';
 import { getClient, getSummons } from '../graphql/queries';
 import { updateSummons } from '../graphql/mutations';
 import {
   createInvoiceRecord,
   createInvoiceSummonsRecord,
   invoiceSummonsItemsBySummons,
+  updateInvoiceRecord,
 } from '../graphql/customQueries';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
@@ -270,9 +272,10 @@ const InvoiceBuilder = () => {
    * Uses localStorage for immediate persistence (works before schema deployment).
    * Also attempts DB update which will succeed once schema is deployed.
    */
-  const markItemsAsInvoiced = async (): Promise<boolean> => {
+  const markItemsAsInvoiced = async (): Promise<string | null> => {
     const invoiceDate = new Date().toISOString();
     const deadline = alertDeadline || computeAlertDeadline(invoiceDate);
+    let invoiceId: string | null = null;
 
     // Save to localStorage immediately (works before schema deployment)
     markAsInvoiced(cartItems.map(item => item.id));
@@ -342,17 +345,17 @@ const InvoiceBuilder = () => {
         console.error('GraphQL errors creating invoice:', invoiceResult.errors);
       }
 
-      const createdInvoiceId = invoiceResult.data?.createInvoice?.id;
-      console.log('Invoice created with ID:', createdInvoiceId);
+      invoiceId = invoiceResult.data?.createInvoice?.id || null;
+      console.log('Invoice created with ID:', invoiceId);
 
-      if (createdInvoiceId) {
+      if (invoiceId) {
         // Create join records linking each summons to the invoice
         await Promise.all(cartItems.map(item =>
           apiClient.graphql({
             query: createInvoiceSummonsRecord,
             variables: {
               input: {
-                invoiceID: createdInvoiceId,
+                invoiceID: invoiceId,
                 summonsID: item.id,
                 summons_number: item.summons_number,
                 legal_fee: item.legal_fee,
@@ -369,7 +372,27 @@ const InvoiceBuilder = () => {
       console.error('Invoice record creation failed:', error);
     }
 
-    return true;
+    return invoiceId;
+  };
+
+  // Upload generated invoice file to S3 and store the key on the Invoice record
+  const uploadInvoiceToS3 = async (invoiceId: string, blob: Blob, filename: string, contentType: string) => {
+    const s3Key = `public/invoices/${invoiceId}/${filename}`;
+    try {
+      await uploadData({
+        key: s3Key,
+        data: blob,
+        options: { contentType },
+      }).result;
+
+      await apiClient.graphql({
+        query: updateInvoiceRecord,
+        variables: { input: { id: invoiceId, pdf_s3_key: s3Key } },
+      });
+      console.log('Invoice file saved to S3:', s3Key);
+    } catch (uploadError) {
+      console.error('Invoice file upload to S3 failed (invoice still created):', uploadError);
+    }
   };
 
   const handleGeneratePDF = async () => {
@@ -380,10 +403,15 @@ const InvoiceBuilder = () => {
 
     setGenerating(true);
     try {
-      await generatePDF(cartItems, recipient, { paymentInstructions, reviewText, additionalNotes, showOverdue, overdueText });
+      const { blob, filename } = await generatePDF(cartItems, recipient, { paymentInstructions, reviewText, additionalNotes, showOverdue, overdueText });
 
       // Mark all cart items as invoiced in the database
-      await markItemsAsInvoiced();
+      const invoiceId = await markItemsAsInvoiced();
+
+      // Upload the PDF to S3 and link it to the invoice record
+      if (invoiceId) {
+        await uploadInvoiceToS3(invoiceId, blob, filename, 'application/pdf');
+      }
 
       // Show dialog asking user to keep or clear cart (instead of clearing immediately)
       setSuccessMessage(`Invoice generated! ${cartItems.length} summons${cartItems.length !== 1 ? 'es' : ''} marked as invoiced.`);
@@ -404,10 +432,15 @@ const InvoiceBuilder = () => {
 
     setGenerating(true);
     try {
-      await generateDOCX(cartItems, recipient, { paymentInstructions, reviewText, additionalNotes, showOverdue, overdueText });
+      const { blob, filename } = await generateDOCX(cartItems, recipient, { paymentInstructions, reviewText, additionalNotes, showOverdue, overdueText });
 
       // Mark all cart items as invoiced in the database
-      await markItemsAsInvoiced();
+      const invoiceId = await markItemsAsInvoiced();
+
+      // Upload the DOCX to S3 and link it to the invoice record
+      if (invoiceId) {
+        await uploadInvoiceToS3(invoiceId, blob, filename, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      }
 
       // Show dialog asking user to keep or clear cart (instead of clearing immediately)
       setSuccessMessage(`Invoice generated! ${cartItems.length} summons${cartItems.length !== 1 ? 'es' : ''} marked as invoiced.`);

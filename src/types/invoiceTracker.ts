@@ -25,6 +25,7 @@ export interface Invoice {
   payment_date?: string | null;
   alert_deadline: string;
   notes?: string | null;
+  pdf_s3_key?: string | null;
   clientID?: string | null;
   items?: {
     items: InvoiceSummonsItem[];

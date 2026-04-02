@@ -52,6 +52,7 @@ import {
   Alert,
   Snackbar,
   Tooltip,
+  CircularProgress,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -87,6 +88,11 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 // Import invoice context
 import { useInvoice } from '../contexts/InvoiceContext';
 import { SummonsForInvoice } from '../types/invoice';
+
+// Imports for viewing saved invoice files
+import { generateClient } from 'aws-amplify/api';
+import { getUrl } from 'aws-amplify/storage';
+import { invoiceSummonsItemsBySummons, getInvoicePdfKey } from '../graphql/customQueries';
 
 // Import shared types
 import { Summons, getStatusColor, ActivityLogEntry, AttributionData, DepFileDateAttribution, NoteComment, InternalStatusAttribution, Attachment } from '../types/summons';
@@ -321,8 +327,46 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   // DEP File Date with attribution
   const [depFileDateAttr, setDepFileDateAttr] = useState<DepFileDateAttribution>({});
 
+  // Invoice PDF viewing
+  const [loadingInvoicePdf, setLoadingInvoicePdf] = useState(false);
+  const invoiceApiClient = generateClient();
+
   // Snackbar for copy feedback
   const [copySnackbar, setCopySnackbar] = useState(false);
+
+  // View the saved invoice PDF/DOCX for this summons (looks up via join table)
+  const handleViewInvoiceFile = async () => {
+    if (!summons) return;
+    setLoadingInvoicePdf(true);
+    try {
+      // Find the InvoiceSummons join record for this summons
+      const joinResult: any = await invoiceApiClient.graphql({
+        query: invoiceSummonsItemsBySummons,
+        variables: { summonsID: summons.id, limit: 1 },
+      });
+      const joinItems = joinResult.data?.invoiceSummonsesBySummonsID?.items || [];
+      if (joinItems.length === 0) return;
+
+      // Fetch the invoice to get its pdf_s3_key
+      const invoiceResult: any = await invoiceApiClient.graphql({
+        query: getInvoicePdfKey,
+        variables: { id: joinItems[0].invoiceID },
+      });
+      const pdfKey = invoiceResult.data?.getInvoice?.pdf_s3_key;
+      if (!pdfKey) return;
+
+      // Get a signed URL and open in new tab
+      const urlResult = await getUrl({
+        key: pdfKey,
+        options: { expiresIn: 3600 },
+      });
+      window.open(urlResult.url.toString(), '_blank');
+    } catch (error) {
+      console.error('Error viewing invoice file:', error);
+    } finally {
+      setLoadingInvoicePdf(false);
+    }
+  };
 
   // Helper to get attribution from summons or create default from legacy boolean
   const getAttrFromSummons = (
@@ -907,16 +951,29 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                   <InfoRow
                     label="Invoiced"
                     value={
-                      <Chip
-                        label={dayjs(summons.invoice_date || getInvoiceDateLocally(summons.id)).format('MMM D, YYYY')}
-                        size="small"
-                        color="success"
-                        variant="outlined"
-                        onDelete={() => {
-                          onUpdate(summons.id, 'is_invoiced', false, { invoice_date: null });
-                          unmarkAsInvoiced([summons.id]);
-                        }}
-                      />
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Chip
+                          label={dayjs(summons.invoice_date || getInvoiceDateLocally(summons.id)).format('MMM D, YYYY')}
+                          size="small"
+                          color="success"
+                          variant="outlined"
+                          onDelete={() => {
+                            onUpdate(summons.id, 'is_invoiced', false, { invoice_date: null });
+                            unmarkAsInvoiced([summons.id]);
+                          }}
+                        />
+                        <Tooltip title="View saved invoice">
+                          <IconButton
+                            size="small"
+                            color="primary"
+                            onClick={handleViewInvoiceFile}
+                            disabled={loadingInvoicePdf}
+                            sx={{ p: 0.25 }}
+                          >
+                            {loadingInvoicePdf ? <CircularProgress size={16} /> : <PictureAsPdfIcon fontSize="small" />}
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
                     }
                   />
                 )}

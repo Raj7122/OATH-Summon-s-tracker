@@ -79,6 +79,7 @@ export const listInvoicesWithItems = /* GraphQL */ `
         payment_date
         alert_deadline
         notes
+        pdf_s3_key
         clientID
         items {
           items {
@@ -146,6 +147,7 @@ export const createInvoiceRecord = /* GraphQL */ `
       item_count
       payment_status
       alert_deadline
+      pdf_s3_key
       clientID
     }
   }
@@ -174,6 +176,17 @@ export const updateInvoiceRecord = /* GraphQL */ `
       payment_date
       alert_deadline
       notes
+      pdf_s3_key
+    }
+  }
+`;
+
+// Fetch a single invoice's S3 key for viewing the saved file
+export const getInvoicePdfKey = /* GraphQL */ `
+  query GetInvoicePdfKey($id: ID!) {
+    getInvoice(id: $id) {
+      id
+      pdf_s3_key
     }
   }
 `;

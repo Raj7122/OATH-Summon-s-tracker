@@ -56,7 +56,7 @@ export const generatePDF = async (
   items: InvoiceCartItem[],
   recipient: InvoiceRecipient,
   options: InvoiceOptions
-): Promise<void> => {
+): Promise<{ blob: Blob; filename: string }> => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 20;
@@ -277,8 +277,10 @@ export const generatePDF = async (
   doc.text(FOOTER_TEXT.closing, margin, yPos);
 
   // Save the PDF
-  const filename = `Invoice-${recipient.companyName || 'Client'}-${dayjs().format('YYYY-MM-DD')}.pdf`;
-  doc.save(filename.replace(/[^a-zA-Z0-9-_.]/g, '_'));
+  const filename = `Invoice-${recipient.companyName || 'Client'}-${dayjs().format('YYYY-MM-DD')}.pdf`.replace(/[^a-zA-Z0-9-_.]/g, '_');
+  const blob = doc.output('blob');
+  doc.save(filename);
+  return { blob, filename };
 };
 
 /**
@@ -288,7 +290,7 @@ export const generateDOCX = async (
   items: InvoiceCartItem[],
   recipient: InvoiceRecipient,
   options: InvoiceOptions
-): Promise<void> => {
+): Promise<{ blob: Blob; filename: string }> => {
   const totalLegalFees = items.reduce((sum, item) => sum + item.legal_fee, 0);
   const invoiceDate = dayjs().format('MMMM D, YYYY');
 
@@ -536,8 +538,9 @@ export const generateDOCX = async (
 
   // Generate and save the file
   const blob = await Packer.toBlob(doc);
-  const filename = `Invoice-${recipient.companyName || 'Client'}-${dayjs().format('YYYY-MM-DD')}.docx`;
-  saveAs(blob, filename.replace(/[^a-zA-Z0-9-_.]/g, '_'));
+  const filename = `Invoice-${recipient.companyName || 'Client'}-${dayjs().format('YYYY-MM-DD')}.docx`.replace(/[^a-zA-Z0-9-_.]/g, '_');
+  saveAs(blob, filename);
+  return { blob, filename };
 };
 
 // Helper to create header cell for DOCX table
