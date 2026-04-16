@@ -8,11 +8,13 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
+  Tooltip,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DownloadIcon from '@mui/icons-material/Download';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import FilterAltIcon from '@mui/icons-material/FilterAlt';
 import { DataGrid, GridColDef, GridActionsCellItem, GridToolbar } from '@mui/x-data-grid';
 import { generateClient } from 'aws-amplify/api';
 import { listClients } from '../graphql/queries';
@@ -33,6 +35,7 @@ interface Client {
   contact_email1?: string;
   contact_phone2?: string;
   contact_email2?: string;
+  client_notes?: string;
   plate_filter_enabled?: boolean;
   plate_filter_list?: string[];
 }
@@ -169,7 +172,22 @@ const Clients = () => {
   };
 
   const columns: GridColDef[] = [
-    { field: 'name', headerName: 'Client Name', flex: 1, minWidth: 200 },
+    {
+      field: 'name',
+      headerName: 'Client Name',
+      flex: 1,
+      minWidth: 200,
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          {params.value}
+          {params.row.plate_filter_enabled && (
+            <Tooltip title={`Plate filter active (${params.row.plate_filter_list?.length || 0} plate${(params.row.plate_filter_list?.length || 0) !== 1 ? 's' : ''})`}>
+              <FilterAltIcon sx={{ fontSize: 16, color: 'primary.main' }} />
+            </Tooltip>
+          )}
+        </Box>
+      ),
+    },
     {
       field: 'akas',
       headerName: 'AKAs',

@@ -13,6 +13,7 @@ export const onCreateClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      client_notes
       plate_filter_enabled
       plate_filter_list
       summonses {
@@ -37,6 +38,7 @@ export const onUpdateClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      client_notes
       plate_filter_enabled
       plate_filter_list
       summonses {
@@ -61,6 +63,7 @@ export const onDeleteClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      client_notes
       plate_filter_enabled
       plate_filter_list
       summonses {
@@ -88,6 +91,7 @@ export const onCreateSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        client_notes
         plate_filter_enabled
         plate_filter_list
         createdAt
@@ -176,6 +180,7 @@ export const onUpdateSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        client_notes
         plate_filter_enabled
         plate_filter_list
         createdAt
@@ -264,6 +269,7 @@ export const onDeleteSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        client_notes
         plate_filter_enabled
         plate_filter_list
         createdAt

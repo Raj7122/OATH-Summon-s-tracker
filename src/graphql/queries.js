@@ -13,6 +13,7 @@ export const getClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      client_notes
       plate_filter_enabled
       plate_filter_list
       summonses {
@@ -42,6 +43,7 @@ export const listClients = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        client_notes
         plate_filter_enabled
         plate_filter_list
         createdAt
@@ -68,6 +70,7 @@ export const getSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        client_notes
         plate_filter_enabled
         plate_filter_list
         createdAt

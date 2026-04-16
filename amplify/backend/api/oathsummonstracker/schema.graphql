@@ -11,6 +11,7 @@ type Client @model @auth(rules: [{ allow: private }]) {
   contact_email1: String
   contact_phone2: String
   contact_email2: String
+  client_notes: String
   plate_filter_enabled: Boolean @default(value: "false")
   plate_filter_list: [String]
   summonses: [Summons] @hasMany(indexName: "byClient", fields: ["id"])
