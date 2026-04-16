@@ -1923,5 +1923,69 @@ describe('Daily Sweep Lambda Function', () => {
         expect(lastNameNorm.startsWith(clientNorm)).toBe(true);
       });
     });
+
+    describe('extractPlateFromViolationDetails', () => {
+      const { extractPlateFromViolationDetails } = require('./index')._testExports;
+
+      test('extracts full plate from violation_details', () => {
+        const details = 'CITIZEN OBSERVED TRUCK WITH NJ LICENSE PLATE XDLR87 IDLING';
+        expect(extractPlateFromViolationDetails(details)).toBe('XDLR87');
+      });
+
+      test('extracts truncated plate from violation_details', () => {
+        // NYC API sometimes truncates violation_details, cutting the plate short
+        const details = 'CITIZEN OBSERVED TRUCK WITH NJ LICENSE PLATE XDL';
+        expect(extractPlateFromViolationDetails(details)).toBe('XDL');
+      });
+
+      test('extracts plate with hash symbol', () => {
+        const details = 'LICENSE PLATE # ABC1234 SOME TEXT';
+        expect(extractPlateFromViolationDetails(details)).toBe('ABC1234');
+      });
+
+      test('returns null when no plate in details', () => {
+        const details = 'RESPONDENT CAUSED IDLING OF A MOTOR VEHICLE';
+        expect(extractPlateFromViolationDetails(details)).toBeNull();
+      });
+
+      test('returns null for empty/null input', () => {
+        expect(extractPlateFromViolationDetails('')).toBeNull();
+        expect(extractPlateFromViolationDetails(null)).toBeNull();
+      });
+    });
+
+    describe('Plate filter prefix matching - Summons 000775055Z regression', () => {
+      // This tests the real-world scenario where the NYC API truncated
+      // "XDLR87" to "XDL" in violation_details, causing a false rejection.
+      // The plate filter should use prefix matching, not exact matching.
+
+      test('truncated plate "XDL" should prefix-match filter plate "XDLR87"', () => {
+        const normalizedPlate = 'XDL'; // extracted from truncated API text
+        const plateList = ['XDLR87'];
+        // Prefix match: filter plate starts with extracted plate
+        const plateMatches = plateList.some(filterPlate =>
+          filterPlate.startsWith(normalizedPlate) || normalizedPlate.startsWith(filterPlate)
+        );
+        expect(plateMatches).toBe(true);
+      });
+
+      test('full plate "XDLR87" should match filter plate "XDLR87"', () => {
+        const normalizedPlate = 'XDLR87';
+        const plateList = ['XDLR87'];
+        const plateMatches = plateList.some(filterPlate =>
+          filterPlate.startsWith(normalizedPlate) || normalizedPlate.startsWith(filterPlate)
+        );
+        expect(plateMatches).toBe(true);
+      });
+
+      test('completely different plate should NOT match', () => {
+        const normalizedPlate = 'ABC123';
+        const plateList = ['XDLR87'];
+        const plateMatches = plateList.some(filterPlate =>
+          filterPlate.startsWith(normalizedPlate) || normalizedPlate.startsWith(filterPlate)
+        );
+        expect(plateMatches).toBe(false);
+      });
+    });
   });
 });

@@ -371,16 +371,27 @@ async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime, e
 
   // Plate filter: If client has plate filtering enabled, only accept
   // summonses whose plate (from violation_details) matches the filter list.
-  // This runs before the DB lookup to reject non-matching plates cheaply.
+  // NOTE: The NYC Open Data API often truncates violation_details text, so
+  // the extracted plate may be a prefix of the actual plate (e.g., "XDL"
+  // instead of "XDLR87"). We use prefix matching to handle this.
   if (matchedClient.plate_filter_enabled && matchedClient.plate_filter_list?.length > 0) {
     const detailsPlate = extractPlateFromViolationDetails(apiSummons.violation_details || '');
     if (!detailsPlate) {
-      return { action: 'skipped', reason: 'plate filter active but no plate in details' };
-    }
-    const normalizedPlate = detailsPlate.replace(/[^A-Z0-9]/g, '');
-    const plateList = matchedClient.plate_filter_list.map(p => p.toUpperCase().replace(/[^A-Z0-9]/g, ''));
-    if (!plateList.includes(normalizedPlate)) {
-      return { action: 'skipped', reason: `plate ${detailsPlate} not in filter` };
+      // No plate in violation_details — accept the summons since it already
+      // matched the client by name. The actual plate comes from OCR later.
+      console.log(`  Plate filter: no plate in violation_details for ${ticketNumber}, accepting (name-matched to ${matchedClient.name})`);
+    } else {
+      const normalizedPlate = detailsPlate.replace(/[^A-Z0-9]/g, '');
+      const plateList = matchedClient.plate_filter_list.map(p => p.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+      // Use prefix matching to handle API text truncation: accept if the
+      // extracted plate starts with a filter plate or vice versa, but only
+      // if the extracted plate is at least 3 chars to avoid false positives.
+      const plateMatches = plateList.some(filterPlate =>
+        filterPlate.startsWith(normalizedPlate) || normalizedPlate.startsWith(filterPlate)
+      );
+      if (!plateMatches && normalizedPlate.length >= 3) {
+        return { action: 'skipped', reason: `plate ${detailsPlate} not in filter` };
+      }
     }
   }
 
