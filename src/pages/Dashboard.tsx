@@ -48,7 +48,7 @@ const client = generateClient();
 // Activity Log Entry for Summons Lifecycle Audit
 interface ActivityLogEntry {
   date: string;
-  type: 'CREATED' | 'STATUS_CHANGE' | 'RESCHEDULE' | 'RESULT_CHANGE' | 'AMOUNT_CHANGE' | 'PAYMENT' | 'AMENDMENT' | 'OCR_COMPLETE' | 'ARCHIVED' | 'EVIDENCE_UPLOADED' | 'INVOICE_CREATED' | 'INVOICE_DUE';
+  type: 'CREATED' | 'STATUS_CHANGE' | 'RESCHEDULE' | 'RESULT_CHANGE' | 'AMOUNT_CHANGE' | 'PAYMENT' | 'AMENDMENT' | 'OCR_COMPLETE' | 'ARCHIVED' | 'EVIDENCE_UPLOADED' | 'INVOICE_CREATED' | 'INVOICE_DUE' | 'INVOICE_MODIFIED' | 'INVOICE_REMOVED';
   description: string;
   old_value: string | null;
   new_value: string | null;

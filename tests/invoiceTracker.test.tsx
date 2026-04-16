@@ -7,7 +7,14 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import React from 'react';
+
+// InvoiceTracker uses useLocation/useNavigate to pick up snackbar messages
+// passed from InvoiceBuilder after an edit save. Wrap every render in a
+// MemoryRouter so those hooks resolve.
+const renderWithRouter = (ui: React.ReactElement) =>
+  render(<MemoryRouter>{ui}</MemoryRouter>);
 
 // ---------------------------------------------------------------------------
 // Mock AWS Amplify
@@ -74,52 +81,52 @@ describe('InvoiceTracker Page', () => {
   });
 
   it('renders page header with "Invoice Tracker" title', () => {
-    render(<InvoiceTracker />);
+    renderWithRouter(<InvoiceTracker />);
     expect(screen.getByText('Invoice Tracker')).toBeDefined();
   });
 
   it('renders the ReceiptLong icon (via data-testid)', () => {
-    const { container } = render(<InvoiceTracker />);
+    const { container } = renderWithRouter(<InvoiceTracker />);
     const icon = container.querySelector('[data-testid="ReceiptLongIcon"]');
     expect(icon).not.toBeNull();
   });
 
   it('shows loading spinner when loading is true', () => {
     mockContextValues.loading = true;
-    const { container } = render(<InvoiceTracker />);
+    const { container } = renderWithRouter(<InvoiceTracker />);
     // CircularProgress renders a role="progressbar"
     expect(container.querySelector('[role="progressbar"]')).not.toBeNull();
   });
 
   it('does not show page content when loading', () => {
     mockContextValues.loading = true;
-    render(<InvoiceTracker />);
+    renderWithRouter(<InvoiceTracker />);
     expect(screen.queryByText('Invoice Tracker')).toBeNull();
   });
 
   it('shows error alert when error exists', () => {
     mockContextValues.error = 'Failed to load invoices';
-    render(<InvoiceTracker />);
+    renderWithRouter(<InvoiceTracker />);
     expect(screen.getByText('Failed to load invoices')).toBeDefined();
   });
 
   it('renders InvoiceCalendarPanel (visible via "Invoice Calendar" heading)', () => {
-    render(<InvoiceTracker />);
+    renderWithRouter(<InvoiceTracker />);
     expect(screen.getByText('Invoice Calendar')).toBeDefined();
   });
 
   it('renders InvoiceListPanel (visible via "Invoices" heading)', () => {
-    render(<InvoiceTracker />);
+    renderWithRouter(<InvoiceTracker />);
     expect(screen.getByText('Invoices')).toBeDefined();
   });
 
   it('renders InvoiceSummaryCards (visible via "Summary" heading)', () => {
-    render(<InvoiceTracker />);
+    renderWithRouter(<InvoiceTracker />);
     expect(screen.getByText('Summary')).toBeDefined();
   });
 
   it('renders filter chips in the calendar panel with zero counts', () => {
-    render(<InvoiceTracker />);
+    renderWithRouter(<InvoiceTracker />);
     expect(screen.getByText('Overdue (0)')).toBeDefined();
     expect(screen.getByText('Due Soon (0)')).toBeDefined();
     expect(screen.getByText('Paid (0)')).toBeDefined();
@@ -148,7 +155,7 @@ describe('InvoiceTracker Page', () => {
       unpaidCount: 1,
     });
 
-    render(<InvoiceTracker />);
+    renderWithRouter(<InvoiceTracker />);
     expect(screen.getByText('INV-Test-2026-02-01')).toBeDefined();
     expect(screen.getByText('Test Corp')).toBeDefined();
     expect(screen.getByText('Overdue (1)')).toBeDefined();

@@ -55,9 +55,36 @@ vi.mock('../src/components/InvoicePreview', () => ({
   default: () => <div data-testid="invoice-preview">Preview</div>,
 }));
 
+import { MemoryRouter } from 'react-router-dom';
 import { InvoiceProvider } from '../src/contexts/InvoiceContext';
-import InvoiceBuilder from '../src/pages/InvoiceBuilder';
 import { InvoiceCartItem } from '../src/types/invoice';
+
+// Stub the InvoiceTrackerContext — the builder calls `fetchInvoices` after
+// saving edits, but in this cart-mode-only test file we never exercise that
+// path. Providing a no-op avoids pulling the real context's effects and its
+// dependent queries into every render.
+vi.mock('../src/contexts/InvoiceTrackerContext', () => ({
+  useInvoiceTracker: () => ({
+    invoices: [],
+    loading: false,
+    error: null,
+    fetchInvoices: vi.fn().mockResolvedValue(undefined),
+    markAsPaid: vi.fn(),
+    markAsUnpaid: vi.fn(),
+    updateAlertDeadline: vi.fn(),
+    updateNotes: vi.fn(),
+    deleteInvoice: vi.fn(),
+    getHorizonStats: vi.fn().mockReturnValue({
+      overdueCount: 0,
+      dueSoonCount: 0,
+      paidCount: 0,
+      unpaidCount: 0,
+    }),
+  }),
+  InvoiceTrackerProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+import InvoiceBuilder from '../src/pages/InvoiceBuilder';
 
 // ---------------------------------------------------------------------------
 // Test Data
@@ -110,13 +137,18 @@ function setupCart(items: InvoiceCartItem[]) {
 }
 
 /**
- * Render InvoiceBuilder wrapped in InvoiceProvider
+ * Render InvoiceBuilder wrapped in its required providers.
+ * The builder reads `editInvoiceId` from the URL via useSearchParams and
+ * calls useNavigate on save, so we wrap in a MemoryRouter. The default route
+ * keeps us out of edit mode.
  */
 function renderBuilder() {
   return render(
-    <InvoiceProvider>
-      <InvoiceBuilder />
-    </InvoiceProvider>
+    <MemoryRouter initialEntries={['/invoice-builder']}>
+      <InvoiceProvider>
+        <InvoiceBuilder />
+      </InvoiceProvider>
+    </MemoryRouter>
   );
 }
 
@@ -400,5 +432,82 @@ describe('InvoiceBuilder Integration', () => {
     await waitFor(() => {
       expect(screen.getByText('Invoice Generated')).toBeDefined();
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // Editable Hearing Status + Results cells
+  // -------------------------------------------------------------------------
+
+  it('Hearing Status cell is editable and reflects typed value', async () => {
+    setupCart([cartItem1]);
+    renderBuilder();
+
+    // Wait for the row to render.
+    await waitFor(() => {
+      expect(screen.getByText('SUM-001')).toBeDefined();
+    });
+
+    // Locate the Hearing Status input by its initial displayed value.
+    const statusInput = screen.getByDisplayValue(cartItem1.status) as HTMLInputElement;
+    // Edit to a value that's distinct from cartItem1.hearing_result so the
+    // subsequent lookup uniquely identifies the status input.
+    fireEvent.change(statusInput, { target: { value: 'UPDATED_STATUS' } });
+
+    expect((screen.getByDisplayValue('UPDATED_STATUS') as HTMLInputElement).value).toBe('UPDATED_STATUS');
+  });
+
+  it('Results cell is editable and reflects typed value', async () => {
+    setupCart([cartItem1]);
+    renderBuilder();
+
+    await waitFor(() => {
+      expect(screen.getByText('SUM-001')).toBeDefined();
+    });
+
+    // cartItem1.hearing_result === 'DEFAULT'. Use a unique seed for Status to
+    // avoid ambiguity with the Results cell; cartItem1.status === 'CLOSED' is
+    // different from its hearing_result, so getByDisplayValue resolves cleanly.
+    const resultInput = screen.getByDisplayValue(cartItem1.hearing_result!) as HTMLInputElement;
+    fireEvent.change(resultInput, { target: { value: 'Granted' } });
+
+    expect((screen.getByDisplayValue('Granted') as HTMLInputElement).value).toBe('Granted');
+  });
+
+  it('passes edited Hearing Status + Results values into generatePDF', async () => {
+    setupCart([cartItem1]);
+    renderBuilder();
+
+    await waitFor(() => {
+      expect(screen.getByText('SUM-001')).toBeDefined();
+    });
+
+    // Capture BOTH inputs before editing either — editing one can make the
+    // other's value-based lookup ambiguous if we collide on a display value.
+    const statusInput = screen.getByDisplayValue(cartItem1.status) as HTMLInputElement;
+    const resultInput = screen.getByDisplayValue(cartItem1.hearing_result!) as HTMLInputElement;
+
+    fireEvent.change(statusInput, { target: { value: 'UPDATED_STATUS' } });
+    fireEvent.change(resultInput, { target: { value: 'Granted' } });
+
+    // Silence any alert() calls inside the generate path (the mocked
+    // generatePDF returns undefined, so the destructure downstream will throw;
+    // the test only needs to verify the call reached the generator with the
+    // correct items).
+    vi.spyOn(window, 'alert').mockImplementation(() => {});
+
+    fireEvent.click(screen.getByText('Generate PDF'));
+
+    // Wait until generatePDF has been invoked.
+    await waitFor(() => {
+      expect(mockGeneratePDF).toHaveBeenCalled();
+    });
+
+    // Inspect the items array that was passed to generatePDF. The edited
+    // values must propagate to the PDF generator — this is the core contract.
+    const callArgs = mockGeneratePDF.mock.calls[0];
+    const itemsPassedToPDF = callArgs[0] as InvoiceCartItem[];
+    expect(itemsPassedToPDF).toHaveLength(1);
+    expect(itemsPassedToPDF[0].status).toBe('UPDATED_STATUS');
+    expect(itemsPassedToPDF[0].hearing_result).toBe('Granted');
   });
 });

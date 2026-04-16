@@ -6,9 +6,16 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render as rtlRender, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import React from 'react';
 import InvoiceDetailModal from '../src/components/InvoiceDetailModal';
 import { Invoice } from '../src/types/invoiceTracker';
+
+// InvoiceDetailModal uses useNavigate (for the Edit button) so every render
+// must happen inside a Router context.
+const render = (ui: React.ReactElement) =>
+  rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
 // ---------------------------------------------------------------------------
 // Mock AWS Amplify

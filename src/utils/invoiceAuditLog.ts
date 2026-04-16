@@ -77,6 +77,51 @@ export function appendInvoiceAuditEntries(
 }
 
 /**
+ * Append an INVOICE_MODIFIED entry to an existing activity log when a summons's
+ * invoice line (legal fee or amount due) is edited in place, and return the
+ * updated log as a JSON string.
+ */
+export function appendInvoiceModifiedEntry(
+  existingLog: unknown,
+  invoiceNumber: string,
+  changeSummary: string,
+  changedAt: string = new Date().toISOString(),
+): string {
+  const parsed = parseActivityLog(existingLog);
+  const entry: ActivityLogEntry = {
+    date: changedAt,
+    type: 'INVOICE_MODIFIED',
+    description: `Invoice #${invoiceNumber} updated: ${changeSummary}`,
+    old_value: null,
+    new_value: invoiceNumber,
+  };
+  const updated = [...parsed, entry].slice(-MAX_LOG_ENTRIES);
+  return JSON.stringify(updated);
+}
+
+/**
+ * Append an INVOICE_REMOVED entry to an existing activity log when a summons is
+ * taken off an invoice (during invoice editing), and return the updated log as
+ * a JSON string.
+ */
+export function appendInvoiceRemovedEntry(
+  existingLog: unknown,
+  invoiceNumber: string,
+  removedAt: string = new Date().toISOString(),
+): string {
+  const parsed = parseActivityLog(existingLog);
+  const entry: ActivityLogEntry = {
+    date: removedAt,
+    type: 'INVOICE_REMOVED',
+    description: `Removed from invoice #${invoiceNumber}`,
+    old_value: invoiceNumber,
+    new_value: null,
+  };
+  const updated = [...parsed, entry].slice(-MAX_LOG_ENTRIES);
+  return JSON.stringify(updated);
+}
+
+/**
  * Format an ISO deadline string for display (e.g., "Apr 15, 2026").
  */
 export function formatDeadline(isoDate: string): string {

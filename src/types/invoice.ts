@@ -69,8 +69,11 @@ export interface InvoiceContextState {
 export interface InvoiceContextActions {
   addToCart: (summons: SummonsForInvoice) => void;
   removeFromCart: (summonsId: string) => void;
+  removeManyFromCart: (summonsIds: string[]) => void;
   updateLegalFee: (summonsId: string, newFee: number) => void;
   updateAmountDue: (summonsId: string, newAmount: number | null) => void;
+  updateStatus: (summonsId: string, newStatus: string) => void;
+  updateHearingResult: (summonsId: string, newResult: string | null) => void;
   clearCart: () => void;
   isInCart: (summonsId: string) => boolean;
   setRecipient: (recipient: InvoiceRecipient) => void;

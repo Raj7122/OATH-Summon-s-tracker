@@ -33,7 +33,9 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import EditIcon from '@mui/icons-material/Edit';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import { useNavigate } from 'react-router-dom';
 import CircularProgress from '@mui/material/CircularProgress';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
@@ -76,12 +78,21 @@ const InvoiceDetailModal = ({
   onUpdateNotes,
   onDelete,
 }: InvoiceDetailModalProps) => {
+  const navigate = useNavigate();
   const [paymentDate, setPaymentDate] = useState<dayjs.Dayjs | null>(dayjs());
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesValue, setNotesValue] = useState('');
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [loadingPdf, setLoadingPdf] = useState(false);
+
+  // Navigate to the InvoiceBuilder page in edit mode. Closing the modal first
+  // prevents a flash of a stale invoice detail on return.
+  const handleEditInvoice = () => {
+    if (!invoice) return;
+    onClose();
+    navigate(`/invoice-builder?editInvoiceId=${invoice.id}`);
+  };
 
   if (!invoice) return null;
 
@@ -168,6 +179,11 @@ const InvoiceDetailModal = ({
               </IconButton>
             </Tooltip>
           )}
+          <Tooltip title="Edit invoice (recipient, line items, fees)">
+            <IconButton onClick={handleEditInvoice} size="small" color="primary">
+              <EditIcon />
+            </IconButton>
+          </Tooltip>
           <IconButton
             onClick={() => setDeleteConfirmOpen(true)}
             size="small"

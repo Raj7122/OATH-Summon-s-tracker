@@ -208,3 +208,86 @@ export const deleteInvoiceSummonsRecord = /* GraphQL */ `
     }
   }
 `;
+
+// Fetch a single invoice with its join-table items.
+// Used when entering edit mode so we can hydrate the builder with the invoice's
+// current line items, recipient info, and alert deadline.
+export const getInvoiceWithItems = /* GraphQL */ `
+  query GetInvoiceWithItems($id: ID!) {
+    getInvoice(id: $id) {
+      id
+      invoice_number
+      invoice_date
+      recipient_company
+      recipient_attention
+      recipient_address
+      recipient_email
+      total_legal_fees
+      total_fines_due
+      item_count
+      payment_status
+      payment_date
+      alert_deadline
+      notes
+      clientID
+      pdf_s3_key
+      items {
+        items {
+          id
+          invoiceID
+          summonsID
+          summons_number
+          legal_fee
+          amount_due
+        }
+      }
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+// Update an invoice-summons join record (for changing legal_fee / amount_due).
+export const updateInvoiceSummonsRecord = /* GraphQL */ `
+  mutation UpdateInvoiceSummonsRecord($input: UpdateInvoiceSummonsInput!) {
+    updateInvoiceSummons(input: $input) {
+      id
+      invoiceID
+      summonsID
+      summons_number
+      legal_fee
+      amount_due
+    }
+  }
+`;
+
+// Fetch all summonses for a client, with just the fields needed for the
+// "Add summonses to invoice" picker. Uses the existing byClient GSI.
+export const summonsesByClientForPicker = /* GraphQL */ `
+  query SummonsesByClientForPicker(
+    $clientID: ID!
+    $limit: Int
+    $nextToken: String
+  ) {
+    summonsByClientIDAndHearing_date(
+      clientID: $clientID
+      limit: $limit
+      nextToken: $nextToken
+    ) {
+      items {
+        id
+        clientID
+        summons_number
+        respondent_name
+        hearing_date
+        hearing_result
+        status
+        violation_date
+        amount_due
+        is_invoiced
+        invoice_date
+      }
+      nextToken
+    }
+  }
+`;

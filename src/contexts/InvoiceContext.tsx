@@ -93,6 +93,15 @@ export const InvoiceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setCartItems((prev) => prev.filter((item) => item.id !== summonsId));
   }, []);
 
+  // Remove multiple summonses from the cart in a single state update.
+  // Used by InvoiceBuilder to drain only the active client's items after
+  // generating a per-client invoice, leaving the remaining clients intact.
+  const removeManyFromCart = useCallback((summonsIds: string[]) => {
+    if (summonsIds.length === 0) return;
+    const idSet = new Set(summonsIds);
+    setCartItems((prev) => prev.filter((item) => !idSet.has(item.id)));
+  }, []);
+
   // Update the legal fee for a specific summons
   const updateLegalFee = useCallback((summonsId: string, newFee: number) => {
     setCartItems((prev) =>
@@ -108,6 +117,25 @@ export const InvoiceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       prev.map((item) =>
         item.id === summonsId ? { ...item, amount_due: newAmount !== null ? Math.max(0, newAmount) : null } : item
       )
+    );
+  }, []);
+
+  // Update the Hearing Status column for a specific summons.
+  // This value is shown on the invoice preview and baked into the generated
+  // PDF/DOCX. Kept separate from the underlying Summons record so the user can
+  // present a cleaner/curated value for legal correspondence without altering
+  // the source OATH data.
+  const updateStatus = useCallback((summonsId: string, newStatus: string) => {
+    setCartItems((prev) =>
+      prev.map((item) => (item.id === summonsId ? { ...item, status: newStatus } : item)),
+    );
+  }, []);
+
+  // Update the Results (hearing_result) column for a specific summons.
+  // Same rationale as updateStatus — ephemeral override for the invoice only.
+  const updateHearingResult = useCallback((summonsId: string, newResult: string | null) => {
+    setCartItems((prev) =>
+      prev.map((item) => (item.id === summonsId ? { ...item, hearing_result: newResult } : item)),
     );
   }, []);
 
@@ -160,8 +188,11 @@ export const InvoiceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     alertDeadline,
     addToCart,
     removeFromCart,
+    removeManyFromCart,
     updateLegalFee,
     updateAmountDue,
+    updateStatus,
+    updateHearingResult,
     clearCart,
     isInCart,
     setRecipient,

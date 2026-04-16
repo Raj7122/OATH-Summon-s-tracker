@@ -9,6 +9,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Box,
   Grid,
@@ -69,11 +70,27 @@ const InvoiceTracker = () => {
   const [calendarDrawerOpen, setCalendarDrawerOpen] = useState(false);
 
   // Snackbar
-  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' | 'warning' }>({
     open: false,
     message: '',
     severity: 'success',
   });
+
+  // Show any transient message passed from the InvoiceBuilder after a save.
+  // Clears the location state so refreshing the page doesn't re-trigger it.
+  const location = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    const state = location.state as { invoiceEditMessage?: string; invoiceEditSeverity?: 'success' | 'warning' } | null;
+    if (state?.invoiceEditMessage) {
+      setSnackbar({
+        open: true,
+        message: state.invoiceEditMessage,
+        severity: state.invoiceEditSeverity || 'success',
+      });
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location, navigate]);
 
   const horizonStats = getHorizonStats();
 
