@@ -45,7 +45,12 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  FormControlLabel,
+  Switch,
+  Link,
 } from '@mui/material';
+import { useGridApiRef } from '@mui/x-data-grid';
+import type { GridRowSelectionModel } from '@mui/x-data-grid';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
@@ -94,7 +99,8 @@ import { horizonColors } from '../theme';
 import { generateCSV, downloadCSV } from '../lib/csvExport';
 
 // Notice of Appearance DOCX
-import { generateNoticeOfAppearance } from '../utils/noticeOfAppearance';
+import { generateNoticeOfAppearance, generateWeekNoticeOfAppearance } from '../utils/noticeOfAppearance';
+import { buildOrderedSummonses } from '../utils/noticeOrdering';
 
 // Week utilities
 import { getISOWeekRange } from '../utils/weekFilters';
@@ -275,6 +281,14 @@ const CalendarDashboard: React.FC = () => {
   const [auditDateEnd, setAuditDateEnd] = useState<Dayjs | null>(null);
   const [auditActionType, setAuditActionType] = useState<string>('all');
 
+  // Notice of Appearance selection state
+  // When selectionEnabled is off, the Notice button behaves as before (generate for all).
+  // When on, checkboxes appear in the grid; if any rows are selected, the notice is
+  // limited to just those rows — in the grid's currently displayed sort order.
+  const gridApiRef = useGridApiRef();
+  const [selectionEnabled, setSelectionEnabled] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<GridRowSelectionModel>([]);
+
   /**
    * Load summonses from GraphQL API with pagination
    * CRITICAL: Must paginate to get ALL records, not just the default limit
@@ -346,6 +360,12 @@ const CalendarDashboard: React.FC = () => {
   useEffect(() => {
     loadSummonses();
   }, [loadSummonses]);
+
+  // Clear notice-of-appearance selection whenever the user navigates to a
+  // different date/week, since those IDs no longer belong to the visible set.
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [selectedDate, selectedWeek, weekMode]);
 
   /**
    * Apply global filters: Active Era + Idling Guardrail
@@ -753,6 +773,24 @@ const CalendarDashboard: React.FC = () => {
   }, [selectedWeek, weeklyFilteredSummonses]);
 
   /**
+   * Build an ordered list of summonses for the notice using the grid's live
+   * sort order and the current selection. Delegates to the pure helper so
+   * the ordering logic stays unit-testable.
+   */
+  const orderSummonsesForNotice = useCallback(
+    (source: Summons[]): Summons[] => {
+      const sortedIds = gridApiRef.current?.getSortedRowIds?.() ?? null;
+      return buildOrderedSummonses({
+        source,
+        sortedIds,
+        selectedIds: selectedIds as Array<string | number>,
+        selectionEnabled,
+      });
+    },
+    [gridApiRef, selectedIds, selectionEnabled]
+  );
+
+  /**
    * Generate Notice of Appearance DOCX for the selected single date.
    */
   const handleGenerateNoticeDay = useCallback(async () => {
@@ -760,45 +798,56 @@ const CalendarDashboard: React.FC = () => {
       setSnackbar({ open: true, message: 'No hearings for this date.', severity: 'error' });
       return;
     }
+    const ordered = orderSummonsesForNotice(filteredByDate);
+    if (ordered.length === 0) {
+      setSnackbar({ open: true, message: 'No cases selected.', severity: 'error' });
+      return;
+    }
     const dateLabel = selectedDate.format('dddd, MMMM D, YYYY');
     try {
-      await generateNoticeOfAppearance(filteredByDate, dateLabel);
-      setSnackbar({ open: true, message: `Notice of Appearance generated for ${dateLabel}.`, severity: 'success' });
+      await generateNoticeOfAppearance(ordered, dateLabel);
+      setSnackbar({
+        open: true,
+        message: `Notice of Appearance generated for ${dateLabel} (${ordered.length} case${ordered.length !== 1 ? 's' : ''}).`,
+        severity: 'success',
+      });
     } catch (err) {
       console.error('Notice of Appearance generation failed:', err);
       setSnackbar({ open: true, message: 'Failed to generate Notice of Appearance.', severity: 'error' });
     }
-  }, [selectedDate, filteredByDate]);
+  }, [selectedDate, filteredByDate, orderSummonsesForNotice]);
 
   /**
-   * Generate Notice of Appearance DOCX(s) for the selected week — one per hearing day.
+   * Generate a single Notice of Appearance DOCX for the selected week.
+   *
+   * Contains every case currently visible in the dashboard for that week
+   * (or just the checked ones, if selection mode is on) in the grid's
+   * current sort order. A Hearing Date column lets OATH match cases to
+   * their hearing days.
    */
   const handleGenerateNoticeWeek = useCallback(async () => {
     if (!selectedWeek || weeklyFilteredSummonses.length === 0) {
       setSnackbar({ open: true, message: 'No hearings to generate notices for this week.', severity: 'error' });
       return;
     }
-    // Group summonses by hearing date (YYYY-MM-DD)
-    const byDate = new Map<string, Summons[]>();
-    for (const s of weeklyFilteredSummonses) {
-      const key = s.hearing_date ? dayjs.utc(s.hearing_date).format('YYYY-MM-DD') : 'unknown';
-      if (!byDate.has(key)) byDate.set(key, []);
-      byDate.get(key)!.push(s);
+    const ordered = orderSummonsesForNotice(weeklyFilteredSummonses);
+    if (ordered.length === 0) {
+      setSnackbar({ open: true, message: 'No cases selected.', severity: 'error' });
+      return;
     }
+    const weekLabel = `${selectedWeek.start.format('MMM D')}\u2013${selectedWeek.end.format('MMM D, YYYY')}`;
     try {
-      let count = 0;
-      for (const [dateKey, daySummonses] of byDate) {
-        if (dateKey === 'unknown') continue;
-        const dateLabel = dayjs.utc(dateKey).format('dddd, MMMM D, YYYY');
-        await generateNoticeOfAppearance(daySummonses, dateLabel);
-        count++;
-      }
-      setSnackbar({ open: true, message: `Generated ${count} Notice${count !== 1 ? 's' : ''} of Appearance.`, severity: 'success' });
+      await generateWeekNoticeOfAppearance(ordered, weekLabel);
+      setSnackbar({
+        open: true,
+        message: `Notice of Appearance generated for week of ${weekLabel} (${ordered.length} case${ordered.length !== 1 ? 's' : ''}).`,
+        severity: 'success',
+      });
     } catch (err) {
       console.error('Notice of Appearance generation failed:', err);
       setSnackbar({ open: true, message: 'Failed to generate Notice of Appearance.', severity: 'error' });
     }
-  }, [selectedWeek, weeklyFilteredSummonses]);
+  }, [selectedWeek, weeklyFilteredSummonses, orderSummonsesForNotice]);
 
   /**
    * Close snackbar
@@ -1261,7 +1310,21 @@ const CalendarDashboard: React.FC = () => {
                       '& .MuiAlert-message': { width: '100%' },
                     }}
                     action={
-                      <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              size="small"
+                              checked={selectionEnabled}
+                              onChange={(e) => {
+                                setSelectionEnabled(e.target.checked);
+                                if (!e.target.checked) setSelectedIds([]);
+                              }}
+                            />
+                          }
+                          label={<Typography variant="caption" sx={{ fontWeight: 600 }}>Select cases</Typography>}
+                          sx={{ mr: 0.5 }}
+                        />
                         <Button
                           size="small"
                           variant="contained"
@@ -1278,6 +1341,9 @@ const CalendarDashboard: React.FC = () => {
                           }}
                         >
                           Notice of Appearance
+                          {selectionEnabled && selectedIds.length > 0
+                            ? ` (${selectedIds.length} of ${filteredByDate.length})`
+                            : ''}
                         </Button>
                         <Button
                           color="inherit"
@@ -1295,6 +1361,25 @@ const CalendarDashboard: React.FC = () => {
                       <strong>{selectedDate.format('MMMM D, YYYY')}</strong>
                       {selectedDate.isSame(dayjs(), 'day') && ' (Today)'}
                     </Typography>
+                    {selectionEnabled && (
+                      <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: 'text.secondary' }}>
+                        {selectedIds.length > 0 ? (
+                          <>
+                            <strong>{selectedIds.length}</strong> selected — notice will include only these.{' '}
+                            <Link
+                              component="button"
+                              variant="caption"
+                              onClick={() => setSelectedIds([])}
+                              sx={{ fontWeight: 600 }}
+                            >
+                              Clear
+                            </Link>
+                          </>
+                        ) : (
+                          <>No selection = all {filteredByDate.length} cases.</>
+                        )}
+                      </Typography>
+                    )}
                   </Alert>
                 )}
 
@@ -1331,6 +1416,20 @@ const CalendarDashboard: React.FC = () => {
                           <MenuItem value="DOCKETED">Docketed</MenuItem>
                         </Select>
                       </FormControl>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            size="small"
+                            checked={selectionEnabled}
+                            onChange={(e) => {
+                              setSelectionEnabled(e.target.checked);
+                              if (!e.target.checked) setSelectedIds([]);
+                            }}
+                          />
+                        }
+                        label={<Typography variant="caption" sx={{ fontWeight: 600 }}>Select cases</Typography>}
+                        sx={{ mr: 0 }}
+                      />
                       <Button
                         size="small"
                         variant="contained"
@@ -1361,6 +1460,9 @@ const CalendarDashboard: React.FC = () => {
                         }}
                       >
                         Notice of Appearance
+                        {selectionEnabled && selectedIds.length > 0
+                          ? ` (${selectedIds.length} of ${weeklyFilteredSummonses.length})`
+                          : ''}
                       </Button>
                       <Button
                         color="inherit"
@@ -1371,6 +1473,25 @@ const CalendarDashboard: React.FC = () => {
                         Show All
                       </Button>
                     </Box>
+                    {selectionEnabled && (
+                      <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: 'text.secondary' }}>
+                        {selectedIds.length > 0 ? (
+                          <>
+                            <strong>{selectedIds.length}</strong> selected — one notice per hearing day, selected cases only.{' '}
+                            <Link
+                              component="button"
+                              variant="caption"
+                              onClick={() => setSelectedIds([])}
+                              sx={{ fontWeight: 600 }}
+                            >
+                              Clear
+                            </Link>
+                          </>
+                        ) : (
+                          <>No selection = all {weeklyFilteredSummonses.length} cases across the week.</>
+                        )}
+                      </Typography>
+                    )}
                   </Alert>
                 )}
 
@@ -1382,6 +1503,10 @@ const CalendarDashboard: React.FC = () => {
                   onFilterChange={handleFilterChange}
                   searchQuery={dashboardSearch}
                   onSearchChange={setDashboardSearch}
+                  apiRef={gridApiRef}
+                  checkboxSelection={selectionEnabled}
+                  rowSelectionModel={selectedIds}
+                  onRowSelectionModelChange={setSelectedIds}
                 />
               </Paper>
             )}

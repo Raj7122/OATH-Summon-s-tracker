@@ -32,7 +32,9 @@ import {
   GridColumnVisibilityModel,
   GridRenderCellParams,
   GridRowParams,
+  GridRowSelectionModel,
   GridToolbar,
+  useGridApiRef,
 } from '@mui/x-data-grid';
 import {
   Box,
@@ -94,6 +96,14 @@ interface SimpleSummonsTableProps {
   searchQuery?: string;
   /** Optional: callback when search query changes */
   onSearchChange?: (query: string) => void;
+  /** Optional: enables MUI DataGrid checkbox selection column */
+  checkboxSelection?: boolean;
+  /** Optional: controlled row selection model */
+  rowSelectionModel?: GridRowSelectionModel;
+  /** Optional: callback when row selection changes */
+  onRowSelectionModelChange?: (model: GridRowSelectionModel) => void;
+  /** Optional: external grid API ref so the parent can read live sort order */
+  apiRef?: ReturnType<typeof useGridApiRef>;
 }
 
 // Activity filter type
@@ -112,6 +122,10 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
   onFilterChange,
   searchQuery = '',
   onSearchChange,
+  checkboxSelection = false,
+  rowSelectionModel,
+  onRowSelectionModelChange,
+  apiRef,
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -673,11 +687,15 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
 
       {/* DataGrid - Premium styling with no horizontal scroll */}
       <DataGrid
+        apiRef={apiRef}
         rows={filteredSummonses}
         columns={columns}
         pageSizeOptions={[10, 25, 50]}
         columnVisibilityModel={columnVisibilityModel}
         onColumnVisibilityModelChange={handleColumnVisibilityChange}
+        checkboxSelection={checkboxSelection}
+        rowSelectionModel={rowSelectionModel}
+        onRowSelectionModelChange={onRowSelectionModelChange}
         initialState={{
           pagination: {
             paginationModel: { pageSize: 25 },
