@@ -510,4 +510,121 @@ describe('InvoiceBuilder Integration', () => {
     expect(itemsPassedToPDF[0].status).toBe('UPDATED_STATUS');
     expect(itemsPassedToPDF[0].hearing_result).toBe('Granted');
   });
+
+  // -------------------------------------------------------------------------
+  // Edit-mode "Add Summonses" picker: checkbox toggles selection
+  //
+  // Regression: previously both TableRow.onClick and Checkbox.onChange called
+  // the same toggle, so clicking the checkbox fired both (via bubbling) and
+  // the two toggles cancelled out. The fix adds stopPropagation on the cell.
+  // -------------------------------------------------------------------------
+  it('enables the "Add to Invoice" button when a picker checkbox is clicked', async () => {
+    // Dedicated mock wiring for edit mode: getInvoiceWithItems, getSummons,
+    // and summonsesByClientForPicker all need to resolve.
+    mockGraphql.mockImplementation(({ query }: any) => {
+      if (typeof query === 'string' && query.includes('getInvoice(')) {
+        return Promise.resolve({
+          data: {
+            getInvoice: {
+              id: 'inv-edit-1',
+              invoice_number: 'INV-Test_Corp-2026-02-10',
+              invoice_date: '2026-02-10T00:00:00.000Z',
+              clientID: 'client-1',
+              recipient_company: 'Test Corp',
+              recipient_attention: 'John Smith',
+              recipient_address: '123 Main St',
+              recipient_email: 'john@test.com',
+              alert_deadline: null,
+              payment_status: 'unpaid',
+              items: {
+                items: [
+                  {
+                    id: 'join-1',
+                    summonsID: 'sum-1',
+                    summons_number: 'SUM-001',
+                    legal_fee: 250,
+                    amount_due: 500,
+                  },
+                ],
+              },
+            },
+          },
+        });
+      }
+      if (typeof query === 'string' && query.includes('getSummons')) {
+        return Promise.resolve({
+          data: {
+            getSummons: {
+              id: 'sum-1',
+              clientID: 'client-1',
+              respondent_name: 'Test Corp',
+              violation_date: '2026-01-15T00:00:00.000Z',
+              hearing_date: '2026-02-01T00:00:00.000Z',
+              hearing_result: 'DEFAULT',
+              status: 'CLOSED',
+              amount_due: 500,
+            },
+          },
+        });
+      }
+      if (typeof query === 'string' && query.includes('summonsByClientIDAndHearing_date')) {
+        return Promise.resolve({
+          data: {
+            summonsByClientIDAndHearing_date: {
+              items: [
+                {
+                  id: 'sum-candidate-1',
+                  clientID: 'client-1',
+                  summons_number: 'SUM-999',
+                  respondent_name: 'Test Corp',
+                  hearing_date: '2026-03-01T00:00:00.000Z',
+                  hearing_result: null,
+                  status: 'OPEN',
+                  violation_date: '2026-02-15T00:00:00.000Z',
+                  amount_due: 750,
+                  is_invoiced: false,
+                  invoice_date: null,
+                },
+              ],
+            },
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/invoice-builder?editInvoiceId=inv-edit-1']}>
+        <InvoiceProvider>
+          <InvoiceBuilder />
+        </InvoiceProvider>
+      </MemoryRouter>
+    );
+
+    // Wait for edit mode hydration: the "Add Summonses" button only renders
+    // once the invoice has loaded.
+    const addBtn = await screen.findByRole('button', { name: /Add Summonses/i });
+    fireEvent.click(addBtn);
+
+    // Picker opens and lists the candidate.
+    await waitFor(() => {
+      expect(screen.getByText('SUM-999')).toBeDefined();
+    });
+
+    // Before click: confirm button reads "Add to Invoice" (no count) and is disabled.
+    const confirmBtn = screen.getByRole('button', { name: /Add to Invoice/i }) as HTMLButtonElement;
+    expect(confirmBtn.disabled).toBe(true);
+
+    // Click the row's checkbox. With the old double-toggle bug, this click
+    // would net to zero and the button would stay disabled.
+    const checkbox = screen.getAllByRole('checkbox')[0] as HTMLInputElement;
+    fireEvent.click(checkbox);
+
+    // After fix: exactly one toggle fires, selection size is 1, button enables
+    // and its label reflects the count.
+    await waitFor(() => {
+      const btn = screen.getByRole('button', { name: /Add 1 to Invoice/i }) as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+  });
 });

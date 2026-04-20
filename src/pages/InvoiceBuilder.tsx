@@ -1733,7 +1733,7 @@ const InvoiceBuilder = () => {
                         sx={{ cursor: 'pointer' }}
                         selected={selected}
                       >
-                        <TableCell padding="checkbox">
+                        <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
                           <Checkbox checked={selected} onChange={() => handleTogglePickerSelection(s.id)} />
                         </TableCell>
                         <TableCell sx={{ fontFamily: 'monospace' }}>{s.summons_number}</TableCell>
