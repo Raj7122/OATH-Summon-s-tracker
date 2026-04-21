@@ -16,7 +16,7 @@ import {
   ExternalHyperlink,
 } from 'docx';
 import { saveAs } from 'file-saver';
-import { InvoiceCartItem, InvoiceRecipient, InvoiceOptions } from '../types/invoice';
+import { InvoiceCartItem, InvoiceExtraLineItem, InvoiceRecipient, InvoiceOptions } from '../types/invoice';
 import {
   SENDER,
   INVOICE_SUBJECT,
@@ -49,13 +49,31 @@ const formatCurrencyWithDecimals = (amount: number): string => {
   return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
+// Parse a user-typed currency string into a number for totals math.
+// Accepts "250", "$250.00", "1,500", etc. Returns 0 for empty/non-numeric input.
+export const parseExtraAmount = (raw: string | null | undefined): number => {
+  if (!raw) return 0;
+  const cleaned = raw.replace(/[^0-9.\-]/g, '');
+  if (!cleaned) return 0;
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : 0;
+};
+
+// Sum extras' legal_fee contributions. Extras' amount_due is intentionally
+// excluded from totals per user spec (Fines Due rolls only from summons rows).
+export const sumExtrasLegalFees = (extras: InvoiceExtraLineItem[] | undefined): number => {
+  if (!extras || extras.length === 0) return 0;
+  return extras.reduce((sum, e) => sum + parseExtraAmount(e.legal_fee), 0);
+};
+
 /**
  * Generate PDF invoice using jsPDF
  */
 export const generatePDF = async (
   items: InvoiceCartItem[],
   recipient: InvoiceRecipient,
-  options: InvoiceOptions
+  options: InvoiceOptions,
+  extras: InvoiceExtraLineItem[] = []
 ): Promise<{ blob: Blob; filename: string }> => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -164,8 +182,9 @@ export const generatePDF = async (
   doc.text(splitText, margin, yPos);
   yPos += splitText.length * 5;
 
-  // LEGAL FEE total (right aligned, large)
-  const totalLegalFees = items.reduce((sum, item) => sum + item.legal_fee, 0);
+  // LEGAL FEE total (right aligned, large). Includes extras' legal_fee.
+  const totalLegalFees =
+    items.reduce((sum, item) => sum + item.legal_fee, 0) + sumExtrasLegalFees(extras);
   yPos += 5;
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
@@ -190,15 +209,26 @@ export const generatePDF = async (
         { content: 'LEGAL FEE', styles: { halign: 'right' } },
       ],
     ],
-    body: items.map((item) => [
-      item.summons_number,
-      formatDate(item.violation_date),
-      item.status || '',
-      item.hearing_result || '',
-      formatDate(item.hearing_date),
-      formatCurrency(item.amount_due),
-      formatCurrency(item.legal_fee),
-    ]),
+    body: [
+      ...items.map((item) => [
+        item.summons_number,
+        formatDate(item.violation_date),
+        item.status || '',
+        item.hearing_result || '',
+        formatDate(item.hearing_date),
+        formatCurrency(item.amount_due),
+        formatCurrency(item.legal_fee),
+      ]),
+      ...extras.map((e) => [
+        e.summons_number,
+        e.violation_date,
+        e.status,
+        e.hearing_result,
+        e.hearing_date,
+        e.amount_due,
+        e.legal_fee,
+      ]),
+    ],
     headStyles: {
       fillColor: [255, 255, 255],
       textColor: [0, 0, 0],
@@ -289,9 +319,11 @@ export const generatePDF = async (
 export const generateDOCX = async (
   items: InvoiceCartItem[],
   recipient: InvoiceRecipient,
-  options: InvoiceOptions
+  options: InvoiceOptions,
+  extras: InvoiceExtraLineItem[] = []
 ): Promise<{ blob: Blob; filename: string }> => {
-  const totalLegalFees = items.reduce((sum, item) => sum + item.legal_fee, 0);
+  const totalLegalFees =
+    items.reduce((sum, item) => sum + item.legal_fee, 0) + sumExtrasLegalFees(extras);
   const invoiceDate = dayjs().format('MMMM D, YYYY');
 
   const doc = new Document({
@@ -466,6 +498,22 @@ export const generateDOCX = async (
                       createDataCell(formatDate(item.hearing_date)),
                       createDataCell(formatCurrency(item.amount_due)),
                       createDataCell(formatCurrency(item.legal_fee)),
+                    ],
+                  })
+              ),
+              // Manual extra-line rows (research fee, etc.) — values are
+              // free text exactly as entered by the user.
+              ...extras.map(
+                (e) =>
+                  new TableRow({
+                    children: [
+                      createDataCell(e.summons_number),
+                      createDataCell(e.violation_date),
+                      createDataCell(e.status),
+                      createDataCell(e.hearing_result),
+                      createDataCell(e.hearing_date),
+                      createDataCell(e.amount_due),
+                      createDataCell(e.legal_fee),
                     ],
                   })
               ),

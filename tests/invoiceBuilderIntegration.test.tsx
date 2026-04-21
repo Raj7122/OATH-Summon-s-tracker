@@ -30,6 +30,20 @@ const mockGenerateDOCX = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock('../src/utils/invoiceGenerator', () => ({
   generatePDF: mockGeneratePDF,
   generateDOCX: mockGenerateDOCX,
+  // Also re-export the pure helpers so components (e.g., InvoicePreview) and
+  // the builder can still compute totals without running the real PDF/DOCX paths.
+  parseExtraAmount: (raw: string | null | undefined) => {
+    if (!raw) return 0;
+    const n = parseFloat(raw.replace(/[^0-9.\-]/g, ''));
+    return Number.isFinite(n) ? n : 0;
+  },
+  sumExtrasLegalFees: (extras: { legal_fee: string }[] | undefined) => {
+    if (!extras || extras.length === 0) return 0;
+    return extras.reduce((sum, e) => {
+      const n = parseFloat((e.legal_fee || '').replace(/[^0-9.\-]/g, ''));
+      return sum + (Number.isFinite(n) ? n : 0);
+    }, 0);
+  },
 }));
 
 // ---------------------------------------------------------------------------

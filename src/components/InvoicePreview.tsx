@@ -13,7 +13,8 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
 dayjs.extend(utc);
-import { InvoiceCartItem, InvoiceRecipient } from '../types/invoice';
+import { InvoiceCartItem, InvoiceExtraLineItem, InvoiceRecipient } from '../types/invoice';
+import { sumExtrasLegalFees } from '../utils/invoiceGenerator';
 import {
   SENDER,
   INVOICE_SUBJECT,
@@ -31,6 +32,7 @@ interface InvoicePreviewProps {
   showOverdue: boolean;
   overdueText: string;
   additionalNotes: string;
+  extras?: InvoiceExtraLineItem[];
 }
 
 // Format date as M/DD/YY to match PDF output
@@ -60,9 +62,11 @@ const InvoicePreview = ({
   showOverdue,
   overdueText,
   additionalNotes,
+  extras = [],
 }: InvoicePreviewProps) => {
   const invoiceDate = dayjs().format('MMMM D, YYYY');
-  const totalLegalFees = cartItems.reduce((sum, item) => sum + item.legal_fee, 0);
+  const totalLegalFees =
+    cartItems.reduce((sum, item) => sum + item.legal_fee, 0) + sumExtrasLegalFees(extras);
 
   return (
     <Paper
@@ -244,6 +248,17 @@ const InvoicePreview = ({
               <td>{formatDate(item.hearing_date)}</td>
               <td style={{ textAlign: 'right' }}>{formatCurrency(item.amount_due)}</td>
               <td style={{ textAlign: 'right' }}>{formatCurrency(item.legal_fee)}</td>
+            </tr>
+          ))}
+          {extras.map((e) => (
+            <tr key={e.id}>
+              <td style={{ fontFamily: 'monospace' }}>{e.summons_number}</td>
+              <td>{e.violation_date}</td>
+              <td>{e.status}</td>
+              <td>{e.hearing_result}</td>
+              <td>{e.hearing_date}</td>
+              <td style={{ textAlign: 'right' }}>{e.amount_due}</td>
+              <td style={{ textAlign: 'right' }}>{e.legal_fee}</td>
             </tr>
           ))}
         </tbody>

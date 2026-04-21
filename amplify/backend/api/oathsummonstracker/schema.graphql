@@ -193,6 +193,7 @@ type Invoice @model @auth(rules: [{ allow: private }]) {
   notes: String
   clientID: ID @index(name: "invoiceByClient")
   pdf_s3_key: String    # S3 key for the stored invoice file (PDF or DOCX)
+  extra_line_items: AWSJSON  # Optional non-summons rows (e.g., research fee) — JSON array of InvoiceExtraLineItem
   items: [InvoiceSummons] @hasMany(indexName: "byInvoice", fields: ["id"])
 }
 

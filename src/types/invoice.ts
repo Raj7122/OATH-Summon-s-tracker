@@ -17,6 +17,21 @@ export interface InvoiceCartItem {
 }
 
 /**
+ * Manual non-summons line item (e.g., research fee).
+ * Every field is free-text; stored as JSON on the Invoice record.
+ */
+export interface InvoiceExtraLineItem {
+  id: string;
+  summons_number: string;
+  violation_date: string;
+  status: string;
+  hearing_result: string;
+  hearing_date: string;
+  amount_due: string;
+  legal_fee: string;
+}
+
+/**
  * Invoice Recipient - Contact information for the invoice
  */
 export interface InvoiceRecipient {

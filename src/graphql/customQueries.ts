@@ -149,6 +149,7 @@ export const createInvoiceRecord = /* GraphQL */ `
       alert_deadline
       pdf_s3_key
       clientID
+      extra_line_items
     }
   }
 `;
@@ -177,6 +178,7 @@ export const updateInvoiceRecord = /* GraphQL */ `
       alert_deadline
       notes
       pdf_s3_key
+      extra_line_items
     }
   }
 `;
@@ -231,6 +233,7 @@ export const getInvoiceWithItems = /* GraphQL */ `
       notes
       clientID
       pdf_s3_key
+      extra_line_items
       items {
         items {
           id

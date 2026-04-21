@@ -27,6 +27,7 @@ export interface Invoice {
   notes?: string | null;
   pdf_s3_key?: string | null;
   clientID?: string | null;
+  extra_line_items?: string | null;  // AWSJSON — array of InvoiceExtraLineItem
   items?: {
     items: InvoiceSummonsItem[];
   };

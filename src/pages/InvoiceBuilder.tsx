@@ -74,15 +74,17 @@ dayjs.extend(utc);
 import SummonsDetailModal from '../components/SummonsDetailModal';
 import InvoicePreview from '../components/InvoicePreview';
 import { Summons } from '../types/summons';
-import { InvoiceCartItem } from '../types/invoice';
+import { InvoiceCartItem, InvoiceExtraLineItem } from '../types/invoice';
 
 import { useInvoice } from '../contexts/InvoiceContext';
 import { useInvoiceTracker } from '../contexts/InvoiceTrackerContext';
-import { generatePDF, generateDOCX } from '../utils/invoiceGenerator';
+import { generatePDF, generateDOCX, sumExtrasLegalFees } from '../utils/invoiceGenerator';
 import { FOOTER_TEXT, DEFAULT_LEGAL_FEE } from '../constants/invoiceDefaults';
 import { markAsInvoiced } from '../utils/invoiceTracking';
 import { computeAlertDeadline, generateInvoiceNumber } from '../utils/invoiceTrackerHelpers';
 import { appendInvoiceAuditEntries, appendInvoiceModifiedEntry, appendInvoiceRemovedEntry } from '../utils/invoiceAuditLog';
+import { compareByHearingDateAsc } from '../utils/invoiceOrdering';
+import { v4 as uuidv4 } from 'uuid';
 import { Invoice as TrackerInvoice } from '../types/invoiceTracker';
 
 const apiClient = generateClient();
@@ -180,6 +182,15 @@ const InvoiceBuilder = () => {
   // Paid-invoice confirmation dialog (edit mode).
   const [paidWarningOpen, setPaidWarningOpen] = useState(false);
 
+  // Manual extra line items (research fee, etc.) — fully free-text rows that
+  // render below the summons rows on the invoice. In create mode they're
+  // scoped per-active-client and ephemeral; in edit mode they're hydrated
+  // from and persisted back to the Invoice record's `extra_line_items` field.
+  const [createExtrasByClient, setCreateExtrasByClient] = useState<
+    Record<string, InvoiceExtraLineItem[]>
+  >({});
+  const [editExtras, setEditExtras] = useState<InvoiceExtraLineItem[]>([]);
+
   // "Add summonses" picker dialog state (edit mode).
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerLoading, setPickerLoading] = useState(false);
@@ -227,13 +238,64 @@ const InvoiceBuilder = () => {
   // Edit mode uses the local edit-items snapshot; cart mode uses the active
   // client's subset of the shared cart.
   const displayItems = isEditMode ? editItems : activeClientItems;
+  const displayExtras: InvoiceExtraLineItem[] = isEditMode
+    ? editExtras
+    : (activeClientID ? (createExtrasByClient[activeClientID] ?? []) : []);
   const displayTotalLegalFees = useMemo(
-    () => displayItems.reduce((sum, item) => sum + item.legal_fee, 0),
-    [displayItems],
+    () =>
+      displayItems.reduce((sum, item) => sum + item.legal_fee, 0) +
+      sumExtrasLegalFees(displayExtras),
+    [displayItems, displayExtras],
   );
   const displayTotalFinesDue = useMemo(
     () => displayItems.reduce((sum, item) => sum + (item.amount_due || 0), 0),
     [displayItems],
+  );
+
+  // Extras handlers. Both modes funnel through these so the UI doesn't need
+  // to branch on isEditMode in every cell handler.
+  const updateExtras = useCallback(
+    (updater: (prev: InvoiceExtraLineItem[]) => InvoiceExtraLineItem[]) => {
+      if (isEditMode) {
+        setEditExtras(updater);
+      } else if (activeClientID) {
+        setCreateExtrasByClient((prev) => ({
+          ...prev,
+          [activeClientID]: updater(prev[activeClientID] ?? []),
+        }));
+      }
+    },
+    [isEditMode, activeClientID],
+  );
+
+  const handleAddExtraLine = useCallback(() => {
+    const blank: InvoiceExtraLineItem = {
+      id: `extra-${uuidv4()}`,
+      summons_number: '',
+      violation_date: '',
+      status: '',
+      hearing_result: '',
+      hearing_date: '',
+      amount_due: '',
+      legal_fee: '',
+    };
+    updateExtras((prev) => [...prev, blank]);
+  }, [updateExtras]);
+
+  const handleExtraFieldChange = useCallback(
+    (id: string, field: keyof InvoiceExtraLineItem, value: string) => {
+      updateExtras((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, [field]: value } : e)),
+      );
+    },
+    [updateExtras],
+  );
+
+  const handleRemoveExtraLine = useCallback(
+    (id: string) => {
+      updateExtras((prev) => prev.filter((e) => e.id !== id));
+    },
+    [updateExtras],
   );
 
   // Modal state for viewing summons details
@@ -428,7 +490,27 @@ const InvoiceBuilder = () => {
 
         if (cancelled) return;
         setLoadedInvoice(invoice);
-        setEditItems(hydrated);
+        setEditItems([...hydrated].sort(compareByHearingDateAsc));
+
+        // Hydrate manual extra-line rows from the Invoice record. Stored as
+        // AWSJSON (serialized array) — defensively parse to tolerate null,
+        // legacy records without the field, or malformed payloads.
+        const rawExtras = invoice.extra_line_items;
+        if (rawExtras) {
+          try {
+            const parsed = typeof rawExtras === 'string' ? JSON.parse(rawExtras) : rawExtras;
+            if (Array.isArray(parsed)) {
+              setEditExtras(parsed as InvoiceExtraLineItem[]);
+            } else {
+              setEditExtras([]);
+            }
+          } catch (parseErr) {
+            console.error('Failed to parse extra_line_items:', parseErr);
+            setEditExtras([]);
+          }
+        } else {
+          setEditExtras([]);
+        }
         setOriginalJoinRows(
           joinItems.map((j) => ({
             id: j.id,
@@ -485,7 +567,10 @@ const InvoiceBuilder = () => {
    * record + InvoiceSummons join rows. Only the active client's subset is
    * invoiced so that a multi-client cart can be drained one client at a time.
    */
-  const markItemsAsInvoiced = async (items: InvoiceCartItem[]): Promise<string | null> => {
+  const markItemsAsInvoiced = async (
+    items: InvoiceCartItem[],
+    extras: InvoiceExtraLineItem[] = [],
+  ): Promise<string | null> => {
     const invoiceDate = new Date().toISOString();
     const deadline = alertDeadline || computeAlertDeadline(invoiceDate);
     let invoiceId: string | null = null;
@@ -532,7 +617,8 @@ const InvoiceBuilder = () => {
     // Create persistent Invoice record with linked InvoiceSummons items
     try {
       const clientID = items[0]?.clientID || null;
-      const totalLegalFees = items.reduce((sum, i) => sum + i.legal_fee, 0);
+      const totalLegalFees =
+        items.reduce((sum, i) => sum + i.legal_fee, 0) + sumExtrasLegalFees(extras);
       const totalFinesDue = items.reduce((sum, i) => sum + (i.amount_due || 0), 0);
 
       const invoiceResult: any = await apiClient.graphql({
@@ -551,6 +637,7 @@ const InvoiceBuilder = () => {
             payment_status: 'unpaid',
             alert_deadline: deadline,
             clientID,
+            extra_line_items: extras.length > 0 ? JSON.stringify(extras) : null,
           },
         },
       });
@@ -622,11 +709,17 @@ const InvoiceBuilder = () => {
 
     setGenerating(true);
     const itemsToInvoice = activeClientItems;
+    const extrasToInvoice = activeClientID ? (createExtrasByClient[activeClientID] ?? []) : [];
     try {
-      const { blob, filename } = await generatePDF(itemsToInvoice, recipient, { paymentInstructions, reviewText, additionalNotes, showOverdue, overdueText });
+      const { blob, filename } = await generatePDF(
+        itemsToInvoice,
+        recipient,
+        { paymentInstructions, reviewText, additionalNotes, showOverdue, overdueText },
+        extrasToInvoice,
+      );
 
       // Mark only the active client's items as invoiced
-      const invoiceId = await markItemsAsInvoiced(itemsToInvoice);
+      const invoiceId = await markItemsAsInvoiced(itemsToInvoice, extrasToInvoice);
 
       // Upload the PDF to S3 and link it to the invoice record
       if (invoiceId) {
@@ -654,11 +747,17 @@ const InvoiceBuilder = () => {
 
     setGenerating(true);
     const itemsToInvoice = activeClientItems;
+    const extrasToInvoice = activeClientID ? (createExtrasByClient[activeClientID] ?? []) : [];
     try {
-      const { blob, filename } = await generateDOCX(itemsToInvoice, recipient, { paymentInstructions, reviewText, additionalNotes, showOverdue, overdueText });
+      const { blob, filename } = await generateDOCX(
+        itemsToInvoice,
+        recipient,
+        { paymentInstructions, reviewText, additionalNotes, showOverdue, overdueText },
+        extrasToInvoice,
+      );
 
       // Mark only the active client's items as invoiced
-      const invoiceId = await markItemsAsInvoiced(itemsToInvoice);
+      const invoiceId = await markItemsAsInvoiced(itemsToInvoice, extrasToInvoice);
 
       // Upload the DOCX to S3 and link it to the invoice record
       if (invoiceId) {
@@ -873,6 +972,7 @@ const InvoiceBuilder = () => {
               total_fines_due: displayTotalFinesDue,
               item_count: editItems.length,
               alert_deadline: alertDeadline || loadedInvoice.alert_deadline,
+              extra_line_items: editExtras.length > 0 ? JSON.stringify(editExtras) : null,
             },
           },
         });
@@ -883,13 +983,18 @@ const InvoiceBuilder = () => {
 
       // --- 5. Regenerate PDF + overwrite S3 -------------------------------
       try {
-        const { blob, filename } = await generatePDF(editItems, recipient, {
-          paymentInstructions,
-          reviewText,
-          additionalNotes,
-          showOverdue,
-          overdueText,
-        });
+        const { blob, filename } = await generatePDF(
+          editItems,
+          recipient,
+          {
+            paymentInstructions,
+            reviewText,
+            additionalNotes,
+            showOverdue,
+            overdueText,
+          },
+          editExtras,
+        );
         await uploadInvoiceToS3(editInvoiceId, blob, filename, 'application/pdf');
       } catch (err) {
         console.error('PDF regeneration failed:', err);
@@ -920,6 +1025,7 @@ const InvoiceBuilder = () => {
     loadedInvoice,
     editInvoiceId,
     editItems,
+    editExtras,
     originalJoinRows,
     recipient,
     alertDeadline,
@@ -989,7 +1095,7 @@ const InvoiceBuilder = () => {
         }
         return true;
       });
-      setPickerCandidates(filtered);
+      setPickerCandidates([...filtered].sort(compareByHearingDateAsc));
     } catch (err) {
       console.error('Failed to load summonses for picker:', err);
       alert('Failed to load summonses. Please try again.');
@@ -1033,7 +1139,7 @@ const InvoiceBuilder = () => {
         addedAt: now,
       }));
 
-    setEditItems((prev) => [...prev, ...newItems]);
+    setEditItems((prev) => [...prev, ...newItems].sort(compareByHearingDateAsc));
     setPickerOpen(false);
     setPickerSelection(new Set());
   };
@@ -1044,6 +1150,17 @@ const InvoiceBuilder = () => {
   const handleSuccessDialogClear = () => {
     if (lastGeneratedItems.length > 0) {
       removeManyFromCart(lastGeneratedItems.map((i) => i.id));
+    }
+    // Drop the extras for the client we just invoiced — they were baked in
+    // and persisted on the Invoice record, so keeping them staged would
+    // cause double-inclusion on the next invoice for this client.
+    const clientIDJustInvoiced = lastGeneratedItems[0]?.clientID;
+    if (clientIDJustInvoiced) {
+      setCreateExtrasByClient((prev) => {
+        const next = { ...prev };
+        delete next[clientIDJustInvoiced];
+        return next;
+      });
     }
     setLastGeneratedItems([]);
     setSuccessDialogOpen(false);
@@ -1287,27 +1404,39 @@ const InvoiceBuilder = () => {
                   <Typography variant="h6" sx={{ fontWeight: 600 }}>
                     {isEditMode ? 'Invoice Line Items' : 'Cart Items'}
                   </Typography>
-                  {isEditMode ? (
+                  <Stack direction="row" spacing={1}>
                     <Button
                       variant="outlined"
                       color="primary"
                       size="small"
                       startIcon={<AddIcon />}
-                      onClick={handleOpenPicker}
+                      onClick={handleAddExtraLine}
+                      disabled={!isEditMode && !activeClientID}
                     >
-                      Add Summonses
+                      Add Line
                     </Button>
-                  ) : (
-                    <Button
-                      variant="outlined"
-                      color="error"
-                      size="small"
-                      startIcon={<ClearAllIcon />}
-                      onClick={handleClearCart}
-                    >
-                      Clear Cart
-                    </Button>
-                  )}
+                    {isEditMode ? (
+                      <Button
+                        variant="outlined"
+                        color="primary"
+                        size="small"
+                        startIcon={<AddIcon />}
+                        onClick={handleOpenPicker}
+                      >
+                        Add Summonses
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outlined"
+                        color="error"
+                        size="small"
+                        startIcon={<ClearAllIcon />}
+                        onClick={handleClearCart}
+                      >
+                        Clear Cart
+                      </Button>
+                    )}
+                  </Stack>
                 </Box>
                 <TableContainer component={Paper} variant="outlined">
                   <Table size="small">
@@ -1409,6 +1538,97 @@ const InvoiceBuilder = () => {
                                 size="small"
                                 color="error"
                                 onClick={() => handleRemoveItem(item.id)}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {/* Manual extra-line rows — every cell is a free-text
+                          field. Pinned below the summons rows so the invoice
+                          reads chronologically at the top and "other fees"
+                          group at the bottom. */}
+                      {displayExtras.map((extra) => (
+                        <TableRow key={extra.id} hover sx={{ bgcolor: 'grey.50' }}>
+                          <TableCell>
+                            <TextField
+                              value={extra.summons_number}
+                              onChange={(e) => handleExtraFieldChange(extra.id, 'summons_number', e.target.value)}
+                              size="small"
+                              variant="standard"
+                              placeholder="Research Fee"
+                              sx={{ minWidth: 120 }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              value={extra.violation_date}
+                              onChange={(e) => handleExtraFieldChange(extra.id, 'violation_date', e.target.value)}
+                              size="small"
+                              variant="standard"
+                              placeholder="—"
+                              sx={{ minWidth: 90 }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              value={extra.status}
+                              onChange={(e) => handleExtraFieldChange(extra.id, 'status', e.target.value)}
+                              size="small"
+                              variant="standard"
+                              placeholder="—"
+                              sx={{ minWidth: 110 }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              value={extra.hearing_result}
+                              onChange={(e) => handleExtraFieldChange(extra.id, 'hearing_result', e.target.value)}
+                              size="small"
+                              variant="standard"
+                              placeholder="—"
+                              sx={{ minWidth: 110 }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              value={extra.hearing_date}
+                              onChange={(e) => handleExtraFieldChange(extra.id, 'hearing_date', e.target.value)}
+                              size="small"
+                              variant="standard"
+                              placeholder="—"
+                              sx={{ minWidth: 90 }}
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            <TextField
+                              value={extra.amount_due}
+                              onChange={(e) => handleExtraFieldChange(extra.id, 'amount_due', e.target.value)}
+                              size="small"
+                              variant="standard"
+                              placeholder="—"
+                              inputProps={{ style: { textAlign: 'right' } }}
+                              sx={{ width: 100 }}
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            <TextField
+                              value={extra.legal_fee}
+                              onChange={(e) => handleExtraFieldChange(extra.id, 'legal_fee', e.target.value)}
+                              size="small"
+                              variant="standard"
+                              placeholder="0"
+                              inputProps={{ style: { textAlign: 'right' } }}
+                              sx={{ width: 90 }}
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <Tooltip title="Remove line">
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => handleRemoveExtraLine(extra.id)}
                               >
                                 <DeleteIcon fontSize="small" />
                               </IconButton>
@@ -1609,6 +1829,7 @@ const InvoiceBuilder = () => {
                   showOverdue={showOverdue}
                   overdueText={overdueText}
                   additionalNotes={additionalNotes}
+                  extras={displayExtras}
                 />
               </CardContent>
             </Card>
