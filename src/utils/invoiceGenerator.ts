@@ -255,6 +255,10 @@ export const generatePDF = async (
     },
     margin: { left: margin, right: margin },
     theme: 'grid',
+    // Keep rows intact at page boundaries. Without this, a wrapped cell
+    // (e.g. extra line with "STATUS REVIEW") can be sliced between its
+    // lines — first line on page 1, second on page 2.
+    rowPageBreak: 'avoid',
   });
 
   // Get the final Y position after the table
@@ -476,6 +480,7 @@ export const generateDOCX = async (
             rows: [
               // Header row
               new TableRow({
+                cantSplit: true,
                 children: [
                   createHeaderCell('Summons\nNumber'),
                   createHeaderCell('Violation Date'),
@@ -490,6 +495,7 @@ export const generateDOCX = async (
               ...items.map(
                 (item) =>
                   new TableRow({
+                    cantSplit: true,
                     children: [
                       createDataCell(item.summons_number),
                       createDataCell(formatDate(item.violation_date)),
@@ -506,6 +512,7 @@ export const generateDOCX = async (
               ...extras.map(
                 (e) =>
                   new TableRow({
+                    cantSplit: true,
                     children: [
                       createDataCell(e.summons_number),
                       createDataCell(e.violation_date),
