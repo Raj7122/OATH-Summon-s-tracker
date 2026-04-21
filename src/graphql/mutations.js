@@ -512,6 +512,7 @@ export const createInvoice = /* GraphQL */ `
       notes
       clientID
       pdf_s3_key
+      extra_line_items
       items {
         nextToken
         __typename
@@ -544,6 +545,7 @@ export const updateInvoice = /* GraphQL */ `
       notes
       clientID
       pdf_s3_key
+      extra_line_items
       items {
         nextToken
         __typename
@@ -576,6 +578,7 @@ export const deleteInvoice = /* GraphQL */ `
       notes
       clientID
       pdf_s3_key
+      extra_line_items
       items {
         nextToken
         __typename
@@ -615,6 +618,7 @@ export const createInvoiceSummons = /* GraphQL */ `
         notes
         clientID
         pdf_s3_key
+        extra_line_items
         createdAt
         updatedAt
         __typename
@@ -654,6 +658,7 @@ export const updateInvoiceSummons = /* GraphQL */ `
         notes
         clientID
         pdf_s3_key
+        extra_line_items
         createdAt
         updatedAt
         __typename
@@ -693,6 +698,7 @@ export const deleteInvoiceSummons = /* GraphQL */ `
         notes
         clientID
         pdf_s3_key
+        extra_line_items
         createdAt
         updatedAt
         __typename

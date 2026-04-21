@@ -331,6 +331,7 @@ export const getInvoice = /* GraphQL */ `
       notes
       clientID
       pdf_s3_key
+      extra_line_items
       items {
         nextToken
         __typename
@@ -365,6 +366,7 @@ export const listInvoices = /* GraphQL */ `
         notes
         clientID
         pdf_s3_key
+        extra_line_items
         createdAt
         updatedAt
         __typename
@@ -400,6 +402,7 @@ export const getInvoiceSummons = /* GraphQL */ `
         notes
         clientID
         pdf_s3_key
+        extra_line_items
         createdAt
         updatedAt
         __typename
@@ -731,6 +734,7 @@ export const invoicesByClientID = /* GraphQL */ `
         notes
         clientID
         pdf_s3_key
+        extra_line_items
         createdAt
         updatedAt
         __typename
