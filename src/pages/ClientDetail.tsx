@@ -52,8 +52,8 @@ import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
 import RemoveShoppingCartIcon from '@mui/icons-material/RemoveShoppingCart';
 import { generateClient } from 'aws-amplify/api';
 
-import { getClient, listSummons, invoicesByClientID } from '../graphql/queries';
-import { getClientWithPlateFilter } from '../graphql/customQueries';
+import { getClient, listSummons } from '../graphql/queries';
+import { getClientWithPlateFilter, invoicesByClientBasic, invoiceSummonsForInvoice } from '../graphql/customQueries';
 import { updateSummons } from '../graphql/mutations';
 import { Client, Summons, isNewRecord, isUpdatedRecord } from '../types/summons';
 import { applyClientPlateFilter } from '../lib/plateFilter';
@@ -145,6 +145,15 @@ const ClientDetail: React.FC = () => {
   // Invoices dialog + count
   const [invoicesDialogOpen, setInvoicesDialogOpen] = useState(false);
   const [invoiceCount, setInvoiceCount] = useState<number>(0);
+
+  // Map of summonsID → payment info, derived from this client's invoices +
+  // their join rows. Drives the "Paid" column in the case-history grid so
+  // Arthur can see "invoiced this AND got paid" at a glance.
+  const [summonsPaymentMap, setSummonsPaymentMap] = useState<Map<string, {
+    paid: boolean;
+    paymentDate: string | null;
+    invoiceNumber: string;
+  }>>(new Map());
 
   /**
    * Load client details
@@ -279,35 +288,84 @@ const ClientDetail: React.FC = () => {
     loadClient();
   }, [loadClient]);
 
-  // Load invoice count for this client (for the metric tile).
-  useEffect(() => {
+  // Load this client's invoices + their join rows in one pass. Populates the
+  // invoice count tile AND the summonsID → payment_status map that drives
+  // the "Paid" column in the case-history grid.
+  //
+  // Exposed as a useCallback so child dialogs (ClientInvoicesDialog,
+  // SummonsDetailModal) can trigger a refresh after mark-paid / delete
+  // without requiring navigation.
+  const refreshInvoiceData = useCallback(async () => {
     if (!id) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        let count = 0;
-        let nextTok: string | null = null;
-        let fetches = 0;
-        while (fetches < 20) {
-          const result = await apiClient.graphql({
-            query: invoicesByClientID,
-            variables: { clientID: id, limit: 1000, nextToken: nextTok },
-          }) as { data: { invoicesByClientID: { items: unknown[]; nextToken: string | null } } };
-          count += result.data.invoicesByClientID.items.length;
-          nextTok = result.data.invoicesByClientID.nextToken;
-          fetches++;
-          if (!nextTok) break;
-        }
-        if (!cancelled) setInvoiceCount(count);
-      } catch (err) {
-        // Gracefully degrade — the tile will show 0 if the query fails.
-        console.warn('Could not load invoice count for client:', err);
+    try {
+      type InvoiceLite = {
+        id: string;
+        invoice_number: string;
+        payment_status: 'paid' | 'unpaid';
+        payment_date?: string | null;
+      };
+      type InvoiceSummonsLite = { summonsID: string };
+      type InvoicesResp = {
+        data?: { invoicesByClientID?: { items?: InvoiceLite[]; nextToken?: string | null } };
+      };
+      type ItemsResp = {
+        data?: { invoiceSummonsByInvoiceIDAndSummonsID?: { items?: InvoiceSummonsLite[]; nextToken?: string | null } };
+      };
+
+      const invoices: InvoiceLite[] = [];
+      let nextTok: string | null = null;
+      let fetches = 0;
+      while (fetches < 20) {
+        const result = (await apiClient.graphql({
+          query: invoicesByClientBasic,
+          variables: { clientID: id, limit: 1000, nextToken: nextTok },
+        })) as InvoicesResp;
+        const page = result?.data?.invoicesByClientID;
+        if (!page) break;
+        invoices.push(...(page.items || []));
+        nextTok = page.nextToken || null;
+        fetches++;
+        if (!nextTok) break;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+      setInvoiceCount(invoices.length);
+
+      // For each invoice, hydrate its InvoiceSummons rows. A paid invoice
+      // wins over an unpaid one if the same summons happens to be on both
+      // — Arthur cares whether the money arrived for this summons at all.
+      const map = new Map<string, { paid: boolean; paymentDate: string | null; invoiceNumber: string }>();
+      await Promise.all(invoices.map(async (inv) => {
+        try {
+          const itemsResp = (await apiClient.graphql({
+            query: invoiceSummonsForInvoice,
+            variables: { invoiceID: inv.id, limit: 1000 },
+          })) as ItemsResp;
+          const items = itemsResp?.data?.invoiceSummonsByInvoiceIDAndSummonsID?.items || [];
+          const paid = inv.payment_status === 'paid';
+          items.forEach((it) => {
+            const existing = map.get(it.summonsID);
+            if (!existing || (!existing.paid && paid)) {
+              map.set(it.summonsID, {
+                paid,
+                paymentDate: inv.payment_date || null,
+                invoiceNumber: inv.invoice_number,
+              });
+            }
+          });
+        } catch (err) {
+          console.warn(`Could not load items for invoice ${inv.id}:`, err);
+        }
+      }));
+      setSummonsPaymentMap(map);
+    } catch (err) {
+      // Gracefully degrade — the tile will show 0 and the Paid column will
+      // be empty if the queries fail.
+      console.warn('Could not load invoices for client:', err);
+    }
   }, [id]);
+
+  useEffect(() => {
+    refreshInvoiceData();
+  }, [refreshInvoiceData]);
 
   // Load summonses when client is loaded
   useEffect(() => {
@@ -657,6 +715,36 @@ const ClientDetail: React.FC = () => {
       },
     },
     {
+      field: 'payment_status_derived',
+      headerName: 'Paid',
+      width: 70,
+      align: 'center',
+      headerAlign: 'center',
+      sortable: false,
+      filterable: false,
+      disableColumnMenu: true,
+      // Derived from summonsPaymentMap (see invoice-loading effect above).
+      // A summons is "paid" when any invoice containing it has
+      // payment_status === 'paid'. Column is independent of is_invoiced so
+      // Arthur can scan for "invoiced but still unpaid" by comparing columns.
+      renderCell: (params) => {
+        const info = summonsPaymentMap.get(params.row.id);
+        if (info?.paid) {
+          const tip = info.paymentDate
+            ? `Paid ${dayjs.utc(info.paymentDate).format('MMM D, YYYY')} (${info.invoiceNumber})`
+            : `Paid (${info.invoiceNumber})`;
+          return (
+            <Tooltip title={tip} arrow placement="top">
+              <CheckCircleOutlineIcon sx={{ color: 'success.main', fontSize: 18 }} />
+            </Tooltip>
+          );
+        }
+        return (
+          <Box sx={{ width: 16, height: 16, borderRadius: '50%', border: '1.5px solid', borderColor: 'grey.300' }} />
+        );
+      },
+    },
+    {
       field: 'cart',
       headerName: 'Cart',
       width: 60,
@@ -713,7 +801,7 @@ const ClientDetail: React.FC = () => {
         );
       },
     },
-  ], [isInCart, addToCart, removeFromCart]);
+  ], [isInCart, addToCart, removeFromCart, summonsPaymentMap]);
 
   /**
    * Handle row click to open detail modal
@@ -1164,6 +1252,7 @@ const ClientDetail: React.FC = () => {
           setSelectedSummons(null);
         }}
         onUpdate={handleSummonsUpdate}
+        onInvoicesChanged={refreshInvoiceData}
       />
 
       {/* Export Configuration Modal */}
@@ -1184,6 +1273,7 @@ const ClientDetail: React.FC = () => {
         clientID={id ?? ''}
         clientName={client.name}
         onCountChange={setInvoiceCount}
+        onInvoicesChanged={refreshInvoiceData}
       />
     </Box>
   );

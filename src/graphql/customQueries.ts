@@ -101,15 +101,21 @@ export const listInvoicesWithItems = /* GraphQL */ `
   }
 `;
 
-// Query InvoiceSummons by summonsID to check if a summons was previously invoiced
+// Query InvoiceSummons by summonsID to check if a summons was previously invoiced.
+// Uses the bySummonsInvoice GSI directly (invoiceSummonsBySummonsID). The alias
+// `invoiceSummonsesBySummonsID:` is preserved so existing callers (modal,
+// builder, tests) continue to read result.data.invoiceSummonsesBySummonsID.items.
+// The previous implementation called listInvoiceSummonses with a filter, which
+// scans up to `limit` rows then filters — any join row that happened to land
+// outside the first page was silently dropped, hiding real links.
 export const invoiceSummonsItemsBySummons = /* GraphQL */ `
   query InvoiceSummonsItemsBySummons(
     $summonsID: ID!
     $limit: Int
     $nextToken: String
   ) {
-    invoiceSummonsesBySummonsID: listInvoiceSummonses(
-      filter: { summonsID: { eq: $summonsID } }
+    invoiceSummonsesBySummonsID: invoiceSummonsBySummonsID(
+      summonsID: $summonsID
       limit: $limit
       nextToken: $nextToken
     ) {

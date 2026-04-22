@@ -62,6 +62,13 @@ interface ClientInvoicesDialogProps {
   clientID: string;
   clientName: string;
   onCountChange?: (count: number) => void;
+  /**
+   * Fired after any invoice mutation (mark paid/unpaid, delete) so the
+   * parent page can refresh its own derived state — e.g. the Paid column
+   * on ClientDetail. Firing on every mutation (not just create/delete)
+   * keeps the parent in sync without a navigation round-trip.
+   */
+  onInvoicesChanged?: () => void;
 }
 
 const formatDate = (dateStr: string | null | undefined): string => {
@@ -195,7 +202,7 @@ const InvoiceRow = ({ invoice, onOpen, onViewPdfError }: InvoiceRowProps) => {
   );
 };
 
-const ClientInvoicesDialog = ({ open, onClose, clientID, clientName, onCountChange }: ClientInvoicesDialogProps) => {
+const ClientInvoicesDialog = ({ open, onClose, clientID, clientName, onCountChange, onInvoicesChanged }: ClientInvoicesDialogProps) => {
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down('md'));
 
@@ -316,7 +323,9 @@ const ClientInvoicesDialog = ({ open, onClose, clientID, clientName, onCountChan
   }, []);
 
   // InvoiceDetailModal callbacks — persist the change and refresh the list so
-  // the client dialog reflects the new state immediately.
+  // the client dialog reflects the new state immediately. Also notify the
+  // parent page (ClientDetail) so its derived state (Paid column, invoice
+  // count tile) refreshes without requiring navigation.
   const handleMarkPaid = useCallback(async (invoiceId: string, paymentDate: string) => {
     try {
       await apiClient.graphql({
@@ -325,12 +334,13 @@ const ClientInvoicesDialog = ({ open, onClose, clientID, clientName, onCountChan
       });
       setSnackbar({ open: true, message: 'Invoice marked as paid', severity: 'success' });
       await fetchInvoices();
+      onInvoicesChanged?.();
       handleCloseDetail();
     } catch (err) {
       console.error('Error marking invoice paid:', err);
       setSnackbar({ open: true, message: 'Failed to update invoice', severity: 'error' });
     }
-  }, [fetchInvoices, handleCloseDetail]);
+  }, [fetchInvoices, handleCloseDetail, onInvoicesChanged]);
 
   const handleMarkUnpaid = useCallback(async (invoiceId: string) => {
     try {
@@ -340,12 +350,13 @@ const ClientInvoicesDialog = ({ open, onClose, clientID, clientName, onCountChan
       });
       setSnackbar({ open: true, message: 'Invoice marked as unpaid', severity: 'success' });
       await fetchInvoices();
+      onInvoicesChanged?.();
       handleCloseDetail();
     } catch (err) {
       console.error('Error marking invoice unpaid:', err);
       setSnackbar({ open: true, message: 'Failed to update invoice', severity: 'error' });
     }
-  }, [fetchInvoices, handleCloseDetail]);
+  }, [fetchInvoices, handleCloseDetail, onInvoicesChanged]);
 
   const handleUpdateDeadline = useCallback(async (invoiceId: string, newDeadline: string) => {
     try {
@@ -390,12 +401,13 @@ const ClientInvoicesDialog = ({ open, onClose, clientID, clientName, onCountChan
       });
       setSnackbar({ open: true, message: 'Invoice deleted', severity: 'success' });
       await fetchInvoices();
+      onInvoicesChanged?.();
       handleCloseDetail();
     } catch (err) {
       console.error('Error deleting invoice:', err);
       setSnackbar({ open: true, message: 'Failed to delete invoice', severity: 'error' });
     }
-  }, [fetchInvoices, handleCloseDetail]);
+  }, [fetchInvoices, handleCloseDetail, onInvoicesChanged]);
 
   const unpaidCount = useMemo(() => invoices.filter((inv) => inv.payment_status === 'unpaid').length, [invoices]);
   const overdueCount = useMemo(() => invoices.filter((inv) => getInvoiceHorizonColor(inv) === 'overdue').length, [invoices]);
