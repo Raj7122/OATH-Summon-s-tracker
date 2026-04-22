@@ -183,6 +183,72 @@ export const updateInvoiceRecord = /* GraphQL */ `
   }
 `;
 
+// List invoices for a specific client (basic fields, no nested items).
+// Used by ClientInvoicesDialog. Linked InvoiceSummons items are fetched
+// separately per invoice so a partial failure of the hasMany resolver
+// doesn't prevent the list from rendering.
+export const invoicesByClientBasic = /* GraphQL */ `
+  query InvoicesByClientBasic(
+    $clientID: ID!
+    $limit: Int
+    $nextToken: String
+  ) {
+    invoicesByClientID(
+      clientID: $clientID
+      limit: $limit
+      nextToken: $nextToken
+    ) {
+      items {
+        id
+        invoice_number
+        invoice_date
+        recipient_company
+        recipient_attention
+        recipient_address
+        recipient_email
+        total_legal_fees
+        total_fines_due
+        item_count
+        payment_status
+        payment_date
+        alert_deadline
+        notes
+        clientID
+        pdf_s3_key
+        extra_line_items
+        createdAt
+        updatedAt
+      }
+      nextToken
+    }
+  }
+`;
+
+// Fetch InvoiceSummons rows for a single invoice. Uses the byInvoice index.
+export const invoiceSummonsForInvoice = /* GraphQL */ `
+  query InvoiceSummonsForInvoice(
+    $invoiceID: ID!
+    $limit: Int
+    $nextToken: String
+  ) {
+    invoiceSummonsByInvoiceIDAndSummonsID(
+      invoiceID: $invoiceID
+      limit: $limit
+      nextToken: $nextToken
+    ) {
+      items {
+        id
+        invoiceID
+        summonsID
+        summons_number
+        legal_fee
+        amount_due
+      }
+      nextToken
+    }
+  }
+`;
+
 // Fetch a single invoice's S3 key for viewing the saved file
 export const getInvoicePdfKey = /* GraphQL */ `
   query GetInvoicePdfKey($id: ID!) {

@@ -52,13 +52,14 @@ import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
 import RemoveShoppingCartIcon from '@mui/icons-material/RemoveShoppingCart';
 import { generateClient } from 'aws-amplify/api';
 
-import { getClient, listSummons } from '../graphql/queries';
+import { getClient, listSummons, invoicesByClientID } from '../graphql/queries';
 import { getClientWithPlateFilter } from '../graphql/customQueries';
 import { updateSummons } from '../graphql/mutations';
 import { Client, Summons, isNewRecord, isUpdatedRecord } from '../types/summons';
 import { applyClientPlateFilter } from '../lib/plateFilter';
 import SummonsDetailModal from '../components/SummonsDetailModal';
 import ExportConfigurationModal from '../components/ExportConfigurationModal';
+import ClientInvoicesDialog from '../components/ClientInvoicesDialog';
 import { useCSVExport } from '../hooks/useCSVExport';
 import { ExportConfig } from '../lib/csvExport';
 import { isInvoiced as isInvoicedLocally, getInvoiceDate as getInvoiceDateLocally, unmarkAsInvoiced } from '../utils/invoiceTracking';
@@ -140,6 +141,10 @@ const ClientDetail: React.FC = () => {
   // Export State
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const { progress: exportProgress, isExporting, error: exportError, exportClientSummonses, resetExport } = useCSVExport();
+
+  // Invoices dialog + count
+  const [invoicesDialogOpen, setInvoicesDialogOpen] = useState(false);
+  const [invoiceCount, setInvoiceCount] = useState<number>(0);
 
   /**
    * Load client details
@@ -273,6 +278,36 @@ const ClientDetail: React.FC = () => {
   useEffect(() => {
     loadClient();
   }, [loadClient]);
+
+  // Load invoice count for this client (for the metric tile).
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        let count = 0;
+        let nextTok: string | null = null;
+        let fetches = 0;
+        while (fetches < 20) {
+          const result = await apiClient.graphql({
+            query: invoicesByClientID,
+            variables: { clientID: id, limit: 1000, nextToken: nextTok },
+          }) as { data: { invoicesByClientID: { items: unknown[]; nextToken: string | null } } };
+          count += result.data.invoicesByClientID.items.length;
+          nextTok = result.data.invoicesByClientID.nextToken;
+          fetches++;
+          if (!nextTok) break;
+        }
+        if (!cancelled) setInvoiceCount(count);
+      } catch (err) {
+        // Gracefully degrade — the tile will show 0 if the query fails.
+        console.warn('Could not load invoice count for client:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   // Load summonses when client is loaded
   useEffect(() => {
@@ -822,9 +857,9 @@ const ClientDetail: React.FC = () => {
           </Tooltip>
         </Box>
 
-        {/* Metrics Grid - 4 columns */}
+        {/* Metrics Grid - 5 columns (sm+). The Invoices tile is clickable. */}
         <Grid container spacing={3}>
-          <Grid item xs={6} sm={3}>
+          <Grid item xs={6} sm={2.4}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Box
                 sx={{
@@ -849,7 +884,7 @@ const ClientDetail: React.FC = () => {
               </Box>
             </Box>
           </Grid>
-          <Grid item xs={6} sm={3}>
+          <Grid item xs={6} sm={2.4}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Box
                 sx={{
@@ -889,7 +924,7 @@ const ClientDetail: React.FC = () => {
               </Box>
             </Box>
           </Grid>
-          <Grid item xs={6} sm={3}>
+          <Grid item xs={6} sm={2.4}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Box
                 sx={{
@@ -914,7 +949,7 @@ const ClientDetail: React.FC = () => {
               </Box>
             </Box>
           </Grid>
-          <Grid item xs={6} sm={3}>
+          <Grid item xs={6} sm={2.4}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Box
                 sx={{
@@ -938,6 +973,48 @@ const ClientDetail: React.FC = () => {
                 </Typography>
               </Box>
             </Box>
+          </Grid>
+          <Grid item xs={6} sm={2.4}>
+            <Tooltip title="View all invoices for this client">
+              <Box
+                onClick={() => setInvoicesDialogOpen(true)}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1.5,
+                  cursor: 'pointer',
+                  borderRadius: 1.5,
+                  p: 0.5,
+                  mx: -0.5,
+                  transition: 'background-color 120ms',
+                  '&:hover': {
+                    bgcolor: (theme) => alpha(theme.palette.primary.main, 0.04),
+                  },
+                }}
+              >
+                <Box
+                  sx={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 1.5,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    bgcolor: (theme) => alpha(theme.palette.secondary.main, 0.08),
+                  }}
+                >
+                  <ReceiptLongIcon sx={{ color: 'secondary.main', fontSize: 20 }} />
+                </Box>
+                <Box>
+                  <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+                    {invoiceCount}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Invoices
+                  </Typography>
+                </Box>
+              </Box>
+            </Tooltip>
           </Grid>
         </Grid>
       </Paper>
@@ -1098,6 +1175,15 @@ const ClientDetail: React.FC = () => {
         progress={exportProgress}
         isExporting={isExporting}
         error={exportError}
+      />
+
+      {/* Client Invoices Dialog */}
+      <ClientInvoicesDialog
+        open={invoicesDialogOpen}
+        onClose={() => setInvoicesDialogOpen(false)}
+        clientID={id ?? ''}
+        clientName={client.name}
+        onCountChange={setInvoiceCount}
       />
     </Box>
   );

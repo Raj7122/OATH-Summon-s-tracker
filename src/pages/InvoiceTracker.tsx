@@ -33,6 +33,11 @@ import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import InvoiceSummaryCards from '../components/InvoiceSummaryCards';
 import { useInvoiceTracker } from '../contexts/InvoiceTrackerContext';
 import { Invoice, InvoiceHorizonFilter } from '../types/invoiceTracker';
+import { runInvoiceClientBackfill } from '../utils/invoiceClientBackfill';
+
+// One-time backfill flag. Stamps clientID onto legacy invoices that predate
+// the Invoice.clientID field. Idempotent — safe to re-run.
+const BACKFILL_FLAG = 'invoiceClientBackfill_v1_done';
 
 dayjs.extend(utc);
 
@@ -56,6 +61,21 @@ const InvoiceTracker = () => {
   // Re-fetch invoices every time the user navigates to this page
   useEffect(() => {
     fetchInvoices();
+  }, [fetchInvoices]);
+
+  // One-time backfill: ensure legacy invoices carry clientID so they appear
+  // on the Client Detail page. Re-runs once per browser, per user session.
+  useEffect(() => {
+    if (localStorage.getItem(BACKFILL_FLAG)) return;
+    runInvoiceClientBackfill()
+      .then((result) => {
+        console.log('[invoiceClientBackfill]', result);
+        localStorage.setItem(BACKFILL_FLAG, new Date().toISOString());
+        if (result.updated > 0) fetchInvoices();
+      })
+      .catch((err) => {
+        console.error('[invoiceClientBackfill] failed:', err);
+      });
   }, [fetchInvoices]);
 
   // Calendar state
