@@ -489,6 +489,8 @@ export const onCreateInvoice = /* GraphQL */ `
       clientID
       pdf_s3_key
       extra_line_items
+      highlighted_sections
+      custom_middle_text
       items {
         nextToken
         __typename
@@ -519,6 +521,8 @@ export const onUpdateInvoice = /* GraphQL */ `
       clientID
       pdf_s3_key
       extra_line_items
+      highlighted_sections
+      custom_middle_text
       items {
         nextToken
         __typename
@@ -549,6 +553,8 @@ export const onDeleteInvoice = /* GraphQL */ `
       clientID
       pdf_s3_key
       extra_line_items
+      highlighted_sections
+      custom_middle_text
       items {
         nextToken
         __typename
@@ -570,6 +576,7 @@ export const onCreateInvoiceSummons = /* GraphQL */ `
       summons_number
       legal_fee
       amount_due
+      highlighted
       invoice {
         id
         invoice_number
@@ -588,6 +595,8 @@ export const onCreateInvoiceSummons = /* GraphQL */ `
         clientID
         pdf_s3_key
         extra_line_items
+        highlighted_sections
+        custom_middle_text
         createdAt
         updatedAt
         __typename
@@ -609,6 +618,7 @@ export const onUpdateInvoiceSummons = /* GraphQL */ `
       summons_number
       legal_fee
       amount_due
+      highlighted
       invoice {
         id
         invoice_number
@@ -627,6 +637,8 @@ export const onUpdateInvoiceSummons = /* GraphQL */ `
         clientID
         pdf_s3_key
         extra_line_items
+        highlighted_sections
+        custom_middle_text
         createdAt
         updatedAt
         __typename
@@ -648,6 +660,7 @@ export const onDeleteInvoiceSummons = /* GraphQL */ `
       summons_number
       legal_fee
       amount_due
+      highlighted
       invoice {
         id
         invoice_number
@@ -666,6 +679,8 @@ export const onDeleteInvoiceSummons = /* GraphQL */ `
         clientID
         pdf_s3_key
         extra_line_items
+        highlighted_sections
+        custom_middle_text
         createdAt
         updatedAt
         __typename

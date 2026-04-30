@@ -140,6 +140,7 @@ vi.mock('docx', () => {
     BorderStyle: { SINGLE: 'SINGLE' },
     UnderlineType: { SINGLE: 'SINGLE' },
     HeadingLevel: { HEADING_1: 'HEADING_1' },
+    ShadingType: { CLEAR: 'CLEAR' },
   };
 });
 

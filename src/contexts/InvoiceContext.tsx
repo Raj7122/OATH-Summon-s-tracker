@@ -139,6 +139,17 @@ export const InvoiceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     );
   }, []);
 
+  // Toggle the yellow-highlight flag for a summons row on the invoice.
+  // Persisted to localStorage along with the rest of the cart, then saved to
+  // DynamoDB via the InvoiceSummons.highlighted field when the invoice is generated.
+  const toggleSummonsHighlight = useCallback((summonsId: string) => {
+    setCartItems((prev) =>
+      prev.map((item) =>
+        item.id === summonsId ? { ...item, highlighted: !item.highlighted } : item,
+      ),
+    );
+  }, []);
+
   // Clear all items from the cart
   const clearCart = useCallback(() => {
     setCartItems([]);
@@ -193,6 +204,7 @@ export const InvoiceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     updateAmountDue,
     updateStatus,
     updateHearingResult,
+    toggleSummonsHighlight,
     clearCart,
     isInCart,
     setRecipient,

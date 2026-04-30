@@ -332,6 +332,8 @@ export const getInvoice = /* GraphQL */ `
       clientID
       pdf_s3_key
       extra_line_items
+      highlighted_sections
+      custom_middle_text
       items {
         nextToken
         __typename
@@ -367,6 +369,8 @@ export const listInvoices = /* GraphQL */ `
         clientID
         pdf_s3_key
         extra_line_items
+        highlighted_sections
+        custom_middle_text
         createdAt
         updatedAt
         __typename
@@ -385,6 +389,7 @@ export const getInvoiceSummons = /* GraphQL */ `
       summons_number
       legal_fee
       amount_due
+      highlighted
       invoice {
         id
         invoice_number
@@ -403,6 +408,8 @@ export const getInvoiceSummons = /* GraphQL */ `
         clientID
         pdf_s3_key
         extra_line_items
+        highlighted_sections
+        custom_middle_text
         createdAt
         updatedAt
         __typename
@@ -427,6 +434,7 @@ export const listInvoiceSummons = /* GraphQL */ `
         summons_number
         legal_fee
         amount_due
+        highlighted
         createdAt
         updatedAt
         __typename
@@ -735,6 +743,8 @@ export const invoicesByClientID = /* GraphQL */ `
         clientID
         pdf_s3_key
         extra_line_items
+        highlighted_sections
+        custom_middle_text
         createdAt
         updatedAt
         __typename
@@ -768,6 +778,7 @@ export const invoiceSummonsByInvoiceIDAndSummonsID = /* GraphQL */ `
         summons_number
         legal_fee
         amount_due
+        highlighted
         createdAt
         updatedAt
         __typename
@@ -799,6 +810,7 @@ export const invoiceSummonsBySummonsID = /* GraphQL */ `
         summons_number
         legal_fee
         amount_due
+        highlighted
         createdAt
         updatedAt
         __typename

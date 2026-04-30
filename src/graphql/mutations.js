@@ -513,6 +513,8 @@ export const createInvoice = /* GraphQL */ `
       clientID
       pdf_s3_key
       extra_line_items
+      highlighted_sections
+      custom_middle_text
       items {
         nextToken
         __typename
@@ -546,6 +548,8 @@ export const updateInvoice = /* GraphQL */ `
       clientID
       pdf_s3_key
       extra_line_items
+      highlighted_sections
+      custom_middle_text
       items {
         nextToken
         __typename
@@ -579,6 +583,8 @@ export const deleteInvoice = /* GraphQL */ `
       clientID
       pdf_s3_key
       extra_line_items
+      highlighted_sections
+      custom_middle_text
       items {
         nextToken
         __typename
@@ -601,6 +607,7 @@ export const createInvoiceSummons = /* GraphQL */ `
       summons_number
       legal_fee
       amount_due
+      highlighted
       invoice {
         id
         invoice_number
@@ -619,6 +626,8 @@ export const createInvoiceSummons = /* GraphQL */ `
         clientID
         pdf_s3_key
         extra_line_items
+        highlighted_sections
+        custom_middle_text
         createdAt
         updatedAt
         __typename
@@ -641,6 +650,7 @@ export const updateInvoiceSummons = /* GraphQL */ `
       summons_number
       legal_fee
       amount_due
+      highlighted
       invoice {
         id
         invoice_number
@@ -659,6 +669,8 @@ export const updateInvoiceSummons = /* GraphQL */ `
         clientID
         pdf_s3_key
         extra_line_items
+        highlighted_sections
+        custom_middle_text
         createdAt
         updatedAt
         __typename
@@ -681,6 +693,7 @@ export const deleteInvoiceSummons = /* GraphQL */ `
       summons_number
       legal_fee
       amount_due
+      highlighted
       invoice {
         id
         invoice_number
@@ -699,6 +712,8 @@ export const deleteInvoiceSummons = /* GraphQL */ `
         clientID
         pdf_s3_key
         extra_line_items
+        highlighted_sections
+        custom_middle_text
         createdAt
         updatedAt
         __typename

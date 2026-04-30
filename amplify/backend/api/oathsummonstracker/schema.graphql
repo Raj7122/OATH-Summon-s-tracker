@@ -194,6 +194,8 @@ type Invoice @model @auth(rules: [{ allow: private }]) {
   clientID: ID @index(name: "invoiceByClient")
   pdf_s3_key: String    # S3 key for the stored invoice file (PDF or DOCX)
   extra_line_items: AWSJSON  # Optional non-summons rows (e.g., research fee) — JSON array of InvoiceExtraLineItem
+  highlighted_sections: AWSJSON  # Optional map of which footer paragraphs render with yellow highlight
+  custom_middle_text: String  # Optional free-text paragraph rendered between the overdue block and the questions line
   items: [InvoiceSummons] @hasMany(indexName: "byInvoice", fields: ["id"])
 }
 
@@ -206,5 +208,6 @@ type InvoiceSummons @model @auth(rules: [{ allow: private }]) {
   summons_number: String!
   legal_fee: Float!
   amount_due: Float
+  highlighted: Boolean  # Optional yellow-highlight flag for this row on the invoice
   invoice: Invoice @belongsTo(fields: ["invoiceID"])
 }

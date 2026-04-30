@@ -66,6 +66,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import AddIcon from '@mui/icons-material/Add';
 import SaveIcon from '@mui/icons-material/Save';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
+import BorderColorIcon from '@mui/icons-material/BorderColor';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
@@ -74,7 +75,7 @@ dayjs.extend(utc);
 import SummonsDetailModal from '../components/SummonsDetailModal';
 import InvoicePreview from '../components/InvoicePreview';
 import { Summons } from '../types/summons';
-import { InvoiceCartItem, InvoiceExtraLineItem } from '../types/invoice';
+import { InvoiceCartItem, InvoiceExtraLineItem, HighlightedSections } from '../types/invoice';
 
 import { useInvoice } from '../contexts/InvoiceContext';
 import { useInvoiceTracker } from '../contexts/InvoiceTrackerContext';
@@ -144,6 +145,7 @@ const InvoiceBuilder = () => {
     updateAmountDue,
     updateStatus,
     updateHearingResult,
+    toggleSummonsHighlight,
     clearCart,
     setAlertDeadline,
   } = useInvoice();
@@ -176,7 +178,13 @@ const InvoiceBuilder = () => {
   // Snapshot of the original InvoiceSummons join-row IDs keyed by summonsID.
   // Used to diff what was kept/added/removed on save.
   const [originalJoinRows, setOriginalJoinRows] = useState<
-    { id: string; summonsID: string; legal_fee: number; amount_due: number | null }[]
+    {
+      id: string;
+      summonsID: string;
+      legal_fee: number;
+      amount_due: number | null;
+      highlighted: boolean;
+    }[]
   >([]);
 
   // Paid-invoice confirmation dialog (edit mode).
@@ -360,6 +368,52 @@ const InvoiceBuilder = () => {
   const [overdueText, setOverdueText] = useState(FOOTER_TEXT.overdue);
   const [additionalNotes, setAdditionalNotes] = useState('');
 
+  // Free-text paragraph injected between the overdue/CityPay block and the
+  // "Let me know if you have any questions…" line. Empty by default; only
+  // renders when non-empty. Persisted on the Invoice record.
+  const [customMiddleText, setCustomMiddleText] = useState('');
+
+  // Per-paragraph highlight toggles. When a key is true, the matching paragraph
+  // renders with a yellow marker background in preview, PDF, and DOCX.
+  const [highlightedSections, setHighlightedSections] = useState<HighlightedSections>({});
+
+  // Toggle an entry on the highlightedSections map. Keyed by paragraph slot.
+  const toggleParagraphHighlight = useCallback(
+    (key: keyof HighlightedSections) => {
+      setHighlightedSections((prev) => ({ ...prev, [key]: !prev[key] }));
+    },
+    [],
+  );
+
+  // Toggle highlight for a single summons row. Cart mode delegates to context
+  // (so the flag persists across reloads via localStorage); edit mode mutates
+  // the local edit-items snapshot.
+  const handleToggleSummonsHighlight = useCallback(
+    (summonsId: string) => {
+      if (isEditMode) {
+        setEditItems((prev) =>
+          prev.map((item) =>
+            item.id === summonsId ? { ...item, highlighted: !item.highlighted } : item,
+          ),
+        );
+      } else {
+        toggleSummonsHighlight(summonsId);
+      }
+    },
+    [isEditMode, toggleSummonsHighlight],
+  );
+
+  // Toggle highlight for an extra (free-text) line. Same dispatch pattern as
+  // the other extras handlers.
+  const handleToggleExtraHighlight = useCallback(
+    (id: string) => {
+      updateExtras((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, highlighted: !e.highlighted } : e)),
+      );
+    },
+    [updateExtras],
+  );
+
   // Cache of fetched Client records keyed by clientID.
   // Populated lazily as new clients show up in the cart — used for tab labels
   // and for auto-filling the recipient form when the active client changes.
@@ -485,6 +539,7 @@ const InvoiceBuilder = () => {
             amount_due: j.amount_due ?? s?.amount_due ?? null,
             legal_fee: j.legal_fee,
             addedAt: invoice.invoice_date,
+            highlighted: !!j.highlighted,
           };
         });
 
@@ -517,8 +572,25 @@ const InvoiceBuilder = () => {
             summonsID: j.summonsID,
             legal_fee: j.legal_fee,
             amount_due: j.amount_due ?? null,
+            highlighted: !!j.highlighted,
           })),
         );
+
+        // Restore the custom-middle paragraph and the per-paragraph highlight
+        // map. Both are optional + AWSJSON, so parse defensively.
+        setCustomMiddleText(invoice.custom_middle_text || '');
+        const rawHl = invoice.highlighted_sections;
+        if (rawHl) {
+          try {
+            const parsed = typeof rawHl === 'string' ? JSON.parse(rawHl) : rawHl;
+            setHighlightedSections(parsed && typeof parsed === 'object' ? parsed : {});
+          } catch (parseErr) {
+            console.error('Failed to parse highlighted_sections:', parseErr);
+            setHighlightedSections({});
+          }
+        } else {
+          setHighlightedSections({});
+        }
       } catch (err) {
         console.error('Failed to load invoice for editing:', err);
         if (!cancelled) setEditLoadError('Failed to load invoice. Please try again.');
@@ -621,6 +693,7 @@ const InvoiceBuilder = () => {
         items.reduce((sum, i) => sum + i.legal_fee, 0) + sumExtrasLegalFees(extras);
       const totalFinesDue = items.reduce((sum, i) => sum + (i.amount_due || 0), 0);
 
+      const hasAnyHighlight = Object.values(highlightedSections).some(Boolean);
       const invoiceResult: any = await apiClient.graphql({
         query: createInvoiceRecord,
         variables: {
@@ -638,6 +711,8 @@ const InvoiceBuilder = () => {
             alert_deadline: deadline,
             clientID,
             extra_line_items: extras.length > 0 ? JSON.stringify(extras) : null,
+            custom_middle_text: customMiddleText.trim() ? customMiddleText : null,
+            highlighted_sections: hasAnyHighlight ? JSON.stringify(highlightedSections) : null,
           },
         },
       });
@@ -662,6 +737,7 @@ const InvoiceBuilder = () => {
                 summons_number: item.summons_number,
                 legal_fee: item.legal_fee,
                 amount_due: item.amount_due,
+                highlighted: !!item.highlighted,
               },
             },
           })
@@ -714,7 +790,15 @@ const InvoiceBuilder = () => {
       const { blob, filename } = await generatePDF(
         itemsToInvoice,
         recipient,
-        { paymentInstructions, reviewText, additionalNotes, showOverdue, overdueText },
+        {
+          paymentInstructions,
+          reviewText,
+          additionalNotes,
+          showOverdue,
+          overdueText,
+          customMiddleText,
+          highlightedSections,
+        },
         extrasToInvoice,
       );
 
@@ -752,7 +836,15 @@ const InvoiceBuilder = () => {
       const { blob, filename } = await generateDOCX(
         itemsToInvoice,
         recipient,
-        { paymentInstructions, reviewText, additionalNotes, showOverdue, overdueText },
+        {
+          paymentInstructions,
+          reviewText,
+          additionalNotes,
+          showOverdue,
+          overdueText,
+          customMiddleText,
+          highlightedSections,
+        },
         extrasToInvoice,
       );
 
@@ -813,14 +905,15 @@ const InvoiceBuilder = () => {
       const added = editItems.filter((i) => !originalBySummons.has(i.id));
       const removed = originalJoinRows.filter((r) => !editedBySummons.has(r.summonsID));
 
-      // Apply updates for kept rows with changed fees/amount.
+      // Apply updates for kept rows with changed fees/amount/highlight.
       await Promise.all(
         kept.map(async (item) => {
           const orig = originalBySummons.get(item.id);
           if (!orig) return;
           const feeChanged = orig.legal_fee !== item.legal_fee;
           const amtChanged = (orig.amount_due ?? null) !== (item.amount_due ?? null);
-          if (!feeChanged && !amtChanged) return;
+          const highlightChanged = !!orig.highlighted !== !!item.highlighted;
+          if (!feeChanged && !amtChanged && !highlightChanged) return;
 
           try {
             await apiClient.graphql({
@@ -830,14 +923,17 @@ const InvoiceBuilder = () => {
                   id: orig.id,
                   legal_fee: item.legal_fee,
                   amount_due: item.amount_due,
+                  highlighted: !!item.highlighted,
                 },
               },
             });
 
             // Audit the summons activity log with an INVOICE_MODIFIED entry.
+            // Highlight changes don't get audited — they're cosmetic only.
             const diffParts: string[] = [];
             if (feeChanged) diffParts.push(`legal fee $${orig.legal_fee} → $${item.legal_fee}`);
             if (amtChanged) diffParts.push(`amount due ${orig.amount_due ?? 'none'} → ${item.amount_due ?? 'none'}`);
+            if (diffParts.length === 0) return; // highlight-only change — skip audit log write
             const existingSummons: any = await apiClient.graphql({
               query: getSummons,
               variables: { id: item.id },
@@ -925,6 +1021,7 @@ const InvoiceBuilder = () => {
                   summons_number: item.summons_number,
                   legal_fee: item.legal_fee,
                   amount_due: item.amount_due,
+                  highlighted: !!item.highlighted,
                 },
               },
             });
@@ -958,6 +1055,7 @@ const InvoiceBuilder = () => {
       );
 
       // --- 4. Update the Invoice record with new totals + recipient -------
+      const hasAnyHighlight = Object.values(highlightedSections).some(Boolean);
       try {
         await apiClient.graphql({
           query: updateInvoiceRecord,
@@ -973,6 +1071,8 @@ const InvoiceBuilder = () => {
               item_count: editItems.length,
               alert_deadline: alertDeadline || loadedInvoice.alert_deadline,
               extra_line_items: editExtras.length > 0 ? JSON.stringify(editExtras) : null,
+              custom_middle_text: customMiddleText.trim() ? customMiddleText : null,
+              highlighted_sections: hasAnyHighlight ? JSON.stringify(highlightedSections) : null,
             },
           },
         });
@@ -992,6 +1092,8 @@ const InvoiceBuilder = () => {
             additionalNotes,
             showOverdue,
             overdueText,
+            customMiddleText,
+            highlightedSections,
           },
           editExtras,
         );
@@ -1036,6 +1138,8 @@ const InvoiceBuilder = () => {
     additionalNotes,
     showOverdue,
     overdueText,
+    customMiddleText,
+    highlightedSections,
     fetchInvoices,
     navigate,
   ]);
@@ -1449,12 +1553,17 @@ const InvoiceBuilder = () => {
                         <TableCell sx={{ fontWeight: 600 }}>Hearing Date</TableCell>
                         <TableCell sx={{ fontWeight: 600 }} align="right">Fine Due</TableCell>
                         <TableCell sx={{ fontWeight: 600, minWidth: 100 }} align="right">Legal Fee</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }} align="center">Highlight</TableCell>
                         <TableCell sx={{ fontWeight: 600 }} align="center">Remove</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {displayItems.map((item) => (
-                        <TableRow key={item.id} hover>
+                        <TableRow
+                          key={item.id}
+                          hover
+                          sx={item.highlighted ? { bgcolor: '#fff59d' } : undefined}
+                        >
                           <TableCell>
                             <Box
                               sx={{
@@ -1533,6 +1642,20 @@ const InvoiceBuilder = () => {
                             />
                           </TableCell>
                           <TableCell align="center">
+                            <Tooltip title={item.highlighted ? 'Remove highlight' : 'Highlight this row'}>
+                              <IconButton
+                                size="small"
+                                onClick={() => handleToggleSummonsHighlight(item.id)}
+                                sx={{
+                                  color: item.highlighted ? '#bf8f00' : 'action.active',
+                                  bgcolor: item.highlighted ? '#fff59d' : undefined,
+                                }}
+                              >
+                                <BorderColorIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                          <TableCell align="center">
                             <Tooltip title={isEditMode ? 'Remove from invoice' : 'Remove from cart'}>
                               <IconButton
                                 size="small"
@@ -1550,7 +1673,11 @@ const InvoiceBuilder = () => {
                           reads chronologically at the top and "other fees"
                           group at the bottom. */}
                       {displayExtras.map((extra) => (
-                        <TableRow key={extra.id} hover sx={{ bgcolor: 'grey.50' }}>
+                        <TableRow
+                          key={extra.id}
+                          hover
+                          sx={{ bgcolor: extra.highlighted ? '#fff59d' : 'grey.50' }}
+                        >
                           <TableCell>
                             <TextField
                               value={extra.summons_number}
@@ -1624,6 +1751,20 @@ const InvoiceBuilder = () => {
                             />
                           </TableCell>
                           <TableCell align="center">
+                            <Tooltip title={extra.highlighted ? 'Remove highlight' : 'Highlight this row'}>
+                              <IconButton
+                                size="small"
+                                onClick={() => handleToggleExtraHighlight(extra.id)}
+                                sx={{
+                                  color: extra.highlighted ? '#bf8f00' : 'action.active',
+                                  bgcolor: extra.highlighted ? '#fff59d' : undefined,
+                                }}
+                              >
+                                <BorderColorIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                          <TableCell align="center">
                             <Tooltip title="Remove line">
                               <IconButton
                                 size="small"
@@ -1653,25 +1794,55 @@ const InvoiceBuilder = () => {
                 </Typography>
 
                 <Stack spacing={2}>
-                  <TextField
-                    label="Payment Instructions"
-                    value={paymentInstructions}
-                    onChange={(e) => setPaymentInstructions(e.target.value)}
-                    fullWidth
-                    multiline
-                    rows={2}
-                    helperText="Payment methods and instructions"
-                  />
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                    <TextField
+                      label="Payment Instructions"
+                      value={paymentInstructions}
+                      onChange={(e) => setPaymentInstructions(e.target.value)}
+                      fullWidth
+                      multiline
+                      rows={2}
+                      helperText="Payment methods and instructions"
+                    />
+                    <Tooltip title={highlightedSections.payment ? 'Remove paragraph highlight' : 'Highlight this paragraph'}>
+                      <IconButton
+                        size="small"
+                        onClick={() => toggleParagraphHighlight('payment')}
+                        sx={{
+                          mt: 0.5,
+                          color: highlightedSections.payment ? '#bf8f00' : 'action.active',
+                          bgcolor: highlightedSections.payment ? '#fff59d' : undefined,
+                        }}
+                      >
+                        <BorderColorIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
 
-                  <TextField
-                    label="Review Request"
-                    value={reviewText}
-                    onChange={(e) => setReviewText(e.target.value)}
-                    fullWidth
-                    multiline
-                    rows={2}
-                    helperText="Asks client about defenses/explanations for the violations"
-                  />
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                    <TextField
+                      label="Review Request"
+                      value={reviewText}
+                      onChange={(e) => setReviewText(e.target.value)}
+                      fullWidth
+                      multiline
+                      rows={2}
+                      helperText="Asks client about defenses/explanations for the violations"
+                    />
+                    <Tooltip title={highlightedSections.review ? 'Remove paragraph highlight' : 'Highlight this paragraph'}>
+                      <IconButton
+                        size="small"
+                        onClick={() => toggleParagraphHighlight('review')}
+                        sx={{
+                          mt: 0.5,
+                          color: highlightedSections.review ? '#bf8f00' : 'action.active',
+                          bgcolor: highlightedSections.review ? '#fff59d' : undefined,
+                        }}
+                      >
+                        <BorderColorIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
 
                   <Box>
                     <FormControlLabel
@@ -1684,29 +1855,87 @@ const InvoiceBuilder = () => {
                       label="Include Overdue Fine Paragraph"
                     />
                     {showOverdue && (
-                      <TextField
-                        label="Overdue Fine Text"
-                        value={overdueText}
-                        onChange={(e) => setOverdueText(e.target.value)}
-                        fullWidth
-                        multiline
-                        rows={2}
-                        helperText="Paragraph about overdue fines and CityPay link"
-                        sx={{ mt: 1 }}
-                      />
+                      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mt: 1 }}>
+                        <TextField
+                          label="Overdue Fine Text"
+                          value={overdueText}
+                          onChange={(e) => setOverdueText(e.target.value)}
+                          fullWidth
+                          multiline
+                          rows={2}
+                          helperText="Paragraph about overdue fines and CityPay link"
+                        />
+                        <Tooltip title={highlightedSections.overdue ? 'Remove paragraph highlight' : 'Highlight this paragraph'}>
+                          <IconButton
+                            size="small"
+                            onClick={() => toggleParagraphHighlight('overdue')}
+                            sx={{
+                              mt: 0.5,
+                              color: highlightedSections.overdue ? '#bf8f00' : 'action.active',
+                              bgcolor: highlightedSections.overdue ? '#fff59d' : undefined,
+                            }}
+                          >
+                            <BorderColorIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
                     )}
                   </Box>
 
-                  <TextField
-                    label="Additional Notes (Optional)"
-                    value={additionalNotes}
-                    onChange={(e) => setAdditionalNotes(e.target.value)}
-                    fullWidth
-                    multiline
-                    rows={3}
-                    placeholder="Add any case-specific notes here..."
-                    helperText="Custom text that appears at the end of the invoice"
-                  />
+                  {/* Free-text paragraph that renders between the overdue
+                      block and the questions line. Empty by default; only
+                      appears in the invoice when filled. */}
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                    <TextField
+                      label="Custom Paragraph (after overdue block)"
+                      value={customMiddleText}
+                      onChange={(e) => setCustomMiddleText(e.target.value)}
+                      fullWidth
+                      multiline
+                      rows={3}
+                      placeholder="Optional — appears between the overdue/CityPay link and the questions line."
+                      helperText="Leave blank to omit. Renders only if filled."
+                    />
+                    <Tooltip title={highlightedSections.customMiddle ? 'Remove paragraph highlight' : 'Highlight this paragraph'}>
+                      <IconButton
+                        size="small"
+                        onClick={() => toggleParagraphHighlight('customMiddle')}
+                        sx={{
+                          mt: 0.5,
+                          color: highlightedSections.customMiddle ? '#bf8f00' : 'action.active',
+                          bgcolor: highlightedSections.customMiddle ? '#fff59d' : undefined,
+                        }}
+                      >
+                        <BorderColorIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                    <TextField
+                      label="Additional Notes (Optional)"
+                      value={additionalNotes}
+                      onChange={(e) => setAdditionalNotes(e.target.value)}
+                      fullWidth
+                      multiline
+                      rows={3}
+                      placeholder="Add any case-specific notes here..."
+                      helperText="Custom text that appears at the end of the invoice"
+                    />
+                    <Tooltip title={highlightedSections.additional ? 'Remove paragraph highlight' : 'Highlight this paragraph'}>
+                      <IconButton
+                        size="small"
+                        onClick={() => toggleParagraphHighlight('additional')}
+                        sx={{
+                          mt: 0.5,
+                          color: highlightedSections.additional ? '#bf8f00' : 'action.active',
+                          bgcolor: highlightedSections.additional ? '#fff59d' : undefined,
+                        }}
+                      >
+                        <BorderColorIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
                 </Stack>
               </CardContent>
             </Card>
@@ -1830,6 +2059,8 @@ const InvoiceBuilder = () => {
                   overdueText={overdueText}
                   additionalNotes={additionalNotes}
                   extras={displayExtras}
+                  customMiddleText={customMiddleText}
+                  highlightedSections={highlightedSections}
                 />
               </CardContent>
             </Card>

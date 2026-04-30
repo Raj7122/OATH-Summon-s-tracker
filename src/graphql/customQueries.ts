@@ -156,6 +156,8 @@ export const createInvoiceRecord = /* GraphQL */ `
       pdf_s3_key
       clientID
       extra_line_items
+      highlighted_sections
+      custom_middle_text
     }
   }
 `;
@@ -170,6 +172,7 @@ export const createInvoiceSummonsRecord = /* GraphQL */ `
       summons_number
       legal_fee
       amount_due
+      highlighted
     }
   }
 `;
@@ -185,6 +188,8 @@ export const updateInvoiceRecord = /* GraphQL */ `
       notes
       pdf_s3_key
       extra_line_items
+      highlighted_sections
+      custom_middle_text
     }
   }
 `;
@@ -306,6 +311,8 @@ export const getInvoiceWithItems = /* GraphQL */ `
       clientID
       pdf_s3_key
       extra_line_items
+      highlighted_sections
+      custom_middle_text
       items {
         items {
           id
@@ -314,6 +321,7 @@ export const getInvoiceWithItems = /* GraphQL */ `
           summons_number
           legal_fee
           amount_due
+          highlighted
         }
       }
       createdAt
@@ -322,7 +330,7 @@ export const getInvoiceWithItems = /* GraphQL */ `
   }
 `;
 
-// Update an invoice-summons join record (for changing legal_fee / amount_due).
+// Update an invoice-summons join record (for changing legal_fee / amount_due / highlighted).
 export const updateInvoiceSummonsRecord = /* GraphQL */ `
   mutation UpdateInvoiceSummonsRecord($input: UpdateInvoiceSummonsInput!) {
     updateInvoiceSummons(input: $input) {
@@ -332,6 +340,7 @@ export const updateInvoiceSummonsRecord = /* GraphQL */ `
       summons_number
       legal_fee
       amount_due
+      highlighted
     }
   }
 `;

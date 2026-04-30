@@ -14,6 +14,7 @@ export interface InvoiceCartItem {
   amount_due: number | null;
   legal_fee: number; // Default $250, user-editable
   addedAt: string; // ISO timestamp when added to cart
+  highlighted?: boolean;
 }
 
 /**
@@ -29,6 +30,18 @@ export interface InvoiceExtraLineItem {
   hearing_date: string;
   amount_due: string;
   legal_fee: string;
+  highlighted?: boolean;
+}
+
+/**
+ * Map of which footer paragraphs should render with a yellow highlight.
+ */
+export interface HighlightedSections {
+  payment?: boolean;
+  review?: boolean;
+  overdue?: boolean;
+  customMiddle?: boolean;
+  additional?: boolean;
 }
 
 /**
@@ -89,6 +102,7 @@ export interface InvoiceContextActions {
   updateAmountDue: (summonsId: string, newAmount: number | null) => void;
   updateStatus: (summonsId: string, newStatus: string) => void;
   updateHearingResult: (summonsId: string, newResult: string | null) => void;
+  toggleSummonsHighlight: (summonsId: string) => void;
   clearCart: () => void;
   isInCart: (summonsId: string) => boolean;
   setRecipient: (recipient: InvoiceRecipient) => void;
@@ -111,4 +125,6 @@ export interface InvoiceOptions {
   additionalNotes: string;
   showOverdue: boolean;
   overdueText: string;
+  customMiddleText?: string;
+  highlightedSections?: HighlightedSections;
 }

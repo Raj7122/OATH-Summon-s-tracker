@@ -28,6 +28,8 @@ export interface Invoice {
   pdf_s3_key?: string | null;
   clientID?: string | null;
   extra_line_items?: string | null;  // AWSJSON — array of InvoiceExtraLineItem
+  highlighted_sections?: string | null;  // AWSJSON — { payment?, review?, overdue?, customMiddle?, additional? }
+  custom_middle_text?: string | null;
   items?: {
     items: InvoiceSummonsItem[];
   };
@@ -43,6 +45,7 @@ export interface InvoiceSummonsItem {
   summons_number: string;
   legal_fee: number;
   amount_due?: number | null;
+  highlighted?: boolean | null;
 }
 
 /** Horizon stats for the invoice calendar filter chips */
