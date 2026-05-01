@@ -18,9 +18,11 @@ Arthur is not tech-savvy, so Rajiv will do all the technical work using Arthur's
 
 ---
 
-## Prerequisites — Arthur's Side (~20 min on a screen share with Rajiv)
+## Prerequisites — Arthur's Side (~35 min on a screen share with Rajiv)
 
-> **Note for Rajiv:** Schedule a 30-minute screen share with Arthur. He should share *his* screen so he keeps control of his account. Walk him through every click below. Do **not** ask him to do this alone — non-technical users get stuck on the IAM screens.
+> **Note for Rajiv:** Schedule a 45-minute screen share with Arthur. He should share *his* screen so he keeps control of his account. Walk him through every click below. Do **not** ask him to do this alone — non-technical users get stuck on the IAM and Roles screens.
+>
+> **Order matters.** Do steps 1–7 in sequence in a single sitting. The access key from Step 4 is what Rajiv uses to do the migration; the cross-account role from Step 5 is what he uses for ongoing maintenance after the migration is done.
 
 ### Step 1 — Create the AWS Account (~5 min)
 
@@ -74,23 +76,183 @@ This is the user Rajiv will use to do all the technical work. Arthur will **neve
 12. ✅ Check the box next to **`AdministratorAccess`**
 13. Click **"Next"** → **"Create user"**
 
-### Step 4 — Generate an Access Key for Rajiv (~3 min)
+### Step 4 — Generate an Access Key for `rajiv-admin` (~10 min, READ THIS WHOLE SECTION FIRST)
 
-1. On the IAM Users list, click on **`rajiv-admin`**
-2. Click the **"Security credentials"** tab (NOT "Permissions")
-3. Scroll down to **"Access keys"** section
-4. Click **"Create access key"**
-5. Use case: select **"Command Line Interface (CLI)"**
-6. ✅ Check the confirmation box at the bottom
-7. Click **"Next"**
-8. Description tag: `rajiv-cli-migration` → click **"Create access key"**
-9. **CRITICAL:** Click **"Download .csv file"** — this is the only chance to see the secret key
-10. Send the .csv file to Rajiv via a secure channel:
-    - **Best:** Signal, 1Password shared vault, or Bitwarden Send (expires in 7 days)
-    - **OK:** Encrypted email
-    - **NEVER:** Plain text email, SMS, Slack DM, or Discord
+#### What an "Access Key" actually is
 
-### Step 5 — Provide User Emails (~1 min)
+An IAM **access key** is a two-part credential that lets the AWS CLI and SDKs sign in as the `rajiv-admin` IAM user without using a password. Think of it as a username/password specifically for *programs* (Rajiv's terminal, Amplify CLI, Node scripts).
+
+- **Access Key ID** — looks like `AKIAIOSFODNN7EXAMPLE` (20 characters, starts with `AKIA`). Semi-public; appears in some logs.
+- **Secret Access Key** — looks like `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` (40 random characters). Treat like a password. **AWS shows this exactly once.** If you close the screen without copying it, the secret is gone forever and you have to delete the key and make a new one.
+
+> **Why this is needed even though we're setting up Option A (cross-account role) later:** Rajiv uses this key only as a **bootstrap and break-glass credential** — to perform the initial migration before the cross-account role exists, and as a fallback if Rajiv's own AWS account is ever unavailable. After the role is set up (Step 5), day-to-day work goes through the role, not this key.
+
+#### Where to find the screen (exact path)
+
+Arthur should still be signed in as **root** in the AWS Console.
+
+1. In the top **search bar** (the one that says "Search for services, features, blogs, docs, and more"), type **`IAM`**
+2. Click the result labeled **"IAM"** with the tagline "Manage access to AWS resources"
+3. The IAM dashboard opens. In the **left sidebar**, click **"Users"** (under the "Access management" group)
+4. The Users table appears. Click on the username **`rajiv-admin`** (it's a clickable blue link, not a checkbox)
+5. The user detail page opens with several tabs near the top: **Permissions | Groups | Tags | Security credentials | Access Advisor**
+6. Click the **"Security credentials"** tab
+   - ⚠️ **Do NOT click "Permissions"** — that's where the AdministratorAccess policy lives, not the keys.
+7. Scroll past the **"Console sign-in"** section and the **"Multi-factor authentication (MFA)"** section
+8. You will reach a section titled **"Access keys"**. It will say *"You have no access keys."*
+9. Click the white button **"Create access key"** (top-right of the Access keys section)
+
+#### Walking through the wizard
+
+The wizard has 3 screens.
+
+**Screen 1 — "Access key best practices & alternatives":**
+- AWS lists 6 use cases with radio buttons:
+  - Command Line Interface (CLI)
+  - Local code
+  - Application running on an AWS compute service
+  - Third-party service
+  - Application running outside AWS
+  - Other
+- ✅ Select **"Command Line Interface (CLI)"**
+- A yellow warning box appears recommending IAM Identity Center instead. We're intentionally choosing the simpler path; that's fine for this use case.
+- ✅ Scroll to the bottom and check the box: **"I understand the above recommendation and want to proceed to create an access key."**
+- Click **"Next"**
+
+**Screen 2 — "Set description tag (optional)":**
+- **Description tag value:** `rajiv-cli-bootstrap-2026`
+- Click **"Create access key"**
+
+**Screen 3 — "Retrieve access keys":** ⚠️ **THIS IS THE CRITICAL SCREEN — DO NOT CLOSE IT YET**
+- You'll see two fields:
+  - **Access key:** `AKIA...` (visible)
+  - **Secret access key:** masked by default, with a **"Show"** link next to it
+- Click **"Download .csv file"** (the blue button) — this saves a file named `rajiv-admin_accessKeys.csv` to Arthur's Downloads folder.
+- The .csv has two columns: `Access key ID` and `Secret access key`. Open it once with Numbers/Excel/a text editor to confirm both values are present and not blank.
+- **Only after the .csv is confirmed saved**, click **"Done"**.
+
+> **What to do if the screen is closed too early:** The secret is unrecoverable. Go back to Security credentials → Access keys → click the **"Actions"** dropdown next to the half-broken key → **"Delete"** → confirm. Then start Step 4 over from the beginning. No data lost; just an extra 5 minutes.
+
+#### How Arthur sends the credentials to Rajiv (pick ONE secure channel)
+
+The .csv file is the equivalent of handing over the keys to the entire AWS account. Treat it accordingly.
+
+| Channel | Verdict |
+|---|---|
+| **1Password shared vault** (Arthur invites Rajiv as a guest) | ✅ **Best** — encrypted at rest, audit log, easy to revoke |
+| **Bitwarden Send** with 7-day expiry + view limit of 1 | ✅ Best (free option) |
+| **Signal** message, attach the .csv, then `Disappearing messages: 1 day` | ✅ Good |
+| **AWS-encrypted email** (S/MIME or PGP) | 🟡 OK if both sides have it set up |
+| Slack DM, Discord DM, plain email, SMS, iMessage | ❌ **NEVER** — these all log/back-up plaintext |
+| GitHub gist, Pastebin, Google Doc | ❌ **NEVER** — indexed/cached even after deletion |
+
+After Rajiv confirms receipt and that the key works (he'll run `aws sts get-caller-identity` to verify), Arthur should:
+1. Move the .csv to the Trash on his computer
+2. Empty the Trash
+3. Delete the Bitwarden Send / Signal message / 1Password share
+
+#### How Rajiv stores the key on his machine
+
+Rajiv adds this to `~/.aws/credentials` (create the file if it doesn't exist; permissions must be `600`):
+
+```ini
+[arthur-rajiv-admin]
+aws_access_key_id = AKIA...
+aws_secret_access_key = wJalrXUtnFEMI/...
+```
+
+And to `~/.aws/config`:
+
+```ini
+[profile arthur-rajiv-admin]
+region = us-east-1
+output = json
+```
+
+Verify it works:
+
+```bash
+aws sts get-caller-identity --profile arthur-rajiv-admin
+# Expected output:
+# {
+#   "UserId": "AIDA...",
+#   "Account": "<arthur-account-id>",
+#   "Arn": "arn:aws:iam::<arthur-account-id>:user/rajiv-admin"
+# }
+```
+
+> **Never commit `~/.aws/credentials` to git.** Confirm it's in your global gitignore (`~/.config/git/ignore`) and that no project has it tracked. For extra safety, Rajiv can use [`aws-vault`](https://github.com/99designs/aws-vault) to keep the secret in macOS Keychain instead of a plaintext file.
+
+#### What to do if the access key leaks (or you suspect it leaked)
+
+1. Sign in to Arthur's AWS Console (root or `rajiv-admin` if still working)
+2. IAM → Users → `rajiv-admin` → **Security credentials** tab → **Access keys** section
+3. Find the leaked key by its **Access key ID** → **"Actions"** → **"Deactivate"** (immediately stops it working)
+4. Then **"Actions"** → **"Delete"** (cleanup)
+5. Create a fresh key (repeat Step 4 of this doc)
+6. Review CloudTrail (search bar → **CloudTrail** → Event history) for any unfamiliar API calls in the last 24h
+
+### Step 5 — Create the Cross-Account Maintainer Role for Rajiv (~5 min)
+
+This is what lets Rajiv keep maintaining the app long-term **without holding Arthur's credentials**. Rajiv's own AWS account (`568438992037`) is granted permission to "assume" a role inside Arthur's account. Arthur can revoke this in one click if Rajiv ever stops being his developer.
+
+> **Why do this in addition to the access key in Step 4?** The access key is for the initial migration (because the role doesn't exist yet) and as an emergency fallback. The role is the durable, day-to-day path — and it's much safer because secrets never leave Rajiv's own AWS account.
+
+1. Still signed in to Arthur's account (root or `rajiv-admin` both work)
+2. Search bar → type **`IAM`** → click **"IAM"**
+3. Left sidebar → **"Roles"** (under "Access management") → click the orange **"Create role"** button (top-right)
+4. **Step 1 of the wizard — "Select trusted entity":**
+   - **Trusted entity type:** select the **"AWS account"** card (NOT "AWS service")
+   - A new section appears below: **"An AWS account"**
+   - Choose the radio button **"Another AWS account"**
+   - **Account ID:** enter Rajiv's account number → `568438992037`
+   - **Options:**
+     - ✅ Check **"Require external ID (Best practice when a third party will assume this role)"**
+     - In the **External ID** field that appears, type a shared secret string. Suggested: `oath-tracker-2026-mig` (any random string both sides agree on; this prevents the "confused deputy" attack)
+     - ❌ Leave **"Require MFA"** unchecked (MFA can be added later for sensitive operations)
+   - Click **"Next"**
+5. **Step 2 — "Add permissions":**
+   - In the search box, type `AdministratorAccess`
+   - ✅ Check the box next to the policy named exactly **`AdministratorAccess`** (AWS managed)
+   - Click **"Next"**
+6. **Step 3 — "Name, review, and create":**
+   - **Role name:** `OATHTrackerMaintainer`
+   - **Description:** `Long-term role assumed by Rajiv (account 568438992037) to maintain the OATH Summons Tracker. Revoke by deleting this role.`
+   - Scroll down, review the trust policy summary (it should reference `568438992037` and the external ID)
+   - Click **"Create role"**
+7. After creation, you'll land back on the Roles list. Click **`OATHTrackerMaintainer`** to open it.
+8. Copy the **ARN** at the top — it looks like `arn:aws:iam::<arthur-account-id>:role/OATHTrackerMaintainer`
+9. Send the ARN + the external ID string to Rajiv via the same secure channel used for the access key.
+
+**What Rajiv adds to his `~/.aws/config` to use the role:**
+
+```ini
+[profile arthur-oath]
+role_arn = arn:aws:iam::<arthur-account-id>:role/OATHTrackerMaintainer
+external_id = oath-tracker-2026-mig
+source_profile = default          # uses Rajiv's own AWS account credentials to assume the role
+region = us-east-1
+```
+
+(If Rajiv's own AWS account is configured under a non-default profile, replace `default` with that profile's name.)
+
+Verify the role works:
+
+```bash
+aws sts get-caller-identity --profile arthur-oath
+# Expected:
+# "Arn": "arn:aws:sts::<arthur-account-id>:assumed-role/OATHTrackerMaintainer/botocore-session-..."
+```
+
+From now on, every maintenance command (`amplify push`, `aws lambda update-function-code`, etc.) runs with `--profile arthur-oath`. **No further credential handoffs are needed from Arthur.**
+
+**How Arthur revokes Rajiv's access (one click, anytime):**
+
+Sign in → IAM → Roles → `OATHTrackerMaintainer` → **"Delete"** → type the role name to confirm. Done.
+
+> **Fallback (Option B):** If for some reason the cross-account role can't be created (e.g., Arthur's account has SCPs that block `iam:AssumeRole`), Rajiv can keep using the `rajiv-admin` access key from Step 4 indefinitely. In that case: rotate the key every 90 days (IAM → Users → `rajiv-admin` → Security credentials → Create new key → delete old). Set a calendar reminder.
+
+### Step 6 — Provide User Emails (~1 min)
 
 Arthur sends Rajiv (in the same secure channel) the email addresses he wants for the 3 app users:
 
@@ -100,63 +262,7 @@ Arthur sends Rajiv (in the same secure channel) the email addresses he wants for
 
 These will be used to recreate their Cognito accounts. Each user will receive a "temporary password" email from AWS and must reset it on first login.
 
----
-
-## Granting Rajiv Long-Term Developer Access (Important — do this before the screen share ends)
-
-Rajiv plans to keep maintaining the app (new features, bug fixes, dependency updates, redeploys). Without a durable access path, every future change would require Arthur to regenerate credentials — friction Arthur should not have to deal with.
-
-There are two ways to handle this. **Option A is strongly recommended.**
-
-### Option A (Recommended): Cross-Account IAM Role
-
-Rajiv keeps using his own AWS account (`568438992037`). Arthur's account has a role that Rajiv's account is allowed to "assume." Rajiv never holds Arthur's credentials, and Arthur can revoke access in one click if he ever needs to.
-
-**What Arthur does (one-time, ~5 min, with Rajiv on screen share):**
-
-1. Sign in to Arthur's account as root or as `rajiv-admin`
-2. Search bar → **`IAM`** → click **"IAM"**
-3. Left sidebar → **"Roles"** → click **"Create role"** (top-right)
-4. **Trusted entity type:** select **"AWS account"**
-5. Choose **"Another AWS account"**
-6. **Account ID:** enter Rajiv's AWS account number: `568438992037`
-7. ✅ Check **"Require external ID"** → set external ID to a random string Arthur and Rajiv agree on (e.g. `oath-tracker-2026`). This prevents the "confused deputy" attack.
-8. ❌ Leave **"Require MFA"** unchecked for now (can be enabled later for sensitive ops)
-9. Click **"Next"**
-10. Search for `AdministratorAccess` → ✅ check it → **"Next"**
-11. **Role name:** `OATHTrackerMaintainer`
-12. **Description:** `Long-term role assumed by Rajiv to maintain the OATH Summons Tracker.`
-13. Click **"Create role"**
-14. Open the new role → copy the **Role ARN** (looks like `arn:aws:iam::<arthur-account-id>:role/OATHTrackerMaintainer`) → send it to Rajiv
-
-**What Rajiv does on his side (one-time):**
-
-Add this profile to `~/.aws/config`:
-
-```ini
-[profile arthur-oath]
-role_arn = arn:aws:iam::<arthur-account-id>:role/OATHTrackerMaintainer
-external_id = oath-tracker-2026
-source_profile = default
-region = us-east-1
-```
-
-From then on, any maintenance command runs with `--profile arthur-oath` — no credential handoff needed.
-
-**How Arthur revokes access (if Rajiv stops working with him):**
-
-- IAM → Roles → `OATHTrackerMaintainer` → **"Delete"**. Done. One click.
-
-### Option B (Fallback): Permanent IAM User for Rajiv
-
-This is the `rajiv-admin` user from Step 3 above. It works, but:
-- Access keys live on Rajiv's machine and need rotation every 90 days
-- If Rajiv's laptop is compromised, Arthur's account is exposed until the key is revoked
-- Recommended only as a backup if Option A can't be set up
-
-If using Option B, set a calendar reminder to rotate the access key every 90 days (IAM → Users → `rajiv-admin` → Security credentials → Create new access key → delete old one).
-
-### Step 6 — Set Up Billing Alerts (Arthur's protection, ~3 min)
+### Step 7 — Set Up Billing Alerts (Arthur's protection, ~3 min)
 
 Arthur is now paying the AWS bill. Set a billing alarm so a misconfigured Lambda doesn't surprise him with a $500 charge.
 
@@ -175,7 +281,7 @@ Arthur is now paying the AWS bill. Set a billing alarm so a misconfigured Lambda
 
 ## Migration Steps (Rajiv's Side)
 
-> All commands below assume Rajiv has set up the `arthur-oath` profile (Option A) or is exporting Arthur's `rajiv-admin` access key (Option B). Run from the project root.
+> Commands below use `--profile arthur-oath` (the cross-account role from Step 5). For the very first migration run, before the role is fully tested, Rajiv can substitute `--profile arthur-rajiv-admin` (the access-key profile from Step 4) — both have AdministratorAccess, so either works. Run all commands from the project root.
 
 ### Phase 1 — Inventory & Backup (Rajiv's account)
 
