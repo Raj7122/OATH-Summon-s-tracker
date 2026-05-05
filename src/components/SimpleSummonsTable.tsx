@@ -385,6 +385,12 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
       headerName: 'Violation Date',
       width: isMobile ? 100 : 130,
       sortable: true,
+      // valueFormatter drives CSV export (MM/DD/YYYY to match Client page export)
+      valueFormatter: (params: { value: string | null | undefined }) => {
+        if (!params.value) return '';
+        const parsed = dayjs.utc(params.value);
+        return parsed.isValid() ? parsed.format('MM/DD/YYYY') : '';
+      },
       renderCell: renderViolationDateCell,
     },
     {
@@ -392,6 +398,12 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
       headerName: 'Hearing Date',
       width: isMobile ? 100 : 130,
       sortable: true,
+      // valueFormatter drives CSV export (MM/DD/YYYY to match Client page export)
+      valueFormatter: (params: { value: string | null | undefined }) => {
+        if (!params.value) return '';
+        const parsed = dayjs.utc(params.value);
+        return parsed.isValid() ? parsed.format('MM/DD/YYYY') : '';
+      },
       renderCell: (params: GridRenderCellParams) => {
         const row = params.row as Summons;
         const value = row.hearing_date;
