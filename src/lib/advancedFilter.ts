@@ -33,12 +33,29 @@ export function isAdvancedFilterActive(criteria: AdvancedFilterCriteria): boolea
 }
 
 /**
- * Build the deduplicated, sorted list of status values present in the data.
- * Driving the dropdown options from the actual data avoids hardcoding a list
- * that drifts as the NYC API introduces new status strings.
+ * Canonical NYC OATH status categories, always shown in the dropdown so
+ * top-level filters like DISMISSED are pickable even if the underlying data
+ * stores them as compound values (e.g. "HEARING COMPLETED - DISMISSED").
+ * Mirrors the labels used in CalendarDashboard's week-mode status dropdown.
+ */
+export const CANONICAL_STATUSES: string[] = [
+  'SCHEDULED',
+  'RESCHEDULED',
+  'HEARING COMPLETED',
+  'DISMISSED',
+  'PAID IN FULL',
+  'DEFAULT',
+  'DOCKETED',
+];
+
+/**
+ * Sorted, deduplicated list of canonical statuses union'd with whatever
+ * distinct values the loaded data contains. Canonical entries are always
+ * present so the user can filter for DISMISSED / HEARING COMPLETED / etc.
+ * even when the underlying data only has compound variants.
  */
 export function getStatusOptions(summonses: Summons[]): string[] {
-  const set = new Set<string>();
+  const set = new Set<string>(CANONICAL_STATUSES);
   for (const s of summonses) {
     const v = (s.status || '').trim();
     if (v) set.add(v);
@@ -61,8 +78,13 @@ export function applyAdvancedFilters(
 ): Summons[] {
   if (!isAdvancedFilterActive(criteria)) return summonses;
 
-  const statusSet =
-    criteria.statuses.length > 0 ? new Set(criteria.statuses) : null;
+  // Status match is case-insensitive substring so picking "DISMISSED" also
+  // captures compound values like "HEARING COMPLETED - DISMISSED". Mirrors
+  // the existing week-mode status filter.
+  const statusNeedles =
+    criteria.statuses.length > 0
+      ? criteria.statuses.map((v) => v.toUpperCase())
+      : null;
 
   const fromMs = criteria.dateFrom
     ? dayjs.utc(dayjs(criteria.dateFrom).format('YYYY-MM-DD')).startOf('day').valueOf()
@@ -72,8 +94,11 @@ export function applyAdvancedFilters(
     : null;
 
   return summonses.filter((s) => {
-    if (statusSet && !statusSet.has((s.status || '').trim())) {
-      return false;
+    if (statusNeedles) {
+      const hay = (s.status || '').toUpperCase();
+      if (!statusNeedles.some((needle) => hay.includes(needle))) {
+        return false;
+      }
     }
 
     if (fromMs !== null || toMs !== null) {
