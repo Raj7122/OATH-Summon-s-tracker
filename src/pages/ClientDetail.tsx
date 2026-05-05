@@ -60,6 +60,12 @@ import { applyClientPlateFilter } from '../lib/plateFilter';
 import SummonsDetailModal from '../components/SummonsDetailModal';
 import ExportConfigurationModal from '../components/ExportConfigurationModal';
 import ClientInvoicesDialog from '../components/ClientInvoicesDialog';
+import SummonsAdvancedFilters from '../components/SummonsAdvancedFilters';
+import {
+  AdvancedFilterCriteria,
+  EMPTY_ADVANCED_FILTERS,
+  applyAdvancedFilters,
+} from '../lib/advancedFilter';
 import { useCSVExport } from '../hooks/useCSVExport';
 import { ExportConfig } from '../lib/csvExport';
 import { isInvoiced as isInvoicedLocally, getInvoiceDate as getInvoiceDateLocally, unmarkAsInvoiced } from '../utils/invoiceTracking';
@@ -133,6 +139,10 @@ const ClientDetail: React.FC = () => {
   const [sortModel, setSortModel] = useState<GridSortModel>([
     { field: 'hearing_date', sort: 'desc' },
   ]);
+
+  // Advanced Filters - multi-select Status + Hearing Date range.
+  // Applied on top of the Active Era (2022+) cutoff below.
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilterCriteria>(EMPTY_ADVANCED_FILTERS);
 
   // Modal State
   const [selectedSummons, setSelectedSummons] = useState<Summons | null>(null);
@@ -378,12 +388,23 @@ const ClientDetail: React.FC = () => {
   /**
    * Filter summonses to Active Era (2022+) only
    */
-  const filteredSummonses = useMemo(() => {
+  const activeEraSummonses = useMemo(() => {
     return summonses.filter((s) => {
       if (!s.hearing_date) return true; // Include records without hearing date
       return new Date(s.hearing_date) >= new Date(PRE_2022_CUTOFF);
     });
   }, [summonses]);
+
+  /**
+   * Apply advanced filters (multi-status + hearing date range) on top of the
+   * Active Era cutoff. The DataGrid renders this list, and the CSV export
+   * threads `advancedFilters` through `useCSVExport` so reports honor the
+   * same filter state.
+   */
+  const filteredSummonses = useMemo(
+    () => applyAdvancedFilters(activeEraSummonses, advancedFilters),
+    [activeEraSummonses, advancedFilters]
+  );
 
   /**
    * Calculate header stats
@@ -851,8 +872,10 @@ const ClientDetail: React.FC = () => {
    */
   const handleExport = useCallback(async (config: ExportConfig) => {
     if (!client) return;
-    await exportClientSummonses(client, config);
-  }, [client, exportClientSummonses]);
+    // Thread the in-page advanced filter state through so the CSV honors
+    // the same status / date-range selection the user sees in the grid.
+    await exportClientSummonses(client, config, advancedFilters);
+  }, [client, exportClientSummonses, advancedFilters]);
 
   /**
    * Handle export modal close
@@ -1149,6 +1172,17 @@ const ClientDetail: React.FC = () => {
 
       {/* Loading indicator */}
       {loadingMore && <LinearProgress sx={{ mb: 1, borderRadius: 1 }} />}
+
+      {/* Advanced Filters - multi-select Status + Hearing Date range.
+          Applies on top of the Active Era (2022+) filter and is also
+          honored by the CSV export below. */}
+      <SummonsAdvancedFilters
+        summonses={activeEraSummonses}
+        value={advancedFilters}
+        onChange={setAdvancedFilters}
+        totalCount={activeEraSummonses.length}
+        filteredCount={filteredSummonses.length}
+      />
 
       {/* Master History DataGrid - Enterprise Style */}
       <Paper

@@ -42,6 +42,13 @@ import { Client } from '../types/summons';
 import { applyPlateFilters } from '../lib/plateFilter';
 import SummonsTable from '../components/SummonsTable';
 import DashboardSummary from '../components/DashboardSummary';
+import SummonsAdvancedFilters from '../components/SummonsAdvancedFilters';
+import {
+  AdvancedFilterCriteria,
+  EMPTY_ADVANCED_FILTERS,
+  applyAdvancedFilters,
+  isAdvancedFilterActive,
+} from '../lib/advancedFilter';
 
 const client = generateClient();
 
@@ -224,6 +231,7 @@ const Dashboard = () => {
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>(null);
   const [auditTrailOpen, setAuditTrailOpen] = useState(false);
   const [auditTrailFilter, setAuditTrailFilter] = useState<AuditTrailFilterType>(null);
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilterCriteria>(EMPTY_ADVANCED_FILTERS);
 
   useEffect(() => {
     loadSummonses();
@@ -497,7 +505,9 @@ const Dashboard = () => {
     return summonses;
   };
 
-  const filteredSummonses = getFilteredSummonses();
+  const quickFilteredSummonses = getFilteredSummonses();
+  const filteredSummonses = applyAdvancedFilters(quickFilteredSummonses, advancedFilters);
+  const advancedActive = isAdvancedFilterActive(advancedFilters);
 
   return (
     <Box>
@@ -585,13 +595,14 @@ const Dashboard = () => {
             Audit Trail
           </Button>
 
-          {(activeFilter || activityFilter) && (
+          {(activeFilter || activityFilter || advancedActive) && (
             <Button
               variant="outlined"
               startIcon={<FilterListOffIcon />}
               onClick={() => {
                 setActiveFilter(null);
                 setActivityFilter(null);
+                setAdvancedFilters(EMPTY_ADVANCED_FILTERS);
               }}
               color="secondary"
               size="small"
@@ -621,6 +632,16 @@ const Dashboard = () => {
             summonses={summonses}
             activeFilter={activeFilter}
             onFilterClick={handleFilterClick}
+          />
+
+          {/* Advanced Filters - multi-select Status + Hearing Date range.
+              Composes (AND) with the quick-filter cards above. */}
+          <SummonsAdvancedFilters
+            summonses={summonses}
+            value={advancedFilters}
+            onChange={setAdvancedFilters}
+            totalCount={quickFilteredSummonses.length}
+            filteredCount={filteredSummonses.length}
           />
 
           {/* DataGrid Section - Shows filtered results when a deadline card is clicked */}

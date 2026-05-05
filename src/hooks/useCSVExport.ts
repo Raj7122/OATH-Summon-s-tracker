@@ -24,6 +24,11 @@ import {
   downloadCSV,
 } from '../lib/csvExport';
 import { applyClientPlateFilter } from '../lib/plateFilter';
+import {
+  AdvancedFilterCriteria,
+  applyAdvancedFilters,
+  isAdvancedFilterActive,
+} from '../lib/advancedFilter';
 
 const apiClient = generateClient();
 
@@ -53,7 +58,8 @@ export interface UseCSVExportResult {
   error: string | null;
   exportClientSummonses: (
     client: Client,
-    config: ExportConfig
+    config: ExportConfig,
+    advancedFilters?: AdvancedFilterCriteria
   ) => Promise<void>;
   exportAllSummonses: (config: ExportConfig) => Promise<void>;
   resetExport: () => void;
@@ -171,7 +177,8 @@ export function useCSVExport(): UseCSVExportResult {
    */
   const exportClientSummonses = useCallback(async (
     client: Client,
-    config: ExportConfig
+    config: ExportConfig,
+    advancedFilters?: AdvancedFilterCriteria
   ): Promise<void> => {
     setError(null);
 
@@ -192,8 +199,15 @@ export function useCSVExport(): UseCSVExportResult {
       // Phase 2b: Apply per-client plate filter
       clientSummonses = applyClientPlateFilter(clientSummonses, client);
 
-      // Phase 3: Apply date range filter
+      // Phase 3: Apply Active Era cutoff
       clientSummonses = filterByDateRange(clientSummonses, config.includeHistorical);
+
+      // Phase 3b: Apply caller-supplied advanced filters (status multi-select
+      // and hearing date range). Lets the report mirror what the user sees in
+      // the grid filter bar.
+      if (advancedFilters && isAdvancedFilterActive(advancedFilters)) {
+        clientSummonses = applyAdvancedFilters(clientSummonses, advancedFilters);
+      }
 
       setProgress({
         phase: 'processing',

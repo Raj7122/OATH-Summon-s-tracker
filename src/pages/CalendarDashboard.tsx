@@ -80,6 +80,12 @@ import { generateClient } from 'aws-amplify/api';
 // Components
 import CalendarCommandCenter from '../components/CalendarCommandCenter';
 import SimpleSummonsTable from '../components/SimpleSummonsTable';
+import SummonsAdvancedFilters from '../components/SummonsAdvancedFilters';
+import {
+  AdvancedFilterCriteria,
+  EMPTY_ADVANCED_FILTERS,
+  applyAdvancedFilters,
+} from '../lib/advancedFilter';
 
 // GraphQL
 import { listSummons } from '../graphql/queries';
@@ -254,6 +260,10 @@ const CalendarDashboard: React.FC = () => {
   // Horizon System filter for header chip clicks (Critical/Approaching/Future)
   // Also supports 'new' for NEW badge filter and 'has_evidence' for evidence filter
   const [horizonFilter, setHorizonFilter] = useState<'critical' | 'approaching' | 'future' | 'new' | 'has_evidence' | null>(null);
+
+  // Advanced report filters - multi-select Status + Hearing Date range.
+  // Composes (AND) with all the other filters above.
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilterCriteria>(EMPTY_ADVANCED_FILTERS);
 
   // OVERRIDE C: Archive toggle removed from main dashboard.
   // The main dashboard is for active triage ONLY - always show 2022+ records.
@@ -747,6 +757,24 @@ const CalendarDashboard: React.FC = () => {
       (s.status || '').toUpperCase().includes(weekStatusFilter.toUpperCase())
     );
   }, [filteredByDate, selectedWeek, weekStatusFilter]);
+
+  /**
+   * Pre-advanced array — the rows that would be in the grid before the
+   * Advanced Filters bar (Status multi-select + Hearing Date range) is applied.
+   */
+  const preAdvancedRows = useMemo(
+    () => (selectedWeek ? weeklyFilteredSummonses : filteredByDate),
+    [selectedWeek, weeklyFilteredSummonses, filteredByDate]
+  );
+
+  /**
+   * Final array passed to the grid (and to the CSV export the GridToolbar
+   * exposes). Advanced Filters compose (AND) on top of every other filter.
+   */
+  const advancedFilteredRows = useMemo(
+    () => applyAdvancedFilters(preAdvancedRows, advancedFilters),
+    [preAdvancedRows, advancedFilters]
+  );
 
   /**
    * Export the currently displayed week data as CSV.
@@ -1495,9 +1523,25 @@ const CalendarDashboard: React.FC = () => {
                   </Alert>
                 )}
 
+                {/* Advanced Report Filters - multi-select Status + Hearing
+                    Date range. Sits between the day/week banners and the
+                    table; composes (AND) with every other filter. The
+                    GridToolbar's CSV export inside SimpleSummonsTable
+                    automatically reflects this filter because the rows passed
+                    to the grid are already narrowed. */}
+                <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+                  <SummonsAdvancedFilters
+                    summonses={summonses}
+                    value={advancedFilters}
+                    onChange={setAdvancedFilters}
+                    totalCount={preAdvancedRows.length}
+                    filteredCount={advancedFilteredRows.length}
+                  />
+                </Box>
+
                 {/* Summons Table with Attached Filters and Search */}
                 <SimpleSummonsTable
-                  summonses={selectedWeek ? weeklyFilteredSummonses : filteredByDate}
+                  summonses={advancedFilteredRows}
                   onUpdate={handleSummonsUpdate}
                   activeFilter={activityFilter}
                   onFilterChange={handleFilterChange}
