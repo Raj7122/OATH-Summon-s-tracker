@@ -30,6 +30,11 @@ export interface Invoice {
   extra_line_items?: string | null;  // AWSJSON — array of InvoiceExtraLineItem
   highlighted_sections?: string | null;  // AWSJSON — { payment?, review?, overdue?, customMiddle?, additional? }
   custom_middle_text?: string | null;
+  payment_instructions?: string | null;
+  review_text?: string | null;
+  overdue_text?: string | null;
+  additional_notes?: string | null;
+  show_overdue?: boolean | null;
   items?: {
     items: InvoiceSummonsItem[];
   };

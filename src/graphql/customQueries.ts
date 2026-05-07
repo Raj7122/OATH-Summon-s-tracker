@@ -158,6 +158,11 @@ export const createInvoiceRecord = /* GraphQL */ `
       extra_line_items
       highlighted_sections
       custom_middle_text
+      payment_instructions
+      review_text
+      overdue_text
+      additional_notes
+      show_overdue
     }
   }
 `;
@@ -190,6 +195,11 @@ export const updateInvoiceRecord = /* GraphQL */ `
       extra_line_items
       highlighted_sections
       custom_middle_text
+      payment_instructions
+      review_text
+      overdue_text
+      additional_notes
+      show_overdue
     }
   }
 `;
@@ -313,6 +323,11 @@ export const getInvoiceWithItems = /* GraphQL */ `
       extra_line_items
       highlighted_sections
       custom_middle_text
+      payment_instructions
+      review_text
+      overdue_text
+      additional_notes
+      show_overdue
       items {
         items {
           id

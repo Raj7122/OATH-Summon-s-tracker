@@ -334,6 +334,11 @@ export const getInvoice = /* GraphQL */ `
       extra_line_items
       highlighted_sections
       custom_middle_text
+      payment_instructions
+      review_text
+      overdue_text
+      additional_notes
+      show_overdue
       items {
         nextToken
         __typename
@@ -371,6 +376,11 @@ export const listInvoices = /* GraphQL */ `
         extra_line_items
         highlighted_sections
         custom_middle_text
+        payment_instructions
+        review_text
+        overdue_text
+        additional_notes
+        show_overdue
         createdAt
         updatedAt
         __typename
@@ -410,6 +420,11 @@ export const getInvoiceSummons = /* GraphQL */ `
         extra_line_items
         highlighted_sections
         custom_middle_text
+        payment_instructions
+        review_text
+        overdue_text
+        additional_notes
+        show_overdue
         createdAt
         updatedAt
         __typename
@@ -745,6 +760,11 @@ export const invoicesByClientID = /* GraphQL */ `
         extra_line_items
         highlighted_sections
         custom_middle_text
+        payment_instructions
+        review_text
+        overdue_text
+        additional_notes
+        show_overdue
         createdAt
         updatedAt
         __typename

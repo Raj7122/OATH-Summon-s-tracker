@@ -591,6 +591,15 @@ const InvoiceBuilder = () => {
         } else {
           setHighlightedSections({});
         }
+
+        // Restore editable footer text. Legacy invoices saved before these
+        // fields were persisted have null on the record — fall back to the
+        // hardcoded defaults so they render identically to the pre-fix output.
+        setPaymentInstructions(invoice.payment_instructions ?? FOOTER_TEXT.payment);
+        setReviewText(invoice.review_text ?? FOOTER_TEXT.review);
+        setOverdueText(invoice.overdue_text ?? FOOTER_TEXT.overdue);
+        setAdditionalNotes(invoice.additional_notes ?? '');
+        setShowOverdue(invoice.show_overdue ?? true);
       } catch (err) {
         console.error('Failed to load invoice for editing:', err);
         if (!cancelled) setEditLoadError('Failed to load invoice. Please try again.');
@@ -713,6 +722,11 @@ const InvoiceBuilder = () => {
             extra_line_items: extras.length > 0 ? JSON.stringify(extras) : null,
             custom_middle_text: customMiddleText.trim() ? customMiddleText : null,
             highlighted_sections: hasAnyHighlight ? JSON.stringify(highlightedSections) : null,
+            payment_instructions: paymentInstructions,
+            review_text: reviewText,
+            overdue_text: overdueText,
+            additional_notes: additionalNotes.trim() ? additionalNotes : null,
+            show_overdue: showOverdue,
           },
         },
       });
@@ -1073,6 +1087,11 @@ const InvoiceBuilder = () => {
               extra_line_items: editExtras.length > 0 ? JSON.stringify(editExtras) : null,
               custom_middle_text: customMiddleText.trim() ? customMiddleText : null,
               highlighted_sections: hasAnyHighlight ? JSON.stringify(highlightedSections) : null,
+              payment_instructions: paymentInstructions,
+              review_text: reviewText,
+              overdue_text: overdueText,
+              additional_notes: additionalNotes.trim() ? additionalNotes : null,
+              show_overdue: showOverdue,
             },
           },
         });

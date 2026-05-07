@@ -515,6 +515,11 @@ export const createInvoice = /* GraphQL */ `
       extra_line_items
       highlighted_sections
       custom_middle_text
+      payment_instructions
+      review_text
+      overdue_text
+      additional_notes
+      show_overdue
       items {
         nextToken
         __typename
@@ -550,6 +555,11 @@ export const updateInvoice = /* GraphQL */ `
       extra_line_items
       highlighted_sections
       custom_middle_text
+      payment_instructions
+      review_text
+      overdue_text
+      additional_notes
+      show_overdue
       items {
         nextToken
         __typename
@@ -585,6 +595,11 @@ export const deleteInvoice = /* GraphQL */ `
       extra_line_items
       highlighted_sections
       custom_middle_text
+      payment_instructions
+      review_text
+      overdue_text
+      additional_notes
+      show_overdue
       items {
         nextToken
         __typename
@@ -628,6 +643,11 @@ export const createInvoiceSummons = /* GraphQL */ `
         extra_line_items
         highlighted_sections
         custom_middle_text
+        payment_instructions
+        review_text
+        overdue_text
+        additional_notes
+        show_overdue
         createdAt
         updatedAt
         __typename
@@ -671,6 +691,11 @@ export const updateInvoiceSummons = /* GraphQL */ `
         extra_line_items
         highlighted_sections
         custom_middle_text
+        payment_instructions
+        review_text
+        overdue_text
+        additional_notes
+        show_overdue
         createdAt
         updatedAt
         __typename
@@ -714,6 +739,11 @@ export const deleteInvoiceSummons = /* GraphQL */ `
         extra_line_items
         highlighted_sections
         custom_middle_text
+        payment_instructions
+        review_text
+        overdue_text
+        additional_notes
+        show_overdue
         createdAt
         updatedAt
         __typename

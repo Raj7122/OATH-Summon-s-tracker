@@ -24,8 +24,15 @@ vi.mock('aws-amplify/api', () => ({
 // ---------------------------------------------------------------------------
 // Mock invoice generator to avoid real PDF/DOCX generation
 // ---------------------------------------------------------------------------
-const mockGeneratePDF = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
-const mockGenerateDOCX = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+// generatePDF / generateDOCX must resolve with { blob, filename } — the caller
+// destructures both fields immediately. Returning undefined throws and aborts
+// the rest of the generate flow (mutations, success dialog, etc.).
+const mockGeneratePDF = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ blob: new Blob(['pdf']), filename: 'test.pdf' })
+);
+const mockGenerateDOCX = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ blob: new Blob(['docx']), filename: 'test.docx' })
+);
 
 vi.mock('../src/utils/invoiceGenerator', () => ({
   generatePDF: mockGeneratePDF,
@@ -402,6 +409,18 @@ describe('InvoiceBuilder Integration', () => {
       expect(input.payment_status).toBe('unpaid');
       expect(input.item_count).toBe(1);
       expect(input.total_legal_fees).toBe(250);
+
+      // Bug 2 fix: editable footer fields must round-trip to the DB. They
+      // default to FOOTER_TEXT.* values but must be present on every create.
+      expect(typeof input.payment_instructions).toBe('string');
+      expect(input.payment_instructions.length).toBeGreaterThan(0);
+      expect(typeof input.review_text).toBe('string');
+      expect(input.review_text.length).toBeGreaterThan(0);
+      expect(typeof input.overdue_text).toBe('string');
+      expect(input.overdue_text.length).toBeGreaterThan(0);
+      expect(input.show_overdue).toBe(true);
+      // additional_notes defaults to empty string -> persisted as null
+      expect(input.additional_notes).toBeNull();
     });
   });
 

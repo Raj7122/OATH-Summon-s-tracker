@@ -71,9 +71,31 @@ export const sumExtrasLegalFees = (extras: InvoiceExtraLineItem[] | undefined): 
 const HIGHLIGHT_RGB: [number, number, number] = [255, 245, 157];
 const HIGHLIGHT_HEX = 'FFF59D';
 
-// Draw text with an optional yellow highlight box behind it (jsPDF).
-// jsPDF's text() draws at the baseline; we position the rect slightly above
-// the baseline (~ascent for size 10) and size it to cover all wrapped lines.
+// Top margin used when paginating footer paragraphs onto a fresh page.
+const FOOTER_PAGE_TOP = 20;
+// Bottom keep-out: footer paragraphs that would draw past (pageHeight - this)
+// get pushed to the next page instead of being clipped.
+const FOOTER_BOTTOM_MARGIN = 20;
+
+// If a block of `blockHeight` mm would overflow the current page, start a new
+// page and reset the cursor. Returns the (possibly updated) y-position.
+const ensureRoomFor = (
+  doc: jsPDF,
+  yPos: number,
+  blockHeight: number,
+  pageHeight: number,
+): number => {
+  if (yPos + blockHeight > pageHeight - FOOTER_BOTTOM_MARGIN) {
+    doc.addPage();
+    return FOOTER_PAGE_TOP;
+  }
+  return yPos;
+};
+
+// Draw a footer paragraph with optional yellow highlight, paginating to a new
+// page if the whole block won't fit on the current page. jsPDF's text() draws
+// at the baseline, so the highlight rect is placed ~3.5mm above to cover the
+// ascenders of all wrapped lines.
 const drawFooterParagraph = (
   doc: jsPDF,
   text: string,
@@ -81,15 +103,18 @@ const drawFooterParagraph = (
   y: number,
   width: number,
   highlight: boolean,
+  pageHeight: number,
   lineHeight = 5,
-): number => {
+): { y: number; used: number } => {
   const lines = doc.splitTextToSize(text, width);
+  const blockHeight = lines.length * lineHeight + (highlight ? 1 : 0);
+  const yStart = ensureRoomFor(doc, y, blockHeight, pageHeight);
   if (highlight) {
     doc.setFillColor(...HIGHLIGHT_RGB);
-    doc.rect(x - 1, y - 3.5, width + 2, lines.length * lineHeight + 1, 'F');
+    doc.rect(x - 1, yStart - 3.5, width + 2, lines.length * lineHeight + 1, 'F');
   }
-  doc.text(lines, x, y);
-  return lines.length * lineHeight;
+  doc.text(lines, x, yStart);
+  return { y: yStart, used: lines.length * lineHeight };
 };
 
 // Build the docx shading config for a highlighted paragraph or cell.
@@ -110,6 +135,7 @@ export const generatePDF = async (
 ): Promise<{ blob: Blob; filename: string }> => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 20;
   let yPos = 20;
 
@@ -318,23 +344,31 @@ export const generatePDF = async (
   const textWidth = pageWidth - 2 * margin;
   const hl = options.highlightedSections ?? {};
 
+  // Each footer paragraph is treated as an atomic block: if it doesn't fit on
+  // the current page, the whole block moves to a new page (no mid-paragraph
+  // splits). drawFooterParagraph handles its own pagination via ensureRoomFor.
+
   // 1. Payment Instructions (editable, conditional to avoid gap when empty)
   if (options.paymentInstructions.trim()) {
-    const used = drawFooterParagraph(doc, options.paymentInstructions, margin, yPos, textWidth, !!hl.payment);
-    yPos += used + 5;
+    const r = drawFooterParagraph(doc, options.paymentInstructions, margin, yPos, textWidth, !!hl.payment, pageHeight);
+    yPos = r.y + r.used + 5;
   }
 
   // 2. Review Text (editable, conditional to avoid gap when empty)
   if (options.reviewText.trim()) {
-    const used = drawFooterParagraph(doc, options.reviewText, margin, yPos, textWidth, !!hl.review);
-    yPos += used + 10;
+    const r = drawFooterParagraph(doc, options.reviewText, margin, yPos, textWidth, !!hl.review, pageHeight);
+    yPos = r.y + r.used + 10;
   }
 
-  // 3. Overdue Section (toggleable) — highlight wraps both the text and the CityPay link.
+  // 3. Overdue Section (toggleable). The text and the CityPay link must stay
+  // on the same page so the highlight rect (when enabled) wraps both as one
+  // continuous block. We measure text + link together, page-break the whole
+  // thing, then draw.
   if (options.showOverdue) {
     const overdueLines = doc.splitTextToSize(options.overdueText, textWidth);
     const linkLineHeight = 5;
     const blockHeight = overdueLines.length * 5 + linkLineHeight + 1;
+    yPos = ensureRoomFor(doc, yPos, blockHeight + 5, pageHeight);
     if (hl.overdue) {
       doc.setFillColor(...HIGHLIGHT_RGB);
       doc.rect(margin - 1, yPos - 3.5, textWidth + 2, blockHeight, 'F');
@@ -352,22 +386,31 @@ export const generatePDF = async (
   // 4. Custom middle paragraph (editable, conditional, optional highlight)
   const customMiddle = options.customMiddleText?.trim() ?? '';
   if (customMiddle) {
-    const used = drawFooterParagraph(doc, customMiddle, margin, yPos, textWidth, !!hl.customMiddle);
-    yPos += used + 8;
+    const r = drawFooterParagraph(doc, customMiddle, margin, yPos, textWidth, !!hl.customMiddle, pageHeight);
+    yPos = r.y + r.used + 8;
   }
 
-  // 5. Questions Text (hardcoded)
-  doc.text(FOOTER_TEXT.questions, margin, yPos);
-  yPos += 8;
+  // 5. Questions Text (hardcoded). Single line, but wrap-measure for safety
+  // and page-break check before drawing.
+  {
+    const lines = doc.splitTextToSize(FOOTER_TEXT.questions, textWidth);
+    yPos = ensureRoomFor(doc, yPos, lines.length * 5, pageHeight);
+    doc.text(lines, margin, yPos);
+    yPos += lines.length * 5 + 3;
+  }
 
   // 6. Additional notes (editable, if provided)
   if (options.additionalNotes) {
-    const used = drawFooterParagraph(doc, options.additionalNotes, margin, yPos, textWidth, !!hl.additional);
-    yPos += used + 5;
+    const r = drawFooterParagraph(doc, options.additionalNotes, margin, yPos, textWidth, !!hl.additional, pageHeight);
+    yPos = r.y + r.used + 5;
   }
 
   // 7. Closing Text (hardcoded)
-  doc.text(FOOTER_TEXT.closing, margin, yPos);
+  {
+    const lines = doc.splitTextToSize(FOOTER_TEXT.closing, textWidth);
+    yPos = ensureRoomFor(doc, yPos, lines.length * 5, pageHeight);
+    doc.text(lines, margin, yPos);
+  }
 
   // Save the PDF
   const filename = `Invoice-${recipient.companyName || 'Client'}-${dayjs().format('YYYY-MM-DD')}.pdf`.replace(/[^a-zA-Z0-9-_.]/g, '_');

@@ -196,6 +196,11 @@ type Invoice @model @auth(rules: [{ allow: private }]) {
   extra_line_items: AWSJSON  # Optional non-summons rows (e.g., research fee) — JSON array of InvoiceExtraLineItem
   highlighted_sections: AWSJSON  # Optional map of which footer paragraphs render with yellow highlight
   custom_middle_text: String  # Optional free-text paragraph rendered between the overdue block and the questions line
+  payment_instructions: String  # Editable footer paragraph: payment methods + credit card form note
+  review_text: String  # Editable footer paragraph: "Please review and let me know if there are any defenses…"
+  overdue_text: String  # Editable footer paragraph: overdue-fines language preceding the CityPay link
+  additional_notes: String  # Optional extra paragraph rendered before the closing line
+  show_overdue: Boolean  # Toggle for the entire overdue + CityPay link block; null defaults to true on legacy records
   items: [InvoiceSummons] @hasMany(indexName: "byInvoice", fields: ["id"])
 }
 
