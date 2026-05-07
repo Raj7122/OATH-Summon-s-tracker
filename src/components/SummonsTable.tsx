@@ -868,7 +868,13 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       ),
     },
     // Secondary columns - Hidden by default (Progressive Disclosure)
-    { field: 'license_plate_ocr', headerName: 'License Plate', width: 120 },
+    {
+      field: 'license_plate_ocr',
+      headerName: 'License Plate',
+      width: 120,
+      valueGetter: (params: { row: Summons }) =>
+        params.row.license_plate_ocr || params.row.license_plate || '',
+    },
     {
       field: 'violation_date',
       headerName: 'Violation Date',

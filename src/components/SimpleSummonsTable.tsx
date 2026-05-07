@@ -454,6 +454,8 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
       headerName: 'License Plate',
       width: 120,
       sortable: true,
+      valueGetter: (params: { row: Summons }) =>
+        params.row.license_plate_ocr || params.row.license_plate || '',
     },
     {
       field: 'violation_location',
