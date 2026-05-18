@@ -26,7 +26,49 @@
         "dataExtractor": {
           "deploymentBucketName": "amplify-oathsummonstracker-dev-0fcf6-deployment",
           "s3Key": "amplify-builds/dataExtractor-35582f6d7234586d306d-build.zip"
+        },
+        "oathsummonstracker": {},
+        "oathsummonstracker8a6d84c8": {}
+      }
+    }
+  },
+  "prod": {
+    "awscloudformation": {
+      "AuthRoleName": "amplify-oathsummonstracker-prod-c5f3b-authRole",
+      "UnauthRoleArn": "arn:aws:iam::590728476631:role/amplify-oathsummonstracker-prod-c5f3b-unauthRole",
+      "AuthRoleArn": "arn:aws:iam::590728476631:role/amplify-oathsummonstracker-prod-c5f3b-authRole",
+      "Region": "us-east-1",
+      "DeploymentBucketName": "amplify-oathsummonstracker-prod-c5f3b-deployment",
+      "UnauthRoleName": "amplify-oathsummonstracker-prod-c5f3b-unauthRole",
+      "StackName": "amplify-oathsummonstracker-prod-c5f3b",
+      "StackId": "arn:aws:cloudformation:us-east-1:590728476631:stack/amplify-oathsummonstracker-prod-c5f3b/16295440-5273-11f1-80d6-0e8f6c640c8b",
+      "AmplifyAppId": "d54y71e1ddtll"
+    },
+    "categories": {
+      "auth": {
+        "oathsummonstracker8a6d84c8": {}
+      },
+      "api": {
+        "oathsummonstracker": {}
+      },
+      "function": {
+        "dailySweep": {
+          "deploymentBucketName": "amplify-oathsummonstracker-prod-c5f3b-deployment",
+          "s3Key": "amplify-builds/dailySweep-71656d41385648704f2f-build.zip"
+        },
+        "dataExtractor": {
+          "deploymentBucketName": "amplify-oathsummonstracker-prod-c5f3b-deployment",
+          "s3Key": "amplify-builds/dataExtractor-35582f6d7234586d306d-build.zip"
         }
+      },
+      "hosting": {
+        "amplifyhosting": {
+          "appId": "d54y71e1ddtll",
+          "type": "manual"
+        }
+      },
+      "storage": {
+        "oathEvidenceFiles": {}
       }
     }
   }

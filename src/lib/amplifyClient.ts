@@ -1,25 +1,25 @@
 import { Amplify } from 'aws-amplify';
+import config from '../amplifyconfiguration.json';
 
-// Amplify v6 configuration for NYC OATH Summons Tracker
 Amplify.configure({
   Auth: {
     Cognito: {
-      userPoolId: 'us-east-1_HXL5eyt3G',
-      userPoolClientId: '5u3iqbnppofude6c0jao41pl06',
-      identityPoolId: 'us-east-1:aac0e8b4-29f1-4a87-966c-c06b8d22adb9',
-    }
+      userPoolId: config.aws_user_pools_id,
+      userPoolClientId: config.aws_user_pools_web_client_id,
+      identityPoolId: config.aws_cognito_identity_pool_id,
+    },
   },
   API: {
     GraphQL: {
-      endpoint: 'https://vp3li2qm6ffstf5gjbe5rnrs6u.appsync-api.us-east-1.amazonaws.com/graphql',
-      region: 'us-east-1',
+      endpoint: config.aws_appsync_graphqlEndpoint,
+      region: config.aws_appsync_region,
       defaultAuthMode: 'userPool' as const,
     },
   },
   Storage: {
     S3: {
-      bucket: 'oath-evidence-files-dev',
-      region: 'us-east-1',
+      bucket: config.aws_user_files_s3_bucket,
+      region: config.aws_user_files_s3_bucket_region,
     },
   },
 });

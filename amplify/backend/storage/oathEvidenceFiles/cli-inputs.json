@@ -1,15 +1,20 @@
 {
-  "version": "1",
-  "serviceConfiguration": {
-    "serviceName": "S3",
-    "bucketName": "oath-evidence-files",
-    "permissions": {
-      "auth": [
-        "create",
-        "read",
-        "update",
-        "delete"
-      ]
-    }
-  }
+  "resourceName": "oathEvidenceFiles",
+  "policyUUID": "8a6d84c8",
+  "bucketName": "oath-evidence-files",
+  "storageAccess": "auth",
+  "guestAccess": [],
+  "authAccess": [
+    "CREATE_AND_UPDATE",
+    "READ",
+    "DELETE"
+  ],
+  "triggerFunction": "NONE",
+  "groupAccess": {},
+  "selectedAuthenticatedPermissions": [
+    "s3:PutObject",
+    "s3:GetObject",
+    "s3:DeleteObject"
+  ],
+  "selectedGuestPermissions": []
 }

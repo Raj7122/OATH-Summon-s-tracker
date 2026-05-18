@@ -79,7 +79,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Ignore errors - there may not be a user to sign out
       }
 
-      const signInResult = await signIn({ username, password });
+      const signInResult = await signIn({
+        username,
+        password,
+        options: { authFlowType: 'USER_PASSWORD_AUTH' },
+      });
 
       // Check if password change is required
       if (signInResult.nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
