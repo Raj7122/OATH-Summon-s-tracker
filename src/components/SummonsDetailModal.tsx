@@ -351,6 +351,13 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     name: userInfo?.displayName || 'Unknown User',
   };
 
+  // Pre-migration comments were stamped with Cognito sub IDs from the old user
+  // pool; fall back to display-name match so users can still manage their own
+  // legacy comments after the account migration.
+  const isOwnComment = (comment: NoteComment) =>
+    comment.userId === currentUser.id ||
+    (!!comment.by && comment.by === currentUser.name);
+
   // Local state for editable fields
   const [newComment, setNewComment] = useState('');  // For new comment input
   const [comments, setComments] = useState<NoteComment[]>([]);  // Threaded comments
@@ -1721,10 +1728,10 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                           sx={{
                             p: 1.5,
                             mb: 1,
-                            bgcolor: comment.userId === currentUser.id ? 'primary.50' : 'grey.50',
+                            bgcolor: isOwnComment(comment) ? 'primary.50' : 'grey.50',
                             borderRadius: 1,
                             border: '1px solid',
-                            borderColor: comment.userId === currentUser.id ? 'primary.200' : 'grey.200',
+                            borderColor: isOwnComment(comment) ? 'primary.200' : 'grey.200',
                           }}
                         >
                           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.5 }}>
@@ -1738,7 +1745,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                               </Typography>
                             </Box>
                             {/* Delete button - only for own comments */}
-                            {comment.userId === currentUser.id && (
+                            {isOwnComment(comment) && (
                               <IconButton
                                 size="small"
                                 onClick={() => handleDeleteComment(comment.id)}
