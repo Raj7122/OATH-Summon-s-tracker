@@ -110,6 +110,9 @@ interface Summons {
   // File attachments (AWSJSON - can be string or array)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   attachments?: any;
+  is_archived?: boolean;
+  archived_at?: string;
+  archived_reason?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -232,6 +235,7 @@ const Dashboard = () => {
   const [auditTrailOpen, setAuditTrailOpen] = useState(false);
   const [auditTrailFilter, setAuditTrailFilter] = useState<AuditTrailFilterType>(null);
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilterCriteria>(EMPTY_ADVANCED_FILTERS);
+  const [showArchived, setShowArchived] = useState(false);
 
   useEffect(() => {
     loadSummonses();
@@ -403,35 +407,44 @@ const Dashboard = () => {
    * TRD v1.8: Updated to use business day logic and added hearing_complete filter
    * @returns Filtered array of summonses
    */
+  // Archived rows are hidden by default. The user can opt in via the
+  // "Show archived" toggle. We pre-filter here so summary counts, advanced
+  // filter dropdowns, the table, and the activity-card filters all stay
+  // consistent with what's actually visible.
+  const visibleSummonses = showArchived
+    ? summonses
+    : summonses.filter((s) => !s.is_archived);
+  const archivedCount = summonses.length - visibleSummonses.length;
+
   const getFilteredSummonses = (): Summons[] => {
     // First check activity filter (UPDATED/NEW)
     if (activityFilter) {
-      console.log('Activity filter:', activityFilter, 'Total summonses:', summonses.length);
+      console.log('Activity filter:', activityFilter, 'Total summonses:', visibleSummonses.length);
 
       if (activityFilter === 'new') {
-        const filtered = summonses.filter(isNewRecord);
+        const filtered = visibleSummonses.filter(isNewRecord);
         console.log('NEW filter returned:', filtered.length, 'summonses');
         return filtered;
       }
 
       if (activityFilter === 'updated') {
-        const filtered = summonses.filter(isUpdatedRecord);
+        const filtered = visibleSummonses.filter(isUpdatedRecord);
         console.log('UPDATED filter returned:', filtered.length, 'summonses');
         return filtered;
       }
     }
 
     if (!activeFilter) {
-      console.log('No active filter, showing all summonses:', summonses.length);
-      return summonses;
+      console.log('No active filter, showing all summonses:', visibleSummonses.length);
+      return visibleSummonses;
     }
 
     const now = new Date();
-    console.log('Active filter:', activeFilter, 'Total summonses:', summonses.length);
+    console.log('Active filter:', activeFilter, 'Total summonses:', visibleSummonses.length);
 
     if (activeFilter === 'critical') {
       // Hearings within 7 business days (TRD v1.8: business day logic)
-      const filtered = summonses.filter((summons) => {
+      const filtered = visibleSummonses.filter((summons) => {
         if (!summons.hearing_date) return false;
         const hearingDate = new Date(summons.hearing_date);
         if (hearingDate < now) return false; // Skip past dates
@@ -445,7 +458,7 @@ const Dashboard = () => {
 
     if (activeFilter === 'approaching') {
       // Hearings in 8-21 business days (TRD v1.8: business day logic)
-      const filtered = summonses.filter((summons) => {
+      const filtered = visibleSummonses.filter((summons) => {
         if (!summons.hearing_date) return false;
         const hearingDate = new Date(summons.hearing_date);
         if (hearingDate < now) return false; // Skip past dates
@@ -459,7 +472,7 @@ const Dashboard = () => {
 
     if (activeFilter === 'hearing_complete') {
       // Summonses marked as "Hearing Complete" (TRD v1.8: Client Feedback)
-      const filtered = summonses.filter((summons) => {
+      const filtered = visibleSummonses.filter((summons) => {
         return summons.internal_status === 'Hearing Complete';
       });
       console.log('Hearing Complete filter returned:', filtered.length, 'summonses');
@@ -468,7 +481,7 @@ const Dashboard = () => {
 
     if (activeFilter === 'evidence_pending') {
       // Evidence requested but not yet received (TRD v1.9: Evidence tracking)
-      const filtered = summonses.filter((summons) => {
+      const filtered = visibleSummonses.filter((summons) => {
         return summons.evidence_requested === true && summons.evidence_received === false;
       });
       console.log('Evidence Pending filter returned:', filtered.length, 'summonses');
@@ -477,7 +490,7 @@ const Dashboard = () => {
 
     if (activeFilter === 'has_evidence') {
       // Summonses with file attachments, sorted by hearing date (soonest first)
-      const filtered = summonses.filter((summons) => {
+      const filtered = visibleSummonses.filter((summons) => {
         if (!summons.attachments) return false;
         let parsed: unknown[] = [];
         if (typeof summons.attachments === 'string') {
@@ -502,7 +515,7 @@ const Dashboard = () => {
     }
 
     console.log('No matching filter, returning all summonses');
-    return summonses;
+    return visibleSummonses;
   };
 
   const quickFilteredSummonses = getFilteredSummonses();
@@ -595,6 +608,28 @@ const Dashboard = () => {
             Audit Trail
           </Button>
 
+          {/* Show archived rows. Archived rows are hidden by default so
+              stale orphans (e.g., summonses created when a client AKA later
+              gets removed) don't bleed into the live dashboard. */}
+          <Button
+            variant={showArchived ? 'contained' : 'outlined'}
+            startIcon={<ArchiveIcon />}
+            onClick={() => setShowArchived((v) => !v)}
+            size="small"
+            color={showArchived ? 'primary' : 'inherit'}
+            sx={
+              showArchived
+                ? undefined
+                : {
+                    borderColor: 'grey.400',
+                    color: 'text.secondary',
+                    '&:hover': { borderColor: 'grey.600', backgroundColor: 'grey.100' },
+                  }
+            }
+          >
+            {showArchived ? `Hide archived (${archivedCount})` : `Show archived${archivedCount ? ` (${archivedCount})` : ''}`}
+          </Button>
+
           {(activeFilter || activityFilter || advancedActive) && (
             <Button
               variant="outlined"
@@ -629,7 +664,7 @@ const Dashboard = () => {
         <>
           {/* Summary Widgets Section - FR-10 with Interactive Quick Filters */}
           <DashboardSummary
-            summonses={summonses}
+            summonses={visibleSummonses}
             activeFilter={activeFilter}
             onFilterClick={handleFilterClick}
           />
@@ -637,7 +672,7 @@ const Dashboard = () => {
           {/* Advanced Filters - multi-select Status + Hearing Date range.
               Composes (AND) with the quick-filter cards above. */}
           <SummonsAdvancedFilters
-            summonses={summonses}
+            summonses={visibleSummonses}
             value={advancedFilters}
             onChange={setAdvancedFilters}
             totalCount={quickFilteredSummonses.length}
