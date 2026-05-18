@@ -1988,4 +1988,216 @@ describe('Daily Sweep Lambda Function', () => {
       });
     });
   });
+
+  // Regression suite for the bug Jacky reported: DEP File Creation Date
+  // "disappears on reschedule". The sweep is mathematically incapable of
+  // wiping user-input AWSJSON fields because its UpdateExpression uses SET
+  // over an explicit field allowlist — but these tests pin that invariant
+  // in place so a future allowlist widening can't silently reintroduce it.
+  describe('updateSummonsMetadataWithLog preserves user-input fields', () => {
+    const PROTECTED_USER_FIELDS = [
+      'dep_file_date_attr',
+      'evidence_reviewed_attr',
+      'added_to_calendar_attr',
+      'evidence_requested_attr',
+      'evidence_received_attr',
+      'internal_status_attr',
+      'attachments',
+      'notes_comments',
+      'notes',
+      'evidence_reviewed',
+      'added_to_calendar',
+      'evidence_requested',
+      'evidence_received',
+      'evidence_reviewed_date',
+      'added_to_calendar_date',
+      'evidence_requested_date',
+      'evidence_received_date',
+      'is_invoiced',
+      'invoice_date',
+      'internal_status',
+    ];
+
+    // The full set of fields the sweep is *allowed* to touch — the allowlist
+    // baked into updateSummonsMetadataWithLog plus the tracking/system fields
+    // it sets unconditionally.
+    const ALLOWED_FIELDS = new Set([
+      // metadata allowlist (line ~534)
+      'status', 'hearing_result', 'hearing_time', 'hearing_date',
+      'amount_due', 'paid_amount', 'penalty_imposed', 'code_description',
+      // tracking/system
+      'last_change_summary', 'last_change_at',
+      'activity_log',
+      'ocr_status',
+      'last_metadata_sync',
+      'api_miss_count',
+      'updatedAt',
+    ]);
+
+    // Build a reschedule-triggering metadata payload. We seed it with EVERY
+    // protected user-input field set to a sentinel value so the regression
+    // test actually exercises the field-allowlist enforcement: if a future
+    // refactor widens `fieldsToUpdate` to include any of these, the
+    // sentinel will leak into the UpdateExpression and the test will fail.
+    const buildRescheduleMetadata = () => ({
+      status: 'RESCHEDULED',
+      hearing_result: '',
+      hearing_time: '10:00',
+      hearing_date: '2026-08-01T00:00:00.000Z',
+      amount_due: 1000,
+      paid_amount: 0,
+      penalty_imposed: 0,
+      code_description: 'IDLING OF MOTOR VEHICLE',
+      // Sentinel values for protected fields — must NEVER reach the
+      // UpdateExpression. The sweep is supposed to be incapable of
+      // touching user-input attribution / evidence fields.
+      dep_file_date_attr: 'SENTINEL',
+      evidence_reviewed_attr: 'SENTINEL',
+      added_to_calendar_attr: 'SENTINEL',
+      evidence_requested_attr: 'SENTINEL',
+      evidence_received_attr: 'SENTINEL',
+      internal_status_attr: 'SENTINEL',
+      attachments: 'SENTINEL',
+      notes_comments: 'SENTINEL',
+      notes: 'SENTINEL',
+      evidence_reviewed: 'SENTINEL',
+      added_to_calendar: 'SENTINEL',
+      evidence_requested: 'SENTINEL',
+      evidence_received: 'SENTINEL',
+      evidence_reviewed_date: 'SENTINEL',
+      added_to_calendar_date: 'SENTINEL',
+      evidence_requested_date: 'SENTINEL',
+      evidence_received_date: 'SENTINEL',
+      is_invoiced: 'SENTINEL',
+      invoice_date: 'SENTINEL',
+      internal_status: 'SENTINEL',
+    });
+
+    let updateSummonsMetadataWithLog;
+    let lastUpdateParams;
+
+    beforeEach(() => {
+      // Reset modules + re-mock aws-sdk fresh for each test in this suite,
+      // matching the Handler Integration pattern below. The Handler suite
+      // also calls jest.resetModules() in its own beforeEach, so a captured
+      // DocumentClient reference does not survive across describe blocks —
+      // we re-acquire the active instance per-test via a closure that
+      // captures params directly.
+      lastUpdateParams = null;
+      jest.resetModules();
+      jest.doMock('aws-sdk', () => ({
+        DynamoDB: {
+          DocumentClient: jest.fn(() => ({
+            scan: jest.fn(() => ({ promise: () => Promise.resolve({ Items: [] }) })),
+            query: jest.fn(() => ({ promise: () => Promise.resolve({ Items: [] }) })),
+            put: jest.fn(() => ({ promise: () => Promise.resolve({}) })),
+            get: jest.fn(() => ({ promise: () => Promise.resolve({}) })),
+            update: jest.fn((params) => {
+              lastUpdateParams = params;
+              return { promise: () => Promise.resolve({}) };
+            }),
+          })),
+        },
+        Lambda: jest.fn(() => ({
+          invoke: jest.fn(() => ({ promise: () => Promise.resolve({}) })),
+        })),
+      }));
+      ({ updateSummonsMetadataWithLog } = require('./index')._testExports);
+    });
+
+    test('UpdateExpression never names dep_file_date_attr', async () => {
+      await updateSummonsMetadataWithLog(
+        'summons-id-1',
+        buildRescheduleMetadata(),
+        'Hearing: Jun 1, 2026 -> Aug 1, 2026',
+        false,
+        [{ type: 'RESCHEDULE', date: '2026-05-12T00:00:00Z', description: 'rescheduled' }],
+        '2026-05-12T00:00:00Z',
+      );
+      expect(lastUpdateParams).not.toBeNull();
+      expect(lastUpdateParams.UpdateExpression).not.toMatch(/dep_file_date_attr/);
+    });
+
+    test('UpdateExpression never names any *_attr field', async () => {
+      await updateSummonsMetadataWithLog(
+        'summons-id-2',
+        buildRescheduleMetadata(),
+        'Status: PENDING -> RESCHEDULED',
+        false,
+        [],
+        '2026-05-12T00:00:00Z',
+      );
+      const attrFields = [
+        'evidence_reviewed_attr',
+        'added_to_calendar_attr',
+        'evidence_requested_attr',
+        'evidence_received_attr',
+        'internal_status_attr',
+      ];
+      for (const f of attrFields) {
+        expect(lastUpdateParams.UpdateExpression).not.toMatch(new RegExp(f));
+      }
+    });
+
+    test('UpdateExpression never names attachments or notes_comments', async () => {
+      await updateSummonsMetadataWithLog(
+        'summons-id-3',
+        buildRescheduleMetadata(),
+        'summary',
+        false,
+        [],
+        '2026-05-12T00:00:00Z',
+      );
+      expect(lastUpdateParams.UpdateExpression).not.toMatch(/attachments/);
+      expect(lastUpdateParams.UpdateExpression).not.toMatch(/notes_comments/);
+      expect(lastUpdateParams.UpdateExpression).not.toMatch(/\bnotes\b/);
+    });
+
+    test('UpdateExpression only references fields from the metadata + tracking allowlist', async () => {
+      await updateSummonsMetadataWithLog(
+        'summons-id-4',
+        buildRescheduleMetadata(),
+        'summary',
+        true, // needsOCR — triggers ocr_status = pending too
+        [{ type: 'RESCHEDULE', date: '2026-05-12T00:00:00Z' }],
+        '2026-05-12T00:00:00Z',
+        true, // resetMissCount — triggers api_miss_count
+      );
+      // Parse out every LHS of an assignment in the SET expression.
+      // Resolver builds things like: "SET #status = :status, hearing_date = :hearing_date, ..."
+      // ExpressionAttributeNames maps the # placeholders back to real names.
+      const setMatch = lastUpdateParams.UpdateExpression.match(/^SET\s+(.+)$/);
+      expect(setMatch).not.toBeNull();
+      const assignments = setMatch[1].split(',').map(s => s.trim());
+
+      const lhsNames = assignments.map(a => {
+        const lhs = a.split('=')[0].trim();
+        // Resolve placeholder #foo back to the real field name
+        if (lhs.startsWith('#') && lastUpdateParams.ExpressionAttributeNames) {
+          return lastUpdateParams.ExpressionAttributeNames[lhs] || lhs;
+        }
+        return lhs;
+      });
+
+      for (const name of lhsNames) {
+        expect(ALLOWED_FIELDS.has(name)).toBe(true);
+        // Also assert no protected user-input field snuck in
+        expect(PROTECTED_USER_FIELDS).not.toContain(name);
+      }
+    });
+
+    test('still updates hearing_date when reschedule detected (regression sanity)', async () => {
+      await updateSummonsMetadataWithLog(
+        'summons-id-5',
+        buildRescheduleMetadata(),
+        'Hearing: Jun 1, 2026 -> Aug 1, 2026',
+        false,
+        [],
+        '2026-05-12T00:00:00Z',
+      );
+      expect(lastUpdateParams.UpdateExpression).toMatch(/hearing_date/);
+      expect(lastUpdateParams.ExpressionAttributeValues[':hearing_date'])
+        .toBe('2026-08-01T00:00:00.000Z');
+    });
+  });
 });

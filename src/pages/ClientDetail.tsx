@@ -476,6 +476,7 @@ const ClientDetail: React.FC = () => {
       );
     } catch (err) {
       console.error('Error updating summons:', err);
+      throw err;
     }
   }, []);
 

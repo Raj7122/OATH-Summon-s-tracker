@@ -151,7 +151,7 @@ interface SummonsDetailModalProps {
   /** Callback when modal is closed */
   onClose: () => void;
   /** Callback when data is updated (for refreshing parent) */
-  onUpdate: (id: string, field: string, value: unknown, extraFields?: Record<string, unknown>) => void;
+  onUpdate: (id: string, field: string, value: unknown, extraFields?: Record<string, unknown>) => Promise<void> | void;
   /**
    * Fired after any invoice mutation inside the nested InvoiceDetailModal
    * (mark paid/unpaid, delete). Lets the parent page refresh derived state
@@ -372,6 +372,28 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
 
   // DEP File Date with attribution
   const [depFileDateAttr, setDepFileDateAttr] = useState<DepFileDateAttribution>({});
+
+  // Per-field save state — drives inline saving/error indicators so silent
+  // AWSJSON write failures (e.g. DEP File Creation Date) become impossible to miss.
+  // Fields whose primary value lives entirely inside an AWSJSON column would
+  // otherwise vanish on the next reload without any UI cue.
+  const [saveStates, setSaveStates] = useState<Record<string, 'idle' | 'saving' | 'error'>>({});
+
+  const withSaveTracking = async (
+    field: string,
+    revert: () => void,
+    run: () => Promise<void> | void,
+  ) => {
+    setSaveStates((s) => ({ ...s, [field]: 'saving' }));
+    try {
+      await run();
+      setSaveStates((s) => ({ ...s, [field]: 'idle' }));
+    } catch (err) {
+      console.error(`Save failed for ${field}:`, err);
+      revert();
+      setSaveStates((s) => ({ ...s, [field]: 'error' }));
+    }
+  };
 
   // Invoice PDF viewing — keyed by invoice id so multiple rows can show
   // independent loading spinners if clicked rapidly.
@@ -709,46 +731,88 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       [`${field}_attr`]: JSON.stringify(newAttr),
     };
 
+    // Capture previous local state so we can revert on save failure
+    let revert: () => void = () => {};
+
     // Update local state immediately for responsive UI
     switch (field) {
-      case 'evidence_reviewed':
+      case 'evidence_reviewed': {
+        const prevAttr = evidenceReviewedAttr;
+        const prevDate = evidenceReviewedDate;
         setEvidenceReviewedAttr(newAttr);
         if (checked && !evidenceReviewedDate) {
           setEvidenceReviewedDate(now);
           extra.evidence_reviewed_date = now;
         }
+        revert = () => {
+          setEvidenceReviewedAttr(prevAttr);
+          setEvidenceReviewedDate(prevDate);
+        };
         break;
-      case 'added_to_calendar':
+      }
+      case 'added_to_calendar': {
+        const prevAttr = addedToCalendarAttr;
+        const prevDate = addedToCalendarDate;
         setAddedToCalendarAttr(newAttr);
         if (checked && !addedToCalendarDate) {
           setAddedToCalendarDate(now);
           extra.added_to_calendar_date = now;
         }
+        revert = () => {
+          setAddedToCalendarAttr(prevAttr);
+          setAddedToCalendarDate(prevDate);
+        };
         break;
-      case 'evidence_requested':
+      }
+      case 'evidence_requested': {
+        const prevAttr = evidenceRequestedAttr;
+        const prevDate = evidenceRequestedDate;
         setEvidenceRequestedAttr(newAttr);
         if (checked && !evidenceRequestedDate) {
           setEvidenceRequestedDate(now);
           extra.evidence_requested_date = now;
         }
+        revert = () => {
+          setEvidenceRequestedAttr(prevAttr);
+          setEvidenceRequestedDate(prevDate);
+        };
         break;
-      case 'evidence_received':
+      }
+      case 'evidence_received': {
+        const prevAttr = evidenceReceivedAttr;
+        const prevDate = evidenceReceivedDate;
         setEvidenceReceivedAttr(newAttr);
         if (checked && !evidenceReceivedDate) {
           setEvidenceReceivedDate(now);
           extra.evidence_received_date = now;
         }
+        revert = () => {
+          setEvidenceReceivedAttr(prevAttr);
+          setEvidenceReceivedDate(prevDate);
+        };
         break;
+      }
     }
 
     // Single consolidated mutation: legacy boolean + attribution + date in one call
-    onUpdate(summons.id, field, checked, extra);
+    void withSaveTracking(
+      `${field}_attr`,
+      revert,
+      () => onUpdate(summons.id, field, checked, extra),
+    );
   };
 
   /**
-   * Handle DEP File Date change with attribution
+   * Handle DEP File Date change with attribution.
+   *
+   * Saves via withSaveTracking so a failed AppSync write reverts the picker
+   * to its previous value and surfaces an inline error icon. Without this,
+   * a silent rejection would leave the new date showing in the UI but never
+   * persisted — and on next reload the field would appear empty (the bug
+   * Jacky reported as "DEP disappears on reschedule").
    */
   const handleDepFileDateChange = (date: dayjs.Dayjs | null) => {
+    const previousAttr = depFileDateAttr;
     const now = dayjs().toISOString();
     const newAttr: DepFileDateAttribution = {
       value: date?.toISOString() || undefined,
@@ -758,7 +822,11 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     };
     setDepFileDateAttr(newAttr);
     // AWSJSON fields require JSON.stringify — raw objects are silently dropped by AppSync
-    onUpdate(summons.id, 'dep_file_date_attr', JSON.stringify(newAttr));
+    void withSaveTracking(
+      'dep_file_date_attr',
+      () => setDepFileDateAttr(previousAttr),
+      () => onUpdate(summons.id, 'dep_file_date_attr', JSON.stringify(newAttr)),
+    );
   };
 
   /**
@@ -767,6 +835,8 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   const handleAddComment = () => {
     if (!newComment.trim()) return;
 
+    const previousComments = comments;
+    const previousNewComment = newComment;
     const now = dayjs().toISOString();
     const comment: NoteComment = {
       id: uuidv4(),
@@ -781,16 +851,28 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     setNewComment('');
 
     // Persist to backend
-    onUpdate(summons.id, 'notes_comments', JSON.stringify(updatedComments));
+    void withSaveTracking(
+      'notes_comments',
+      () => {
+        setComments(previousComments);
+        setNewComment(previousNewComment);
+      },
+      () => onUpdate(summons.id, 'notes_comments', JSON.stringify(updatedComments)),
+    );
   };
 
   /**
    * Handle deleting a comment (only own comments can be deleted)
    */
   const handleDeleteComment = (commentId: string) => {
+    const previousComments = comments;
     const updatedComments = comments.filter(c => c.id !== commentId);
     setComments(updatedComments);
-    onUpdate(summons.id, 'notes_comments', JSON.stringify(updatedComments));
+    void withSaveTracking(
+      'notes_comments',
+      () => setComments(previousComments),
+      () => onUpdate(summons.id, 'notes_comments', JSON.stringify(updatedComments)),
+    );
   };
 
   /**
@@ -830,6 +912,8 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
    * Handle internal status change with attribution
    */
   const handleInternalStatusChange = (value: string) => {
+    const prevStatus = internalStatus;
+    const prevAttr = internalStatusAttr;
     const now = dayjs().toISOString();
     const newAttr: InternalStatusAttribution = {
       value,
@@ -842,9 +926,16 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     setInternalStatusAttr(newAttr);
 
     // Single consolidated mutation: legacy field + attribution
-    onUpdate(summons.id, 'internal_status', value, {
-      internal_status_attr: JSON.stringify(newAttr),
-    });
+    void withSaveTracking(
+      'internal_status_attr',
+      () => {
+        setInternalStatus(prevStatus);
+        setInternalStatusAttr(prevAttr);
+      },
+      () => onUpdate(summons.id, 'internal_status', value, {
+        internal_status_attr: JSON.stringify(newAttr),
+      }),
+    );
   };
   
   /**
@@ -888,9 +979,14 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
    * AWSJSON fields require JSON string, not raw array
    */
   const handleAttachmentsChange = (newAttachments: Attachment[]) => {
+    const previousAttachments = attachments;
     setAttachments(newAttachments);
     // Serialize to JSON string for AWSJSON field type
-    onUpdate(summons.id, 'attachments', JSON.stringify(newAttachments));
+    void withSaveTracking(
+      'attachments',
+      () => setAttachments(previousAttachments),
+      () => onUpdate(summons.id, 'attachments', JSON.stringify(newAttachments)),
+    );
   };
 
   /**
@@ -929,9 +1025,15 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       }
     }
 
-    // Append the new entry and save
+    // Append the new entry and save. activity_log lives on the summons prop
+    // (no local state), so revert is a no-op — but withSaveTracking still
+    // surfaces a failure indicator so an unwritten audit entry isn't silent.
     const updatedLog = [...existingLog, activityEntry];
-    onUpdate(summons.id, 'activity_log', JSON.stringify(updatedLog));
+    void withSaveTracking(
+      'activity_log',
+      () => {},
+      () => onUpdate(summons.id, 'activity_log', JSON.stringify(updatedLog)),
+    );
   };
 
   return (
@@ -1456,6 +1558,18 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                         }}
                       />
                     </LocalizationProvider>
+                    {saveStates['dep_file_date_attr'] === 'saving' && (
+                      <CircularProgress size={14} data-testid="dep-save-spinner" />
+                    )}
+                    {saveStates['dep_file_date_attr'] === 'error' && (
+                      <Tooltip title="Save failed — value reverted. Please retry.">
+                        <WarningIcon
+                          color="error"
+                          fontSize="small"
+                          data-testid="dep-save-error"
+                        />
+                      </Tooltip>
+                    )}
                     {/* Delay Days Indicator */}
                     {(() => {
                       const delayDays = calculateDelayDays();
@@ -1551,20 +1665,30 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                 />
 
                 {/* Internal Status Dropdown with Attribution */}
-                <FormControl fullWidth size="small" sx={{ mb: 1 }}>
-                  <InputLabel>Internal Status</InputLabel>
-                  <Select
-                    value={internalStatus}
-                    label="Internal Status"
-                    onChange={(e) => handleInternalStatusChange(e.target.value)}
-                  >
-                    {INTERNAL_STATUS_OPTIONS.map((option) => (
-                      <MenuItem key={option} value={option}>
-                        {option}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Internal Status</InputLabel>
+                    <Select
+                      value={internalStatus}
+                      label="Internal Status"
+                      onChange={(e) => handleInternalStatusChange(e.target.value)}
+                    >
+                      {INTERNAL_STATUS_OPTIONS.map((option) => (
+                        <MenuItem key={option} value={option}>
+                          {option}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  {saveStates['internal_status_attr'] === 'saving' && (
+                    <CircularProgress size={14} />
+                  )}
+                  {saveStates['internal_status_attr'] === 'error' && (
+                    <Tooltip title="Save failed — value reverted. Please retry.">
+                      <WarningIcon color="error" fontSize="small" />
+                    </Tooltip>
+                  )}
+                </Box>
                 {/* Internal Status Attribution */}
                 {internalStatusAttr.by && (
                   <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>

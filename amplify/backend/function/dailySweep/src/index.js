@@ -1550,12 +1550,13 @@ async function fetchNYCDataForClients(clients, context) {
     };
 
     // CRITICAL FILTERS:
-    // 1. Match client name in respondent_last_name OR respondent_first_name,
-    //    also try with apostrophes stripped via SoQL replace() to catch
-    //    names like "MARSALA'S" when searching "MARSALAS"
+    // 1. Match client name in respondent_last_name (NYC removed respondent_first_name
+    //    from the dataset around 2026-05-04 — referencing it returns SoQL 400).
+    //    Also try with apostrophes stripped via SoQL replace() to catch
+    //    names like "MARSALA'S" when searching "MARSALAS".
     // 2. IDLING violations only (check both charge fields)
     // 3. Hearing date >= 2022-01-01
-    const nameClause = `(upper(respondent_last_name) like '%${escapedTerm}%' OR upper(respondent_first_name) like '%${escapedTerm}%' OR upper(replace(respondent_last_name, '''', '')) like '%${escapedTerm}%')`;
+    const nameClause = `(upper(respondent_last_name) like '%${escapedTerm}%' OR upper(replace(respondent_last_name, '''', '')) like '%${escapedTerm}%')`;
     const whereClause = [
       nameClause,
       `(upper(charge_1_code_description) like '%IDLING%' OR upper(charge_2_code_description) like '%IDLING%')`,
@@ -1831,6 +1832,7 @@ exports._testExports = {
   matchRespondentToClient,
   buildClientNameMap,
   extractPlateFromViolationDetails,
+  updateSummonsMetadataWithLog,
 };
 
 /**

@@ -655,6 +655,7 @@ const CalendarDashboard: React.FC = () => {
         message: `Failed to update ${field}. Please try again.`,
         severity: 'error',
       });
+      throw error;
     }
   }, [summonses]);
 
