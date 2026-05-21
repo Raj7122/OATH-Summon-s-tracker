@@ -7,6 +7,7 @@
 
 import { useMemo, useState } from 'react';
 import {
+  Box,
   Typography,
   Paper,
   Table,
@@ -21,15 +22,25 @@ import {
   Tab,
   Tooltip,
 } from '@mui/material';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import { Invoice, InvoiceHorizonFilter } from '../types/invoiceTracker';
 import { getInvoiceHorizonColor } from '../utils/invoiceTrackerHelpers';
+import { downloadCSV } from '../lib/csvExport';
+import { generateInvoiceCSV, buildInvoiceCsvFilename } from '../lib/invoiceCsvExport';
 import { horizonColors } from '../theme';
 
 dayjs.extend(utc);
 
 type FilterTab = 'all' | 'unpaid' | 'overdue' | 'paid';
+
+const TAB_LABELS: Record<FilterTab, string> = {
+  all: 'All',
+  unpaid: 'Unpaid',
+  overdue: 'Overdue',
+  paid: 'Paid',
+};
 
 interface InvoiceListPanelProps {
   invoices: Invoice[];
@@ -86,6 +97,11 @@ const InvoiceListPanel = ({
     return result;
   }, [invoices, horizonFilter, filterTab]);
 
+  const handleExportCsv = () => {
+    const csv = generateInvoiceCSV(filteredInvoices);
+    downloadCSV(csv, buildInvoiceCsvFilename(TAB_LABELS[filterTab]));
+  };
+
   const getStatusChip = (invoice: Invoice) => {
     const color = getInvoiceHorizonColor(invoice);
     switch (color) {
@@ -102,9 +118,20 @@ const InvoiceListPanel = ({
 
   return (
     <Paper sx={{ p: 2 }}>
-      <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
-        Invoices
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 2 }}>
+        <Typography variant="h6" sx={{ fontWeight: 600 }}>
+          Invoices
+        </Typography>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<FileDownloadIcon />}
+          onClick={handleExportCsv}
+          disabled={filteredInvoices.length === 0}
+        >
+          Export CSV
+        </Button>
+      </Box>
 
       {/* Filter tabs */}
       <Tabs
