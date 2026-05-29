@@ -1370,6 +1370,69 @@ function extractPlateFromViolationDetails(violationDetails) {
 }
 
 /**
+ * Split a normalized company name into non-empty word tokens.
+ */
+function tokenizeNormalized(normName) {
+  if (!normName) return [];
+  return normName.split(' ').filter(Boolean);
+}
+
+/**
+ * True when `shorterTokens` is an exact head-sequence (token-aligned prefix)
+ * of `longerTokens`. This guarantees the shorter name ends on a WORD BOUNDARY
+ * in the longer name and that no shared token diverges.
+ *   ["sprague","operating"]  prefixOf  ["sprague","operating","resources"] -> true
+ *   ["all","season","restoration"]  prefixOf  ["all","season","movers"]    -> false (token 3 diverges)
+ *   ["all","season"]  prefixOf  ["all","seasons","door"]                    -> false (season != seasons)
+ */
+function isTokenPrefix(shorterTokens, longerTokens) {
+  if (shorterTokens.length === 0 || shorterTokens.length > longerTokens.length) return false;
+  for (let i = 0; i < shorterTokens.length; i++) {
+    if (shorterTokens[i] !== longerTokens[i]) return false;
+  }
+  return true;
+}
+
+// Thresholds for asserting a partial (prefix) match is strong enough.
+const MIN_PREFIX_TOKENS = 2;     // multi-word prefixes need >= 2 full tokens
+const MIN_SINGLE_TOKEN_LEN = 7;  // single-word AKAs like "cercone" (7 chars)
+const MIN_PREFIX_CHARS = 10;     // historical char floor, kept for multi-word prefixes
+
+/**
+ * Decide whether a token-aligned prefix relationship between two normalized
+ * names is strong enough to assert a client match.
+ *
+ * This replaces the old bare String.startsWith() check, which matched on raw
+ * character prefixes and produced false positives like "ALL SEASON RESTORATION"
+ * capturing "ALL SEASON MOVERS" (shared 10-char "all season" prefix). Matching
+ * is now token-aligned: the shorter name's tokens must be an exact head-sequence
+ * of the longer name's tokens, so divergent company names never match.
+ *
+ * @param {string} aNorm - A normalized company name
+ * @param {string} bNorm - Another normalized company name
+ * @returns {boolean} True if a strong token-prefix match exists
+ */
+function isStrongPrefixMatch(aNorm, bNorm) {
+  if (!aNorm || !bNorm) return false;
+  const aTok = tokenizeNormalized(aNorm);
+  const bTok = tokenizeNormalized(bNorm);
+
+  // Pick the shorter token list as the candidate prefix
+  const [shorter, longer, shorterStr] = aTok.length <= bTok.length
+    ? [aTok, bTok, aNorm]
+    : [bTok, aTok, bNorm];
+
+  if (!isTokenPrefix(shorter, longer)) return false;
+  if (shorter.length === longer.length) return false; // identical handled by exact map lookup
+
+  // A single-token prefix (e.g. AKA "CERCONE") must be a substantial word.
+  if (shorter.length === 1) return shorter[0].length >= MIN_SINGLE_TOKEN_LEN;
+
+  // Multi-word prefixes need >= 2 full tokens and >= 10 chars of content.
+  return shorter.length >= MIN_PREFIX_TOKENS && shorterStr.length >= MIN_PREFIX_CHARS;
+}
+
+/**
  * Match respondent name to a client using multiple strategies
  *
  * MATCHING STRATEGIES (in order of priority):
@@ -1415,19 +1478,14 @@ function matchRespondentToClient(firstName, lastName, clientNameMap) {
     }
   }
 
-  // Strategy 3: Partial word match - check if any client name starts with or
-  // is contained in the respondent name (handles truncated/variant names)
-  // This catches "SPRAGUE OPERATING" matching client AKA "SPRAGUE OPERATING RESOURCES"
+  // Strategy 3: Token-aligned prefix match (handles truncated/variant names).
+  // Catches "SPRAGUE OPERATING" matching client AKA "SPRAGUE OPERATING RESOURCES".
+  // Uses isStrongPrefixMatch (word-boundary alignment) instead of a bare
+  // startsWith so divergent names like "ALL SEASON RESTORATION" vs
+  // "ALL SEASON MOVERS" do NOT match.
   for (const [clientNormName, client] of clientNameMap.entries()) {
-    // Check if respondent name starts with client name (respondent is more specific)
-    if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) {
-      console.log(`  Partial Match (respondent contains client): "${fullName}" → "${client.name}"`);
-      return client;
-    }
-    // Check if client name starts with respondent name (client is more specific)
-    // But only if respondent name is substantial (at least 10 chars after normalization)
-    if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) {
-      console.log(`  Partial Match (client contains respondent): "${fullName}" → "${client.name}"`);
+    if (isStrongPrefixMatch(normalizedFull, clientNormName)) {
+      console.log(`  Partial Match (token-prefix): "${fullName}" → "${client.name}"`);
       return client;
     }
   }
@@ -1446,16 +1504,10 @@ function matchRespondentToClient(firstName, lastName, clientNameMap) {
       return match;
     }
 
-    // Also check partial matches with lastName only
+    // Also check token-aligned partial matches with lastName only
     for (const [clientNormName, client] of clientNameMap.entries()) {
-      // Check if lastName starts with client name (rare but possible)
-      if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) {
-        console.log(`  Fallback Partial Match (lastName contains client): "${lastName}" → "${client.name}"`);
-        return client;
-      }
-      // Check if any client name starts with lastName
-      if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) {
-        console.log(`  Fallback Partial Match (client contains lastName): "${lastName}" → "${client.name}"`);
+      if (isStrongPrefixMatch(normalizedLast, clientNormName)) {
+        console.log(`  Fallback Partial Match (token-prefix): "${lastName}" → "${client.name}"`);
         return client;
       }
     }
@@ -1494,6 +1546,35 @@ function buildClientNameMap(clients) {
   return nameMap;
 }
 
+// Minimum length for an API search term (suffix-stripped). The NYC API matches
+// with a substring LIKE '%TERM%', so a very short term pulls in too much.
+// NOTE: This guard CANNOT cleanly stop a 2-token term like "ALL SEASON" without
+// also dropping legitimate two-word client names — the token-prefix matcher
+// (isStrongPrefixMatch) is the authoritative filter for the ALL SEASON bug.
+// This stays at the historical >3-char floor so it never drops a term that was
+// previously fetched (e.g. the bare "CERCONE" pattern from summons 000726080J).
+const MIN_TERM_CHARS = 4;
+
+/**
+ * Build a NYC API search term from a client name/AKA, or null if the name is
+ * too short to query safely. Centralizes the term-normalization that was
+ * previously duplicated for client names and AKAs.
+ *
+ * @param {string} rawName - A client name or AKA
+ * @returns {string|null} Uppercase search term, or null if too short
+ */
+function buildSearchTerm(rawName) {
+  if (!rawName) return null;
+  const term = rawName
+    .replace(/&/g, ' ')                          // strip ampersand for API LIKE matching (keep hyphens — LIKE is literal)
+    .replace(/['.]/g, '')                        // strip apostrophes/periods for API LIKE matching ("MARSALA'S" -> "MARSALAS")
+    .replace(/\s+(llc|inc|corp|co|ltd)$/i, '')   // suffix regex simplified (periods already stripped)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+  return term.length >= MIN_TERM_CHARS ? term : null;
+}
+
 /**
  * Fetch OATH summonses from NYC Open Data API for specific client names
  * FILTERS:
@@ -1504,26 +1585,16 @@ async function fetchNYCDataForClients(clients, context) {
   const allSummonses = [];
   const seenTickets = new Set();
 
-  // Build unique search terms from client names and AKAs
+  // Build unique search terms from client names and AKAs (generic terms dropped)
   const searchTerms = new Set();
   clients.forEach(client => {
-    const mainName = client.name
-      .replace(/&/g, ' ')                              // strip ampersand for API LIKE matching (keep hyphens — LIKE is literal)
-      .replace(/['.]/g, '')                            // strip apostrophes/periods for API LIKE matching ("MARSALA'S" -> "MARSALAS")
-      .replace(/\s+(llc|inc|corp|co|ltd)$/i, '')       // suffix regex simplified (periods already stripped)
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (mainName.length > 3) searchTerms.add(mainName.toUpperCase());
+    const mainTerm = buildSearchTerm(client.name);
+    if (mainTerm) searchTerms.add(mainTerm);
 
     if (client.akas && Array.isArray(client.akas)) {
       client.akas.forEach(aka => {
-        const akaMain = aka
-          .replace(/&/g, ' ')                          // strip ampersand for API LIKE matching (keep hyphens — LIKE is literal)
-          .replace(/['.]/g, '')                        // strip apostrophes/periods for API LIKE matching
-          .replace(/\s+(llc|inc|corp|co|ltd)$/i, '')   // suffix regex simplified (periods already stripped)
-          .replace(/\s+/g, ' ')
-          .trim();
-        if (akaMain.length > 3) searchTerms.add(akaMain.toUpperCase());
+        const akaTerm = buildSearchTerm(aka);
+        if (akaTerm) searchTerms.add(akaTerm);
       });
     }
   });
@@ -1833,6 +1904,8 @@ exports._testExports = {
   buildClientNameMap,
   extractPlateFromViolationDetails,
   updateSummonsMetadataWithLog,
+  isStrongPrefixMatch,
+  buildSearchTerm,
 };
 
 /**

@@ -235,76 +235,11 @@ describe('Daily Sweep Lambda Function', () => {
         .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
-    const buildClientNameMap = (clients) => {
-      const nameMap = new Map();
-      clients.forEach((client) => {
-        const primaryName = normalizeCompanyName(client.name);
-        nameMap.set(primaryName, client);
-        const noSpaceName = primaryName.replace(/\s/g, '');
-        if (noSpaceName !== primaryName) {
-          nameMap.set(noSpaceName, client);
-        }
-        if (client.akas && Array.isArray(client.akas)) {
-          client.akas.forEach((aka) => {
-            const akaName = normalizeCompanyName(aka);
-            nameMap.set(akaName, client);
-            const akaNoSpace = akaName.replace(/\s/g, '');
-            if (akaNoSpace !== akaName) {
-              nameMap.set(akaNoSpace, client);
-            }
-          });
-        }
-      });
-      return nameMap;
-    };
+    // Use the real production buildClientNameMap so tests exercise actual code.
+    const buildClientNameMap = require('./index')._testExports.buildClientNameMap;
 
-    const matchRespondentToClient = (firstName, lastName, clientNameMap) => {
-      const fullName = `${firstName} ${lastName}`.trim();
-      if (!fullName) return null;
-
-      const normalizedFull = normalizeCompanyName(fullName);
-      const noSpaceFull = normalizedFull.replace(/\s/g, '');
-
-      let match = clientNameMap.get(normalizedFull) || clientNameMap.get(noSpaceFull);
-      if (match) return match;
-
-      // Strategy 2: Suffix Fragment fix
-      if (firstName && looksLikeSuffixFragment(firstName) && lastName) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-      }
-
-      // Strategy 3: Partial word match
-      for (const [clientNormName, client] of clientNameMap.entries()) {
-        if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) {
-          return client;
-        }
-        if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) {
-          return client;
-        }
-      }
-
-      // Strategy 4: Fallback lastName-only match
-      if (lastName && lastName.length >= 5) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-
-        for (const [clientNormName, client] of clientNameMap.entries()) {
-          if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) {
-            return client;
-          }
-          if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) {
-            return client;
-          }
-        }
-      }
-
-      return null;
-    };
+    // Use the real production matcher so these tests exercise the actual code.
+    const matchRespondentToClient = require('./index')._testExports.matchRespondentToClient;
 
     // Test data: Cercone Exterior Restoration Corp with AKAs
     const cerconeClient = {
@@ -413,54 +348,11 @@ describe('Daily Sweep Lambda Function', () => {
         .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
-    const buildClientNameMap = (clients) => {
-      const nameMap = new Map();
-      clients.forEach((client) => {
-        const primaryName = normalizeCompanyName(client.name);
-        nameMap.set(primaryName, client);
-        const noSpaceName = primaryName.replace(/\s/g, '');
-        if (noSpaceName !== primaryName) nameMap.set(noSpaceName, client);
-        if (client.akas && Array.isArray(client.akas)) {
-          client.akas.forEach((aka) => {
-            const akaName = normalizeCompanyName(aka);
-            nameMap.set(akaName, client);
-            const akaNoSpace = akaName.replace(/\s/g, '');
-            if (akaNoSpace !== akaName) nameMap.set(akaNoSpace, client);
-          });
-        }
-      });
-      return nameMap;
-    };
+    // Use the real production buildClientNameMap so tests exercise actual code.
+    const buildClientNameMap = require('./index')._testExports.buildClientNameMap;
 
-    const matchRespondentToClient = (firstName, lastName, clientNameMap) => {
-      const fullName = `${firstName} ${lastName}`.trim();
-      if (!fullName) return null;
-      const normalizedFull = normalizeCompanyName(fullName);
-      const noSpaceFull = normalizedFull.replace(/\s/g, '');
-      let match = clientNameMap.get(normalizedFull) || clientNameMap.get(noSpaceFull);
-      if (match) return match;
-      if (firstName && looksLikeSuffixFragment(firstName) && lastName) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-      }
-      for (const [clientNormName, client] of clientNameMap.entries()) {
-        if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) return client;
-        if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) return client;
-      }
-      if (lastName && lastName.length >= 5) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-        for (const [clientNormName, client] of clientNameMap.entries()) {
-          if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) return client;
-          if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) return client;
-        }
-      }
-      return null;
-    };
+    // Use the real production matcher so these tests exercise the actual code.
+    const matchRespondentToClient = require('./index')._testExports.matchRespondentToClient;
 
     const marsalasClient = {
       id: 'marsalas-1',
@@ -565,76 +457,11 @@ describe('Daily Sweep Lambda Function', () => {
         .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
-    const buildClientNameMap = (clients) => {
-      const nameMap = new Map();
-      clients.forEach((client) => {
-        const primaryName = normalizeCompanyName(client.name);
-        nameMap.set(primaryName, client);
-        const noSpaceName = primaryName.replace(/\s/g, '');
-        if (noSpaceName !== primaryName) {
-          nameMap.set(noSpaceName, client);
-        }
-        if (client.akas && Array.isArray(client.akas)) {
-          client.akas.forEach((aka) => {
-            const akaName = normalizeCompanyName(aka);
-            nameMap.set(akaName, client);
-            const akaNoSpace = akaName.replace(/\s/g, '');
-            if (akaNoSpace !== akaName) {
-              nameMap.set(akaNoSpace, client);
-            }
-          });
-        }
-      });
-      return nameMap;
-    };
+    // Use the real production buildClientNameMap so tests exercise actual code.
+    const buildClientNameMap = require('./index')._testExports.buildClientNameMap;
 
-    const matchRespondentToClient = (firstName, lastName, clientNameMap) => {
-      const fullName = `${firstName} ${lastName}`.trim();
-      if (!fullName) return null;
-
-      const normalizedFull = normalizeCompanyName(fullName);
-      const noSpaceFull = normalizedFull.replace(/\s/g, '');
-
-      let match = clientNameMap.get(normalizedFull) || clientNameMap.get(noSpaceFull);
-      if (match) return match;
-
-      // Strategy 2: Suffix Fragment fix
-      if (firstName && looksLikeSuffixFragment(firstName) && lastName) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-      }
-
-      // Strategy 3: Partial word match
-      for (const [clientNormName, client] of clientNameMap.entries()) {
-        if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) {
-          return client;
-        }
-        if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) {
-          return client;
-        }
-      }
-
-      // Strategy 4: Fallback lastName-only match
-      if (lastName && lastName.length >= 5) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-
-        for (const [clientNormName, client] of clientNameMap.entries()) {
-          if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) {
-            return client;
-          }
-          if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) {
-            return client;
-          }
-        }
-      }
-
-      return null;
-    };
+    // Use the real production matcher so these tests exercise the actual code.
+    const matchRespondentToClient = require('./index')._testExports.matchRespondentToClient;
 
     /**
      * PRODUCTION_PATTERNS: Add new patterns here when clients report missing summonses.
@@ -759,73 +586,11 @@ describe('Daily Sweep Lambda Function', () => {
         .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
-    const buildClientNameMap = (clients) => {
-      const nameMap = new Map();
-      clients.forEach((client) => {
-        const primaryName = normalizeCompanyName(client.name);
-        nameMap.set(primaryName, client);
-        const noSpaceName = primaryName.replace(/\s/g, '');
-        if (noSpaceName !== primaryName) {
-          nameMap.set(noSpaceName, client);
-        }
-        if (client.akas && Array.isArray(client.akas)) {
-          client.akas.forEach((aka) => {
-            const akaName = normalizeCompanyName(aka);
-            nameMap.set(akaName, client);
-            const akaNoSpace = akaName.replace(/\s/g, '');
-            if (akaNoSpace !== akaName) {
-              nameMap.set(akaNoSpace, client);
-            }
-          });
-        }
-      });
-      return nameMap;
-    };
+    // Use the real production buildClientNameMap so tests exercise actual code.
+    const buildClientNameMap = require('./index')._testExports.buildClientNameMap;
 
-    const matchRespondentToClient = (firstName, lastName, clientNameMap) => {
-      const fullName = `${firstName} ${lastName}`.trim();
-      if (!fullName) return null;
-
-      const normalizedFull = normalizeCompanyName(fullName);
-      const noSpaceFull = normalizedFull.replace(/\s/g, '');
-
-      let match = clientNameMap.get(normalizedFull) || clientNameMap.get(noSpaceFull);
-      if (match) return match;
-
-      if (firstName && looksLikeSuffixFragment(firstName) && lastName) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-      }
-
-      for (const [clientNormName, client] of clientNameMap.entries()) {
-        if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) {
-          return client;
-        }
-        if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) {
-          return client;
-        }
-      }
-
-      if (lastName && lastName.length >= 5) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-
-        for (const [clientNormName, client] of clientNameMap.entries()) {
-          if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) {
-            return client;
-          }
-          if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) {
-            return client;
-          }
-        }
-      }
-
-      return null;
-    };
+    // Use the real production matcher so these tests exercise the actual code.
+    const matchRespondentToClient = require('./index')._testExports.matchRespondentToClient;
 
     test('SUCCEEDS via partial match: "ORP" + "CERCONE EXTERIOR RESTORATION C" even without explicit AKA', () => {
       // This documents how the matching logic handles truncated names
@@ -975,73 +740,11 @@ describe('Daily Sweep Lambda Function', () => {
         .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
-    const buildClientNameMap = (clients) => {
-      const nameMap = new Map();
-      clients.forEach((client) => {
-        const primaryName = normalizeCompanyName(client.name);
-        nameMap.set(primaryName, client);
-        const noSpaceName = primaryName.replace(/\s/g, '');
-        if (noSpaceName !== primaryName) {
-          nameMap.set(noSpaceName, client);
-        }
-        if (client.akas && Array.isArray(client.akas)) {
-          client.akas.forEach((aka) => {
-            const akaName = normalizeCompanyName(aka);
-            nameMap.set(akaName, client);
-            const akaNoSpace = akaName.replace(/\s/g, '');
-            if (akaNoSpace !== akaName) {
-              nameMap.set(akaNoSpace, client);
-            }
-          });
-        }
-      });
-      return nameMap;
-    };
+    // Use the real production buildClientNameMap so tests exercise actual code.
+    const buildClientNameMap = require('./index')._testExports.buildClientNameMap;
 
-    const matchRespondentToClient = (firstName, lastName, clientNameMap) => {
-      const fullName = `${firstName} ${lastName}`.trim();
-      if (!fullName) return null;
-
-      const normalizedFull = normalizeCompanyName(fullName);
-      const noSpaceFull = normalizedFull.replace(/\s/g, '');
-
-      let match = clientNameMap.get(normalizedFull) || clientNameMap.get(noSpaceFull);
-      if (match) return match;
-
-      if (firstName && looksLikeSuffixFragment(firstName) && lastName) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-      }
-
-      for (const [clientNormName, client] of clientNameMap.entries()) {
-        if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) {
-          return client;
-        }
-        if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) {
-          return client;
-        }
-      }
-
-      if (lastName && lastName.length >= 5) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-
-        for (const [clientNormName, client] of clientNameMap.entries()) {
-          if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) {
-            return client;
-          }
-          if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) {
-            return client;
-          }
-        }
-      }
-
-      return null;
-    };
+    // Use the real production matcher so these tests exercise the actual code.
+    const matchRespondentToClient = require('./index')._testExports.matchRespondentToClient;
 
     const testClient = {
       id: 'test-1',
@@ -1211,73 +914,11 @@ describe('Daily Sweep Lambda Function', () => {
         .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
-    const buildClientNameMap = (clients) => {
-      const nameMap = new Map();
-      clients.forEach((client) => {
-        const primaryName = normalizeCompanyName(client.name);
-        nameMap.set(primaryName, client);
-        const noSpaceName = primaryName.replace(/\s/g, '');
-        if (noSpaceName !== primaryName) {
-          nameMap.set(noSpaceName, client);
-        }
-        if (client.akas && Array.isArray(client.akas)) {
-          client.akas.forEach((aka) => {
-            const akaName = normalizeCompanyName(aka);
-            nameMap.set(akaName, client);
-            const akaNoSpace = akaName.replace(/\s/g, '');
-            if (akaNoSpace !== akaName) {
-              nameMap.set(akaNoSpace, client);
-            }
-          });
-        }
-      });
-      return nameMap;
-    };
+    // Use the real production buildClientNameMap so tests exercise actual code.
+    const buildClientNameMap = require('./index')._testExports.buildClientNameMap;
 
-    const matchRespondentToClient = (firstName, lastName, clientNameMap) => {
-      const fullName = `${firstName} ${lastName}`.trim();
-      if (!fullName) return null;
-
-      const normalizedFull = normalizeCompanyName(fullName);
-      const noSpaceFull = normalizedFull.replace(/\s/g, '');
-
-      let match = clientNameMap.get(normalizedFull) || clientNameMap.get(noSpaceFull);
-      if (match) return match;
-
-      if (firstName && looksLikeSuffixFragment(firstName) && lastName) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-      }
-
-      for (const [clientNormName, client] of clientNameMap.entries()) {
-        if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) {
-          return client;
-        }
-        if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) {
-          return client;
-        }
-      }
-
-      if (lastName && lastName.length >= 5) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-
-        for (const [clientNormName, client] of clientNameMap.entries()) {
-          if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) {
-            return client;
-          }
-          if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) {
-            return client;
-          }
-        }
-      }
-
-      return null;
-    };
+    // Use the real production matcher so these tests exercise the actual code.
+    const matchRespondentToClient = require('./index')._testExports.matchRespondentToClient;
 
     /**
      * Utility function to validate AKA configuration
@@ -1366,40 +1007,8 @@ describe('Daily Sweep Lambda Function', () => {
   });
 
   describe('buildClientNameMap', () => {
-    const buildClientNameMap = (clients) => {
-      const nameMap = new Map();
-      const normalizeCompanyName = (name) => {
-        if (!name) return '';
-        return name.toLowerCase().trim()
-          .replace(/[&\-]/g, ' ')
-          .replace(/['.]/g, '')
-          .replace(/\s+/g, ' ')
-          .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
-      };
-
-      clients.forEach((client) => {
-        const primaryName = normalizeCompanyName(client.name);
-        nameMap.set(primaryName, client);
-
-        const noSpaceName = primaryName.replace(/\s/g, '');
-        if (noSpaceName !== primaryName) {
-          nameMap.set(noSpaceName, client);
-        }
-
-        if (client.akas && Array.isArray(client.akas)) {
-          client.akas.forEach((aka) => {
-            const akaName = normalizeCompanyName(aka);
-            nameMap.set(akaName, client);
-            const akaNoSpace = akaName.replace(/\s/g, '');
-            if (akaNoSpace !== akaName) {
-              nameMap.set(akaNoSpace, client);
-            }
-          });
-        }
-      });
-
-      return nameMap;
-    };
+    // Use the real production buildClientNameMap so tests exercise actual code.
+    const buildClientNameMap = require('./index')._testExports.buildClientNameMap;
 
     test('should map primary client name', () => {
       const clients = [{ id: '1', name: 'Acme LLC' }];
@@ -1986,6 +1595,88 @@ describe('Daily Sweep Lambda Function', () => {
         );
         expect(plateMatches).toBe(false);
       });
+    });
+  });
+
+  // Regression suite for the bug Jacky reported: the tracker pulled unrelated
+  // "ALL SEASON(S)" companies (movers, doors, windows, solar, EMS, etc.) into
+  // the client "ALL SEASON RESTORATION INC". Root cause was a bare-startsWith
+  // partial match: "all season" (10 chars) prefix-matched "all season movers".
+  // The matcher now uses token-aligned (word-boundary) prefix matching.
+  describe('ALL SEASON false-positive regression (Real Exports)', () => {
+    const { matchRespondentToClient, buildClientNameMap } = require('./index')._testExports;
+    const allSeason = { id: 'as-1', name: 'ALL SEASON RESTORATION INC', akas: [] };
+    const map = buildClientNameMap([allSeason]);
+
+    test.each([
+      ['', 'ALL SEASON MOVERS INC'],
+      ['', 'ALL SEASONS MOVERS INC'],
+      ['', 'EMS INC ALL SEASONS WINDOW DOOR SYST'],
+      ['', 'ALL SEASONS DOOR AND WINDOW'],
+      ['', 'ALL SEASONS EXPRESS LLC'],
+      ['', 'ALL SEASONS IRON WORKS CORP'],
+      ['', 'ALL SEASON SOLAR LLC'],
+      ['', 'ALL SEASONS LANDSCAPING TS INC'],
+      ['', 'ALL SEASONS'], // plural — "seasons" != "season", so not a token-prefix
+      ['ALL', 'SEASON MOVERS INC'],
+    ])('does NOT match "%s" + "%s"', (firstName, lastName) => {
+      expect(matchRespondentToClient(firstName, lastName, map)).toBeNull();
+    });
+
+    // Bare "ALL SEASON" (singular) IS a clean token-prefix of the client name,
+    // so the matcher treats it as a truncation and matches — consistent with the
+    // Sprague case below. This is harmless in production: such records are no
+    // longer FETCHED (the API search term is the full "ALL SEASON RESTORATION").
+    test('treats bare "ALL SEASON" as a truncation (matches, like Sprague)', () => {
+      expect(matchRespondentToClient('', 'ALL SEASON', map).id).toBe('as-1');
+    });
+
+    test('still matches the genuine client exactly', () => {
+      expect(matchRespondentToClient('', 'ALL SEASON RESTORATION INC', map).id).toBe('as-1');
+    });
+
+    test('still matches a truncated variant via token-prefix', () => {
+      // "all season restoration" is a clean token-prefix of "all season restoration c"
+      expect(matchRespondentToClient('ORP', 'ALL SEASON RESTORATION C', map).id).toBe('as-1');
+    });
+  });
+
+  // Guards that the token-prefix fix did NOT break the legitimate truncation
+  // case Strategy 3 exists for: a shorter AKA that is a clean word-boundary
+  // prefix of the respondent name should still match.
+  describe('Sprague legitimate prefix match (Real Exports)', () => {
+    const { matchRespondentToClient, buildClientNameMap } = require('./index')._testExports;
+    const sprague = {
+      id: 'sp-1',
+      name: 'Sprague Operating Resources LLC',
+      akas: ['SPRAGUE OPERATING'],
+    };
+    const map = buildClientNameMap([sprague]);
+
+    test('AKA "SPRAGUE OPERATING" matches respondent "SPRAGUE OPERATING RESOURCES"', () => {
+      expect(matchRespondentToClient('', 'SPRAGUE OPERATING RESOURCES', map).id).toBe('sp-1');
+    });
+    test('respondent "SPRAGUE OPERATING" matches via the AKA', () => {
+      expect(matchRespondentToClient('', 'SPRAGUE OPERATING', map).id).toBe('sp-1');
+    });
+  });
+
+  // The API search-term guard drops terms too generic for a substring LIKE.
+  describe('buildSearchTerm guard (Real Exports)', () => {
+    const { buildSearchTerm } = require('./index')._testExports;
+
+    test('keeps specific multi-word names (suffix stripped)', () => {
+      expect(buildSearchTerm('ALL SEASON RESTORATION INC')).toBe('ALL SEASON RESTORATION');
+      expect(buildSearchTerm("MARSALA'S MAIL SERVICE INC")).toBe('MARSALAS MAIL SERVICE');
+    });
+    test('keeps single-word names at/above the floor', () => {
+      expect(buildSearchTerm('CERCONE')).toBe('CERCONE'); // bare-lastName pattern must stay fetchable
+      expect(buildSearchTerm('ACME')).toBe('ACME');       // 4 chars — historical floor preserved
+    });
+    test('drops too-short stubs (<= 3 chars after suffix strip)', () => {
+      expect(buildSearchTerm('ABC INC')).toBeNull();   // "ABC" 3 chars
+      expect(buildSearchTerm('Co LLC')).toBeNull();    // "CO" 2 chars
+      expect(buildSearchTerm('')).toBeNull();
     });
   });
 
