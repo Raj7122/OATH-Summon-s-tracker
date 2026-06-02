@@ -13,7 +13,13 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
 dayjs.extend(utc);
-import { InvoiceCartItem, InvoiceRecipient } from '../types/invoice';
+import {
+  InvoiceCartItem,
+  InvoiceExtraLineItem,
+  InvoiceRecipient,
+  HighlightedSections,
+} from '../types/invoice';
+import { sumExtrasLegalFees } from '../utils/invoiceGenerator';
 import {
   SENDER,
   INVOICE_SUBJECT,
@@ -31,7 +37,12 @@ interface InvoicePreviewProps {
   showOverdue: boolean;
   overdueText: string;
   additionalNotes: string;
+  extras?: InvoiceExtraLineItem[];
+  customMiddleText?: string;
+  highlightedSections?: HighlightedSections;
 }
+
+const HIGHLIGHT_BG = '#fff59d'; // MUI yellow.200 — matches PDF/DOCX yellow highlight
 
 // Format date as M/DD/YY to match PDF output
 const formatDate = (dateString: string | null): string => {
@@ -60,9 +71,13 @@ const InvoicePreview = ({
   showOverdue,
   overdueText,
   additionalNotes,
+  extras = [],
+  customMiddleText = '',
+  highlightedSections = {},
 }: InvoicePreviewProps) => {
   const invoiceDate = dayjs().format('MMMM D, YYYY');
-  const totalLegalFees = cartItems.reduce((sum, item) => sum + item.legal_fee, 0);
+  const totalLegalFees =
+    cartItems.reduce((sum, item) => sum + item.legal_fee, 0) + sumExtrasLegalFees(extras);
 
   return (
     <Paper
@@ -236,7 +251,10 @@ const InvoicePreview = ({
         </thead>
         <tbody>
           {cartItems.map((item) => (
-            <tr key={item.id}>
+            <tr
+              key={item.id}
+              style={item.highlighted ? { backgroundColor: HIGHLIGHT_BG } : undefined}
+            >
               <td style={{ fontFamily: 'monospace' }}>{item.summons_number}</td>
               <td>{formatDate(item.violation_date)}</td>
               <td>{item.status || ''}</td>
@@ -246,6 +264,20 @@ const InvoicePreview = ({
               <td style={{ textAlign: 'right' }}>{formatCurrency(item.legal_fee)}</td>
             </tr>
           ))}
+          {extras.map((e) => (
+            <tr
+              key={e.id}
+              style={e.highlighted ? { backgroundColor: HIGHLIGHT_BG } : undefined}
+            >
+              <td style={{ fontFamily: 'monospace' }}>{e.summons_number}</td>
+              <td>{e.violation_date}</td>
+              <td>{e.status}</td>
+              <td>{e.hearing_result}</td>
+              <td>{e.hearing_date}</td>
+              <td style={{ textAlign: 'right' }}>{e.amount_due}</td>
+              <td style={{ textAlign: 'right' }}>{e.legal_fee}</td>
+            </tr>
+          ))}
         </tbody>
       </Box>
 
@@ -253,28 +285,64 @@ const InvoicePreview = ({
       <Box sx={{ fontSize: '0.56rem', fontStyle: 'italic', lineHeight: 1.6 }}>
         {/* 1. Payment Instructions (conditional) */}
         {paymentInstructions.trim() && (
-          <Box sx={{ mb: 0.75 }}>{paymentInstructions}</Box>
+          <Box
+            sx={{
+              mb: 0.75,
+              bgcolor: highlightedSections.payment ? HIGHLIGHT_BG : 'transparent',
+              px: highlightedSections.payment ? 0.5 : 0,
+            }}
+          >
+            {paymentInstructions}
+          </Box>
         )}
 
         {/* 2. Review Text (conditional) */}
         {reviewText.trim() && (
-          <Box sx={{ mb: 1 }}>{reviewText}</Box>
+          <Box
+            sx={{
+              mb: 1,
+              bgcolor: highlightedSections.review ? HIGHLIGHT_BG : 'transparent',
+              px: highlightedSections.review ? 0.5 : 0,
+            }}
+          >
+            {reviewText}
+          </Box>
         )}
 
         {/* 3. Overdue Section + CityPay URL (toggleable) */}
         {showOverdue && (
-          <>
+          <Box
+            sx={{
+              mb: 1,
+              bgcolor: highlightedSections.overdue ? HIGHLIGHT_BG : 'transparent',
+              px: highlightedSections.overdue ? 0.5 : 0,
+            }}
+          >
             <Box sx={{ mb: 0.5 }}>{overdueText}</Box>
             <Box
               component="a"
               href={FOOTER_TEXT.cityPayUrl}
               target="_blank"
               rel="noopener noreferrer"
-              sx={{ color: 'blue', display: 'block', mb: 1 }}
+              sx={{ color: 'blue', display: 'block' }}
             >
               {FOOTER_TEXT.cityPayUrl}
             </Box>
-          </>
+          </Box>
+        )}
+
+        {/* 4. Custom middle paragraph (conditional, free-text per invoice) */}
+        {customMiddleText.trim() && (
+          <Box
+            sx={{
+              mb: 0.75,
+              whiteSpace: 'pre-wrap',
+              bgcolor: highlightedSections.customMiddle ? HIGHLIGHT_BG : 'transparent',
+              px: highlightedSections.customMiddle ? 0.5 : 0,
+            }}
+          >
+            {customMiddleText}
+          </Box>
         )}
 
         {/* 5. Questions text (always shown) */}
@@ -282,7 +350,15 @@ const InvoicePreview = ({
 
         {/* 6. Additional Notes (conditional) */}
         {additionalNotes.trim() && (
-          <Box sx={{ mb: 0.75 }}>{additionalNotes}</Box>
+          <Box
+            sx={{
+              mb: 0.75,
+              bgcolor: highlightedSections.additional ? HIGHLIGHT_BG : 'transparent',
+              px: highlightedSections.additional ? 0.5 : 0,
+            }}
+          >
+            {additionalNotes}
+          </Box>
         )}
 
         {/* 7. Closing text (always shown) */}

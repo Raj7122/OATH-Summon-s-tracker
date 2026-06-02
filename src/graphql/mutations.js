@@ -16,6 +16,7 @@ export const createClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      client_notes
       plate_filter_enabled
       plate_filter_list
       summonses {
@@ -43,6 +44,7 @@ export const updateClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      client_notes
       plate_filter_enabled
       plate_filter_list
       summonses {
@@ -70,6 +72,7 @@ export const deleteClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      client_notes
       plate_filter_enabled
       plate_filter_list
       summonses {
@@ -100,6 +103,7 @@ export const createSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        client_notes
         plate_filter_enabled
         plate_filter_list
         createdAt
@@ -191,6 +195,7 @@ export const updateSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        client_notes
         plate_filter_enabled
         plate_filter_list
         createdAt
@@ -282,6 +287,7 @@ export const deleteSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        client_notes
         plate_filter_enabled
         plate_filter_list
         createdAt
@@ -478,6 +484,270 @@ export const deleteSyncStatus = /* GraphQL */ `
       oath_api_reachable
       oath_api_last_check
       oath_api_error
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const createInvoice = /* GraphQL */ `
+  mutation CreateInvoice(
+    $input: CreateInvoiceInput!
+    $condition: ModelInvoiceConditionInput
+  ) {
+    createInvoice(input: $input, condition: $condition) {
+      id
+      invoice_number
+      invoice_date
+      recipient_company
+      recipient_attention
+      recipient_address
+      recipient_email
+      total_legal_fees
+      total_fines_due
+      item_count
+      payment_status
+      payment_date
+      alert_deadline
+      notes
+      clientID
+      pdf_s3_key
+      extra_line_items
+      highlighted_sections
+      custom_middle_text
+      payment_instructions
+      review_text
+      overdue_text
+      additional_notes
+      show_overdue
+      items {
+        nextToken
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const updateInvoice = /* GraphQL */ `
+  mutation UpdateInvoice(
+    $input: UpdateInvoiceInput!
+    $condition: ModelInvoiceConditionInput
+  ) {
+    updateInvoice(input: $input, condition: $condition) {
+      id
+      invoice_number
+      invoice_date
+      recipient_company
+      recipient_attention
+      recipient_address
+      recipient_email
+      total_legal_fees
+      total_fines_due
+      item_count
+      payment_status
+      payment_date
+      alert_deadline
+      notes
+      clientID
+      pdf_s3_key
+      extra_line_items
+      highlighted_sections
+      custom_middle_text
+      payment_instructions
+      review_text
+      overdue_text
+      additional_notes
+      show_overdue
+      items {
+        nextToken
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const deleteInvoice = /* GraphQL */ `
+  mutation DeleteInvoice(
+    $input: DeleteInvoiceInput!
+    $condition: ModelInvoiceConditionInput
+  ) {
+    deleteInvoice(input: $input, condition: $condition) {
+      id
+      invoice_number
+      invoice_date
+      recipient_company
+      recipient_attention
+      recipient_address
+      recipient_email
+      total_legal_fees
+      total_fines_due
+      item_count
+      payment_status
+      payment_date
+      alert_deadline
+      notes
+      clientID
+      pdf_s3_key
+      extra_line_items
+      highlighted_sections
+      custom_middle_text
+      payment_instructions
+      review_text
+      overdue_text
+      additional_notes
+      show_overdue
+      items {
+        nextToken
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const createInvoiceSummons = /* GraphQL */ `
+  mutation CreateInvoiceSummons(
+    $input: CreateInvoiceSummonsInput!
+    $condition: ModelInvoiceSummonsConditionInput
+  ) {
+    createInvoiceSummons(input: $input, condition: $condition) {
+      id
+      invoiceID
+      summonsID
+      summons_number
+      legal_fee
+      amount_due
+      highlighted
+      invoice {
+        id
+        invoice_number
+        invoice_date
+        recipient_company
+        recipient_attention
+        recipient_address
+        recipient_email
+        total_legal_fees
+        total_fines_due
+        item_count
+        payment_status
+        payment_date
+        alert_deadline
+        notes
+        clientID
+        pdf_s3_key
+        extra_line_items
+        highlighted_sections
+        custom_middle_text
+        payment_instructions
+        review_text
+        overdue_text
+        additional_notes
+        show_overdue
+        createdAt
+        updatedAt
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const updateInvoiceSummons = /* GraphQL */ `
+  mutation UpdateInvoiceSummons(
+    $input: UpdateInvoiceSummonsInput!
+    $condition: ModelInvoiceSummonsConditionInput
+  ) {
+    updateInvoiceSummons(input: $input, condition: $condition) {
+      id
+      invoiceID
+      summonsID
+      summons_number
+      legal_fee
+      amount_due
+      highlighted
+      invoice {
+        id
+        invoice_number
+        invoice_date
+        recipient_company
+        recipient_attention
+        recipient_address
+        recipient_email
+        total_legal_fees
+        total_fines_due
+        item_count
+        payment_status
+        payment_date
+        alert_deadline
+        notes
+        clientID
+        pdf_s3_key
+        extra_line_items
+        highlighted_sections
+        custom_middle_text
+        payment_instructions
+        review_text
+        overdue_text
+        additional_notes
+        show_overdue
+        createdAt
+        updatedAt
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const deleteInvoiceSummons = /* GraphQL */ `
+  mutation DeleteInvoiceSummons(
+    $input: DeleteInvoiceSummonsInput!
+    $condition: ModelInvoiceSummonsConditionInput
+  ) {
+    deleteInvoiceSummons(input: $input, condition: $condition) {
+      id
+      invoiceID
+      summonsID
+      summons_number
+      legal_fee
+      amount_due
+      highlighted
+      invoice {
+        id
+        invoice_number
+        invoice_date
+        recipient_company
+        recipient_attention
+        recipient_address
+        recipient_email
+        total_legal_fees
+        total_fines_due
+        item_count
+        payment_status
+        payment_date
+        alert_deadline
+        notes
+        clientID
+        pdf_s3_key
+        extra_line_items
+        highlighted_sections
+        custom_middle_text
+        payment_instructions
+        review_text
+        overdue_text
+        additional_notes
+        show_overdue
+        createdAt
+        updatedAt
+        __typename
+      }
       createdAt
       updatedAt
       __typename

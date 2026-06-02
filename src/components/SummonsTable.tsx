@@ -757,10 +757,14 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     {
       field: 'hearing_date',
       headerName: 'Hearing Date',
+      type: 'date',
       width: 150,
-      valueFormatter: (params: { value: string | null }) => {
+      valueGetter: (params: { value: string | null }) => {
+        if (!params.value) return null;
+        return dayjs.utc(params.value).toDate();
+      },
+      valueFormatter: (params: { value: Date | null }) => {
         if (!params.value) return '';
-        // Use dayjs.utc() to parse date-only fields correctly without timezone shift
         const parsed = dayjs.utc(params.value);
         return parsed.isValid() ? parsed.format('MMMM D, YYYY') : '';
       },
@@ -864,14 +868,24 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       ),
     },
     // Secondary columns - Hidden by default (Progressive Disclosure)
-    { field: 'license_plate_ocr', headerName: 'License Plate', width: 120 },
+    {
+      field: 'license_plate_ocr',
+      headerName: 'License Plate',
+      width: 120,
+      valueGetter: (params: { row: Summons }) =>
+        params.row.license_plate_ocr || params.row.license_plate || '',
+    },
     {
       field: 'violation_date',
       headerName: 'Violation Date',
+      type: 'date',
       width: 140,
-      valueFormatter: (params: { value: string | null }) => {
+      valueGetter: (params: { value: string | null }) => {
+        if (!params.value) return null;
+        return dayjs.utc(params.value).toDate();
+      },
+      valueFormatter: (params: { value: Date | null }) => {
         if (!params.value) return '';
-        // Use dayjs.utc() to parse date-only fields correctly without timezone shift
         const parsed = dayjs.utc(params.value);
         return parsed.isValid() ? parsed.format('MMMM D, YYYY') : '';
       },
@@ -879,10 +893,14 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
     {
       field: 'video_created_date',
       headerName: 'Video Created',
+      type: 'date',
       width: 140,
-      valueFormatter: (params: { value: string | null }) => {
+      valueGetter: (params: { value: string | null }) => {
+        if (!params.value) return null;
+        return dayjs.utc(params.value).toDate();
+      },
+      valueFormatter: (params: { value: Date | null }) => {
         if (!params.value) return '';
-        // Use dayjs.utc() to parse date-only fields correctly without timezone shift
         const parsed = dayjs.utc(params.value);
         return parsed.isValid() ? parsed.format('MMMM D, YYYY') : '';
       },

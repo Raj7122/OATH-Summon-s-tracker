@@ -33,6 +33,8 @@ import DocumentScannerIcon from '@mui/icons-material/DocumentScanner';
 import ArchiveIcon from '@mui/icons-material/Archive';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import FilterAltIcon from '@mui/icons-material/FilterAlt';
+import ReceiptIcon from '@mui/icons-material/Receipt';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { generateClient } from 'aws-amplify/api';
 import { listSummons } from '../graphql/queries';
 import { listClientsWithPlateFilter } from '../graphql/customQueries';
@@ -40,13 +42,20 @@ import { Client } from '../types/summons';
 import { applyPlateFilters } from '../lib/plateFilter';
 import SummonsTable from '../components/SummonsTable';
 import DashboardSummary from '../components/DashboardSummary';
+import SummonsAdvancedFilters from '../components/SummonsAdvancedFilters';
+import {
+  AdvancedFilterCriteria,
+  EMPTY_ADVANCED_FILTERS,
+  applyAdvancedFilters,
+  isAdvancedFilterActive,
+} from '../lib/advancedFilter';
 
 const client = generateClient();
 
 // Activity Log Entry for Summons Lifecycle Audit
 interface ActivityLogEntry {
   date: string;
-  type: 'CREATED' | 'STATUS_CHANGE' | 'RESCHEDULE' | 'RESULT_CHANGE' | 'AMOUNT_CHANGE' | 'PAYMENT' | 'AMENDMENT' | 'OCR_COMPLETE' | 'ARCHIVED' | 'EVIDENCE_UPLOADED';
+  type: 'CREATED' | 'STATUS_CHANGE' | 'RESCHEDULE' | 'RESULT_CHANGE' | 'AMOUNT_CHANGE' | 'PAYMENT' | 'AMENDMENT' | 'OCR_COMPLETE' | 'ARCHIVED' | 'EVIDENCE_UPLOADED' | 'INVOICE_CREATED' | 'INVOICE_DUE' | 'INVOICE_MODIFIED' | 'INVOICE_REMOVED';
   description: string;
   old_value: string | null;
   new_value: string | null;
@@ -101,6 +110,9 @@ interface Summons {
   // File attachments (AWSJSON - can be string or array)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   attachments?: any;
+  is_archived?: boolean;
+  archived_at?: string;
+  archived_reason?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -203,6 +215,10 @@ function getActivityIcon(type: ActivityLogEntry['type']) {
       return <ArchiveIcon sx={{ color: '#757575' }} />;
     case 'EVIDENCE_UPLOADED':
       return <AttachFileIcon sx={{ color: '#9C27B0' }} />; // Purple
+    case 'INVOICE_CREATED':
+      return <ReceiptIcon sx={{ color: '#009688' }} />; // Teal
+    case 'INVOICE_DUE':
+      return <AccessTimeIcon sx={{ color: '#E65100' }} />; // Deep orange
     default:
       return <HistoryIcon />;
   }
@@ -218,6 +234,8 @@ const Dashboard = () => {
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>(null);
   const [auditTrailOpen, setAuditTrailOpen] = useState(false);
   const [auditTrailFilter, setAuditTrailFilter] = useState<AuditTrailFilterType>(null);
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilterCriteria>(EMPTY_ADVANCED_FILTERS);
+  const [showArchived, setShowArchived] = useState(false);
 
   useEffect(() => {
     loadSummonses();
@@ -389,35 +407,44 @@ const Dashboard = () => {
    * TRD v1.8: Updated to use business day logic and added hearing_complete filter
    * @returns Filtered array of summonses
    */
+  // Archived rows are hidden by default. The user can opt in via the
+  // "Show archived" toggle. We pre-filter here so summary counts, advanced
+  // filter dropdowns, the table, and the activity-card filters all stay
+  // consistent with what's actually visible.
+  const visibleSummonses = showArchived
+    ? summonses
+    : summonses.filter((s) => !s.is_archived);
+  const archivedCount = summonses.length - visibleSummonses.length;
+
   const getFilteredSummonses = (): Summons[] => {
     // First check activity filter (UPDATED/NEW)
     if (activityFilter) {
-      console.log('Activity filter:', activityFilter, 'Total summonses:', summonses.length);
+      console.log('Activity filter:', activityFilter, 'Total summonses:', visibleSummonses.length);
 
       if (activityFilter === 'new') {
-        const filtered = summonses.filter(isNewRecord);
+        const filtered = visibleSummonses.filter(isNewRecord);
         console.log('NEW filter returned:', filtered.length, 'summonses');
         return filtered;
       }
 
       if (activityFilter === 'updated') {
-        const filtered = summonses.filter(isUpdatedRecord);
+        const filtered = visibleSummonses.filter(isUpdatedRecord);
         console.log('UPDATED filter returned:', filtered.length, 'summonses');
         return filtered;
       }
     }
 
     if (!activeFilter) {
-      console.log('No active filter, showing all summonses:', summonses.length);
-      return summonses;
+      console.log('No active filter, showing all summonses:', visibleSummonses.length);
+      return visibleSummonses;
     }
 
     const now = new Date();
-    console.log('Active filter:', activeFilter, 'Total summonses:', summonses.length);
+    console.log('Active filter:', activeFilter, 'Total summonses:', visibleSummonses.length);
 
     if (activeFilter === 'critical') {
       // Hearings within 7 business days (TRD v1.8: business day logic)
-      const filtered = summonses.filter((summons) => {
+      const filtered = visibleSummonses.filter((summons) => {
         if (!summons.hearing_date) return false;
         const hearingDate = new Date(summons.hearing_date);
         if (hearingDate < now) return false; // Skip past dates
@@ -431,7 +458,7 @@ const Dashboard = () => {
 
     if (activeFilter === 'approaching') {
       // Hearings in 8-21 business days (TRD v1.8: business day logic)
-      const filtered = summonses.filter((summons) => {
+      const filtered = visibleSummonses.filter((summons) => {
         if (!summons.hearing_date) return false;
         const hearingDate = new Date(summons.hearing_date);
         if (hearingDate < now) return false; // Skip past dates
@@ -445,7 +472,7 @@ const Dashboard = () => {
 
     if (activeFilter === 'hearing_complete') {
       // Summonses marked as "Hearing Complete" (TRD v1.8: Client Feedback)
-      const filtered = summonses.filter((summons) => {
+      const filtered = visibleSummonses.filter((summons) => {
         return summons.internal_status === 'Hearing Complete';
       });
       console.log('Hearing Complete filter returned:', filtered.length, 'summonses');
@@ -454,7 +481,7 @@ const Dashboard = () => {
 
     if (activeFilter === 'evidence_pending') {
       // Evidence requested but not yet received (TRD v1.9: Evidence tracking)
-      const filtered = summonses.filter((summons) => {
+      const filtered = visibleSummonses.filter((summons) => {
         return summons.evidence_requested === true && summons.evidence_received === false;
       });
       console.log('Evidence Pending filter returned:', filtered.length, 'summonses');
@@ -463,7 +490,7 @@ const Dashboard = () => {
 
     if (activeFilter === 'has_evidence') {
       // Summonses with file attachments, sorted by hearing date (soonest first)
-      const filtered = summonses.filter((summons) => {
+      const filtered = visibleSummonses.filter((summons) => {
         if (!summons.attachments) return false;
         let parsed: unknown[] = [];
         if (typeof summons.attachments === 'string') {
@@ -488,10 +515,12 @@ const Dashboard = () => {
     }
 
     console.log('No matching filter, returning all summonses');
-    return summonses;
+    return visibleSummonses;
   };
 
-  const filteredSummonses = getFilteredSummonses();
+  const quickFilteredSummonses = getFilteredSummonses();
+  const filteredSummonses = applyAdvancedFilters(quickFilteredSummonses, advancedFilters);
+  const advancedActive = isAdvancedFilterActive(advancedFilters);
 
   return (
     <Box>
@@ -579,13 +608,36 @@ const Dashboard = () => {
             Audit Trail
           </Button>
 
-          {(activeFilter || activityFilter) && (
+          {/* Show archived rows. Archived rows are hidden by default so
+              stale orphans (e.g., summonses created when a client AKA later
+              gets removed) don't bleed into the live dashboard. */}
+          <Button
+            variant={showArchived ? 'contained' : 'outlined'}
+            startIcon={<ArchiveIcon />}
+            onClick={() => setShowArchived((v) => !v)}
+            size="small"
+            color={showArchived ? 'primary' : 'inherit'}
+            sx={
+              showArchived
+                ? undefined
+                : {
+                    borderColor: 'grey.400',
+                    color: 'text.secondary',
+                    '&:hover': { borderColor: 'grey.600', backgroundColor: 'grey.100' },
+                  }
+            }
+          >
+            {showArchived ? `Hide archived (${archivedCount})` : `Show archived${archivedCount ? ` (${archivedCount})` : ''}`}
+          </Button>
+
+          {(activeFilter || activityFilter || advancedActive) && (
             <Button
               variant="outlined"
               startIcon={<FilterListOffIcon />}
               onClick={() => {
                 setActiveFilter(null);
                 setActivityFilter(null);
+                setAdvancedFilters(EMPTY_ADVANCED_FILTERS);
               }}
               color="secondary"
               size="small"
@@ -612,9 +664,19 @@ const Dashboard = () => {
         <>
           {/* Summary Widgets Section - FR-10 with Interactive Quick Filters */}
           <DashboardSummary
-            summonses={summonses}
+            summonses={visibleSummonses}
             activeFilter={activeFilter}
             onFilterClick={handleFilterClick}
+          />
+
+          {/* Advanced Filters - multi-select Status + Hearing Date range.
+              Composes (AND) with the quick-filter cards above. */}
+          <SummonsAdvancedFilters
+            summonses={visibleSummonses}
+            value={advancedFilters}
+            onChange={setAdvancedFilters}
+            totalCount={quickFilteredSummonses.length}
+            filteredCount={filteredSummonses.length}
           />
 
           {/* DataGrid Section - Shows filtered results when a deadline card is clicked */}
@@ -751,6 +813,22 @@ const Dashboard = () => {
                 variant={auditTrailFilter === 'ARCHIVED' ? 'filled' : 'outlined'}
                 color={auditTrailFilter === 'ARCHIVED' ? 'primary' : 'default'}
                 onClick={() => setAuditTrailFilter('ARCHIVED')}
+                sx={{ cursor: 'pointer' }}
+              />
+              <Chip
+                label="Invoiced"
+                size="small"
+                variant={auditTrailFilter === 'INVOICE_CREATED' ? 'filled' : 'outlined'}
+                color={auditTrailFilter === 'INVOICE_CREATED' ? 'primary' : 'default'}
+                onClick={() => setAuditTrailFilter('INVOICE_CREATED')}
+                sx={{ cursor: 'pointer' }}
+              />
+              <Chip
+                label="Due"
+                size="small"
+                variant={auditTrailFilter === 'INVOICE_DUE' ? 'filled' : 'outlined'}
+                color={auditTrailFilter === 'INVOICE_DUE' ? 'warning' : 'default'}
+                onClick={() => setAuditTrailFilter('INVOICE_DUE')}
                 sx={{ cursor: 'pointer' }}
               />
             </Box>

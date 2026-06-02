@@ -21,6 +21,9 @@ export const InvoiceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   });
 
+  // Alert deadline for invoice tracking (null = use default 7 days)
+  const [alertDeadline, setAlertDeadline] = useState<string | null>(null);
+
   // Initialize recipient from LocalStorage with migration for new email field
   const [recipient, setRecipientState] = useState<InvoiceRecipient>(() => {
     try {
@@ -90,6 +93,15 @@ export const InvoiceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setCartItems((prev) => prev.filter((item) => item.id !== summonsId));
   }, []);
 
+  // Remove multiple summonses from the cart in a single state update.
+  // Used by InvoiceBuilder to drain only the active client's items after
+  // generating a per-client invoice, leaving the remaining clients intact.
+  const removeManyFromCart = useCallback((summonsIds: string[]) => {
+    if (summonsIds.length === 0) return;
+    const idSet = new Set(summonsIds);
+    setCartItems((prev) => prev.filter((item) => !idSet.has(item.id)));
+  }, []);
+
   // Update the legal fee for a specific summons
   const updateLegalFee = useCallback((summonsId: string, newFee: number) => {
     setCartItems((prev) =>
@@ -108,10 +120,41 @@ export const InvoiceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     );
   }, []);
 
+  // Update the Hearing Status column for a specific summons.
+  // This value is shown on the invoice preview and baked into the generated
+  // PDF/DOCX. Kept separate from the underlying Summons record so the user can
+  // present a cleaner/curated value for legal correspondence without altering
+  // the source OATH data.
+  const updateStatus = useCallback((summonsId: string, newStatus: string) => {
+    setCartItems((prev) =>
+      prev.map((item) => (item.id === summonsId ? { ...item, status: newStatus } : item)),
+    );
+  }, []);
+
+  // Update the Results (hearing_result) column for a specific summons.
+  // Same rationale as updateStatus — ephemeral override for the invoice only.
+  const updateHearingResult = useCallback((summonsId: string, newResult: string | null) => {
+    setCartItems((prev) =>
+      prev.map((item) => (item.id === summonsId ? { ...item, hearing_result: newResult } : item)),
+    );
+  }, []);
+
+  // Toggle the yellow-highlight flag for a summons row on the invoice.
+  // Persisted to localStorage along with the rest of the cart, then saved to
+  // DynamoDB via the InvoiceSummons.highlighted field when the invoice is generated.
+  const toggleSummonsHighlight = useCallback((summonsId: string) => {
+    setCartItems((prev) =>
+      prev.map((item) =>
+        item.id === summonsId ? { ...item, highlighted: !item.highlighted } : item,
+      ),
+    );
+  }, []);
+
   // Clear all items from the cart
   const clearCart = useCallback(() => {
     setCartItems([]);
     setRecipientState(DEFAULT_RECIPIENT);
+    setAlertDeadline(null);
   }, []);
 
   // Check if a summons is already in the cart
@@ -153,10 +196,15 @@ export const InvoiceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const value: InvoiceContextType = {
     cartItems,
     recipient,
+    alertDeadline,
     addToCart,
     removeFromCart,
+    removeManyFromCart,
     updateLegalFee,
     updateAmountDue,
+    updateStatus,
+    updateHearingResult,
+    toggleSummonsHighlight,
     clearCart,
     isInCart,
     setRecipient,
@@ -164,6 +212,7 @@ export const InvoiceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     getCartCount,
     getTotalLegalFees,
     getTotalFinesDue,
+    setAlertDeadline,
   };
 
   return <InvoiceContext.Provider value={value}>{children}</InvoiceContext.Provider>;

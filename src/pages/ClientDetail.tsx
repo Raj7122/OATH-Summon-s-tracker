@@ -53,12 +53,19 @@ import RemoveShoppingCartIcon from '@mui/icons-material/RemoveShoppingCart';
 import { generateClient } from 'aws-amplify/api';
 
 import { getClient, listSummons } from '../graphql/queries';
-import { getClientWithPlateFilter } from '../graphql/customQueries';
+import { getClientWithPlateFilter, invoicesByClientBasic, invoiceSummonsForInvoice } from '../graphql/customQueries';
 import { updateSummons } from '../graphql/mutations';
 import { Client, Summons, isNewRecord, isUpdatedRecord } from '../types/summons';
 import { applyClientPlateFilter } from '../lib/plateFilter';
 import SummonsDetailModal from '../components/SummonsDetailModal';
 import ExportConfigurationModal from '../components/ExportConfigurationModal';
+import ClientInvoicesDialog from '../components/ClientInvoicesDialog';
+import SummonsAdvancedFilters from '../components/SummonsAdvancedFilters';
+import {
+  AdvancedFilterCriteria,
+  EMPTY_ADVANCED_FILTERS,
+  applyAdvancedFilters,
+} from '../lib/advancedFilter';
 import { useCSVExport } from '../hooks/useCSVExport';
 import { ExportConfig } from '../lib/csvExport';
 import { isInvoiced as isInvoicedLocally, getInvoiceDate as getInvoiceDateLocally, unmarkAsInvoiced } from '../utils/invoiceTracking';
@@ -133,6 +140,10 @@ const ClientDetail: React.FC = () => {
     { field: 'hearing_date', sort: 'desc' },
   ]);
 
+  // Advanced Filters - multi-select Status + Hearing Date range.
+  // Applied on top of the Active Era (2022+) cutoff below.
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilterCriteria>(EMPTY_ADVANCED_FILTERS);
+
   // Modal State
   const [selectedSummons, setSelectedSummons] = useState<Summons | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -140,6 +151,19 @@ const ClientDetail: React.FC = () => {
   // Export State
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const { progress: exportProgress, isExporting, error: exportError, exportClientSummonses, resetExport } = useCSVExport();
+
+  // Invoices dialog + count
+  const [invoicesDialogOpen, setInvoicesDialogOpen] = useState(false);
+  const [invoiceCount, setInvoiceCount] = useState<number>(0);
+
+  // Map of summonsID → payment info, derived from this client's invoices +
+  // their join rows. Drives the "Paid" column in the case-history grid so
+  // Arthur can see "invoiced this AND got paid" at a glance.
+  const [summonsPaymentMap, setSummonsPaymentMap] = useState<Map<string, {
+    paid: boolean;
+    paymentDate: string | null;
+    invoiceNumber: string;
+  }>>(new Map());
 
   /**
    * Load client details
@@ -274,6 +298,85 @@ const ClientDetail: React.FC = () => {
     loadClient();
   }, [loadClient]);
 
+  // Load this client's invoices + their join rows in one pass. Populates the
+  // invoice count tile AND the summonsID → payment_status map that drives
+  // the "Paid" column in the case-history grid.
+  //
+  // Exposed as a useCallback so child dialogs (ClientInvoicesDialog,
+  // SummonsDetailModal) can trigger a refresh after mark-paid / delete
+  // without requiring navigation.
+  const refreshInvoiceData = useCallback(async () => {
+    if (!id) return;
+    try {
+      type InvoiceLite = {
+        id: string;
+        invoice_number: string;
+        payment_status: 'paid' | 'unpaid';
+        payment_date?: string | null;
+      };
+      type InvoiceSummonsLite = { summonsID: string };
+      type InvoicesResp = {
+        data?: { invoicesByClientID?: { items?: InvoiceLite[]; nextToken?: string | null } };
+      };
+      type ItemsResp = {
+        data?: { invoiceSummonsByInvoiceIDAndSummonsID?: { items?: InvoiceSummonsLite[]; nextToken?: string | null } };
+      };
+
+      const invoices: InvoiceLite[] = [];
+      let nextTok: string | null = null;
+      let fetches = 0;
+      while (fetches < 20) {
+        const result = (await apiClient.graphql({
+          query: invoicesByClientBasic,
+          variables: { clientID: id, limit: 1000, nextToken: nextTok },
+        })) as InvoicesResp;
+        const page = result?.data?.invoicesByClientID;
+        if (!page) break;
+        invoices.push(...(page.items || []));
+        nextTok = page.nextToken || null;
+        fetches++;
+        if (!nextTok) break;
+      }
+      setInvoiceCount(invoices.length);
+
+      // For each invoice, hydrate its InvoiceSummons rows. A paid invoice
+      // wins over an unpaid one if the same summons happens to be on both
+      // — Arthur cares whether the money arrived for this summons at all.
+      const map = new Map<string, { paid: boolean; paymentDate: string | null; invoiceNumber: string }>();
+      await Promise.all(invoices.map(async (inv) => {
+        try {
+          const itemsResp = (await apiClient.graphql({
+            query: invoiceSummonsForInvoice,
+            variables: { invoiceID: inv.id, limit: 1000 },
+          })) as ItemsResp;
+          const items = itemsResp?.data?.invoiceSummonsByInvoiceIDAndSummonsID?.items || [];
+          const paid = inv.payment_status === 'paid';
+          items.forEach((it) => {
+            const existing = map.get(it.summonsID);
+            if (!existing || (!existing.paid && paid)) {
+              map.set(it.summonsID, {
+                paid,
+                paymentDate: inv.payment_date || null,
+                invoiceNumber: inv.invoice_number,
+              });
+            }
+          });
+        } catch (err) {
+          console.warn(`Could not load items for invoice ${inv.id}:`, err);
+        }
+      }));
+      setSummonsPaymentMap(map);
+    } catch (err) {
+      // Gracefully degrade — the tile will show 0 and the Paid column will
+      // be empty if the queries fail.
+      console.warn('Could not load invoices for client:', err);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    refreshInvoiceData();
+  }, [refreshInvoiceData]);
+
   // Load summonses when client is loaded
   useEffect(() => {
     if (client) {
@@ -285,12 +388,23 @@ const ClientDetail: React.FC = () => {
   /**
    * Filter summonses to Active Era (2022+) only
    */
-  const filteredSummonses = useMemo(() => {
+  const activeEraSummonses = useMemo(() => {
     return summonses.filter((s) => {
       if (!s.hearing_date) return true; // Include records without hearing date
       return new Date(s.hearing_date) >= new Date(PRE_2022_CUTOFF);
     });
   }, [summonses]);
+
+  /**
+   * Apply advanced filters (multi-status + hearing date range) on top of the
+   * Active Era cutoff. The DataGrid renders this list, and the CSV export
+   * threads `advancedFilters` through `useCSVExport` so reports honor the
+   * same filter state.
+   */
+  const filteredSummonses = useMemo(
+    () => applyAdvancedFilters(activeEraSummonses, advancedFilters),
+    [activeEraSummonses, advancedFilters]
+  );
 
   /**
    * Calculate header stats
@@ -362,6 +476,7 @@ const ClientDetail: React.FC = () => {
       );
     } catch (err) {
       console.error('Error updating summons:', err);
+      throw err;
     }
   }, []);
 
@@ -622,6 +737,36 @@ const ClientDetail: React.FC = () => {
       },
     },
     {
+      field: 'payment_status_derived',
+      headerName: 'Paid',
+      width: 70,
+      align: 'center',
+      headerAlign: 'center',
+      sortable: false,
+      filterable: false,
+      disableColumnMenu: true,
+      // Derived from summonsPaymentMap (see invoice-loading effect above).
+      // A summons is "paid" when any invoice containing it has
+      // payment_status === 'paid'. Column is independent of is_invoiced so
+      // Arthur can scan for "invoiced but still unpaid" by comparing columns.
+      renderCell: (params) => {
+        const info = summonsPaymentMap.get(params.row.id);
+        if (info?.paid) {
+          const tip = info.paymentDate
+            ? `Paid ${dayjs.utc(info.paymentDate).format('MMM D, YYYY')} (${info.invoiceNumber})`
+            : `Paid (${info.invoiceNumber})`;
+          return (
+            <Tooltip title={tip} arrow placement="top">
+              <CheckCircleOutlineIcon sx={{ color: 'success.main', fontSize: 18 }} />
+            </Tooltip>
+          );
+        }
+        return (
+          <Box sx={{ width: 16, height: 16, borderRadius: '50%', border: '1.5px solid', borderColor: 'grey.300' }} />
+        );
+      },
+    },
+    {
       field: 'cart',
       headerName: 'Cart',
       width: 60,
@@ -678,7 +823,7 @@ const ClientDetail: React.FC = () => {
         );
       },
     },
-  ], [isInCart, addToCart, removeFromCart]);
+  ], [isInCart, addToCart, removeFromCart, summonsPaymentMap]);
 
   /**
    * Handle row click to open detail modal
@@ -728,8 +873,10 @@ const ClientDetail: React.FC = () => {
    */
   const handleExport = useCallback(async (config: ExportConfig) => {
     if (!client) return;
-    await exportClientSummonses(client, config);
-  }, [client, exportClientSummonses]);
+    // Thread the in-page advanced filter state through so the CSV honors
+    // the same status / date-range selection the user sees in the grid.
+    await exportClientSummonses(client, config, advancedFilters);
+  }, [client, exportClientSummonses, advancedFilters]);
 
   /**
    * Handle export modal close
@@ -822,9 +969,9 @@ const ClientDetail: React.FC = () => {
           </Tooltip>
         </Box>
 
-        {/* Metrics Grid - 4 columns */}
+        {/* Metrics Grid - 5 columns (sm+). The Invoices tile is clickable. */}
         <Grid container spacing={3}>
-          <Grid item xs={6} sm={3}>
+          <Grid item xs={6} sm={2.4}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Box
                 sx={{
@@ -849,7 +996,7 @@ const ClientDetail: React.FC = () => {
               </Box>
             </Box>
           </Grid>
-          <Grid item xs={6} sm={3}>
+          <Grid item xs={6} sm={2.4}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Box
                 sx={{
@@ -889,7 +1036,7 @@ const ClientDetail: React.FC = () => {
               </Box>
             </Box>
           </Grid>
-          <Grid item xs={6} sm={3}>
+          <Grid item xs={6} sm={2.4}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Box
                 sx={{
@@ -914,7 +1061,7 @@ const ClientDetail: React.FC = () => {
               </Box>
             </Box>
           </Grid>
-          <Grid item xs={6} sm={3}>
+          <Grid item xs={6} sm={2.4}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Box
                 sx={{
@@ -938,6 +1085,48 @@ const ClientDetail: React.FC = () => {
                 </Typography>
               </Box>
             </Box>
+          </Grid>
+          <Grid item xs={6} sm={2.4}>
+            <Tooltip title="View all invoices for this client">
+              <Box
+                onClick={() => setInvoicesDialogOpen(true)}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1.5,
+                  cursor: 'pointer',
+                  borderRadius: 1.5,
+                  p: 0.5,
+                  mx: -0.5,
+                  transition: 'background-color 120ms',
+                  '&:hover': {
+                    bgcolor: (theme) => alpha(theme.palette.primary.main, 0.04),
+                  },
+                }}
+              >
+                <Box
+                  sx={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 1.5,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    bgcolor: (theme) => alpha(theme.palette.secondary.main, 0.08),
+                  }}
+                >
+                  <ReceiptLongIcon sx={{ color: 'secondary.main', fontSize: 20 }} />
+                </Box>
+                <Box>
+                  <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+                    {invoiceCount}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Invoices
+                  </Typography>
+                </Box>
+              </Box>
+            </Tooltip>
           </Grid>
         </Grid>
       </Paper>
@@ -984,6 +1173,17 @@ const ClientDetail: React.FC = () => {
 
       {/* Loading indicator */}
       {loadingMore && <LinearProgress sx={{ mb: 1, borderRadius: 1 }} />}
+
+      {/* Advanced Filters - multi-select Status + Hearing Date range.
+          Applies on top of the Active Era (2022+) filter and is also
+          honored by the CSV export below. */}
+      <SummonsAdvancedFilters
+        summonses={activeEraSummonses}
+        value={advancedFilters}
+        onChange={setAdvancedFilters}
+        totalCount={activeEraSummonses.length}
+        filteredCount={filteredSummonses.length}
+      />
 
       {/* Master History DataGrid - Enterprise Style */}
       <Paper
@@ -1087,6 +1287,7 @@ const ClientDetail: React.FC = () => {
           setSelectedSummons(null);
         }}
         onUpdate={handleSummonsUpdate}
+        onInvoicesChanged={refreshInvoiceData}
       />
 
       {/* Export Configuration Modal */}
@@ -1098,6 +1299,16 @@ const ClientDetail: React.FC = () => {
         progress={exportProgress}
         isExporting={isExporting}
         error={exportError}
+      />
+
+      {/* Client Invoices Dialog */}
+      <ClientInvoicesDialog
+        open={invoicesDialogOpen}
+        onClose={() => setInvoicesDialogOpen(false)}
+        clientID={id ?? ''}
+        clientName={client.name}
+        onCountChange={setInvoiceCount}
+        onInvoicesChanged={refreshInvoiceData}
       />
     </Box>
   );

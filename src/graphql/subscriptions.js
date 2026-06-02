@@ -13,6 +13,7 @@ export const onCreateClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      client_notes
       plate_filter_enabled
       plate_filter_list
       summonses {
@@ -37,6 +38,7 @@ export const onUpdateClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      client_notes
       plate_filter_enabled
       plate_filter_list
       summonses {
@@ -61,6 +63,7 @@ export const onDeleteClient = /* GraphQL */ `
       contact_email1
       contact_phone2
       contact_email2
+      client_notes
       plate_filter_enabled
       plate_filter_list
       summonses {
@@ -88,6 +91,7 @@ export const onCreateSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        client_notes
         plate_filter_enabled
         plate_filter_list
         createdAt
@@ -176,6 +180,7 @@ export const onUpdateSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        client_notes
         plate_filter_enabled
         plate_filter_list
         createdAt
@@ -264,6 +269,7 @@ export const onDeleteSummons = /* GraphQL */ `
         contact_email1
         contact_phone2
         contact_email2
+        client_notes
         plate_filter_enabled
         plate_filter_list
         createdAt
@@ -457,6 +463,258 @@ export const onDeleteSyncStatus = /* GraphQL */ `
       oath_api_reachable
       oath_api_last_check
       oath_api_error
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const onCreateInvoice = /* GraphQL */ `
+  subscription OnCreateInvoice($filter: ModelSubscriptionInvoiceFilterInput) {
+    onCreateInvoice(filter: $filter) {
+      id
+      invoice_number
+      invoice_date
+      recipient_company
+      recipient_attention
+      recipient_address
+      recipient_email
+      total_legal_fees
+      total_fines_due
+      item_count
+      payment_status
+      payment_date
+      alert_deadline
+      notes
+      clientID
+      pdf_s3_key
+      extra_line_items
+      highlighted_sections
+      custom_middle_text
+      payment_instructions
+      review_text
+      overdue_text
+      additional_notes
+      show_overdue
+      items {
+        nextToken
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const onUpdateInvoice = /* GraphQL */ `
+  subscription OnUpdateInvoice($filter: ModelSubscriptionInvoiceFilterInput) {
+    onUpdateInvoice(filter: $filter) {
+      id
+      invoice_number
+      invoice_date
+      recipient_company
+      recipient_attention
+      recipient_address
+      recipient_email
+      total_legal_fees
+      total_fines_due
+      item_count
+      payment_status
+      payment_date
+      alert_deadline
+      notes
+      clientID
+      pdf_s3_key
+      extra_line_items
+      highlighted_sections
+      custom_middle_text
+      payment_instructions
+      review_text
+      overdue_text
+      additional_notes
+      show_overdue
+      items {
+        nextToken
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const onDeleteInvoice = /* GraphQL */ `
+  subscription OnDeleteInvoice($filter: ModelSubscriptionInvoiceFilterInput) {
+    onDeleteInvoice(filter: $filter) {
+      id
+      invoice_number
+      invoice_date
+      recipient_company
+      recipient_attention
+      recipient_address
+      recipient_email
+      total_legal_fees
+      total_fines_due
+      item_count
+      payment_status
+      payment_date
+      alert_deadline
+      notes
+      clientID
+      pdf_s3_key
+      extra_line_items
+      highlighted_sections
+      custom_middle_text
+      payment_instructions
+      review_text
+      overdue_text
+      additional_notes
+      show_overdue
+      items {
+        nextToken
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const onCreateInvoiceSummons = /* GraphQL */ `
+  subscription OnCreateInvoiceSummons(
+    $filter: ModelSubscriptionInvoiceSummonsFilterInput
+  ) {
+    onCreateInvoiceSummons(filter: $filter) {
+      id
+      invoiceID
+      summonsID
+      summons_number
+      legal_fee
+      amount_due
+      highlighted
+      invoice {
+        id
+        invoice_number
+        invoice_date
+        recipient_company
+        recipient_attention
+        recipient_address
+        recipient_email
+        total_legal_fees
+        total_fines_due
+        item_count
+        payment_status
+        payment_date
+        alert_deadline
+        notes
+        clientID
+        pdf_s3_key
+        extra_line_items
+        highlighted_sections
+        custom_middle_text
+        payment_instructions
+        review_text
+        overdue_text
+        additional_notes
+        show_overdue
+        createdAt
+        updatedAt
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const onUpdateInvoiceSummons = /* GraphQL */ `
+  subscription OnUpdateInvoiceSummons(
+    $filter: ModelSubscriptionInvoiceSummonsFilterInput
+  ) {
+    onUpdateInvoiceSummons(filter: $filter) {
+      id
+      invoiceID
+      summonsID
+      summons_number
+      legal_fee
+      amount_due
+      highlighted
+      invoice {
+        id
+        invoice_number
+        invoice_date
+        recipient_company
+        recipient_attention
+        recipient_address
+        recipient_email
+        total_legal_fees
+        total_fines_due
+        item_count
+        payment_status
+        payment_date
+        alert_deadline
+        notes
+        clientID
+        pdf_s3_key
+        extra_line_items
+        highlighted_sections
+        custom_middle_text
+        payment_instructions
+        review_text
+        overdue_text
+        additional_notes
+        show_overdue
+        createdAt
+        updatedAt
+        __typename
+      }
+      createdAt
+      updatedAt
+      __typename
+    }
+  }
+`;
+export const onDeleteInvoiceSummons = /* GraphQL */ `
+  subscription OnDeleteInvoiceSummons(
+    $filter: ModelSubscriptionInvoiceSummonsFilterInput
+  ) {
+    onDeleteInvoiceSummons(filter: $filter) {
+      id
+      invoiceID
+      summonsID
+      summons_number
+      legal_fee
+      amount_due
+      highlighted
+      invoice {
+        id
+        invoice_number
+        invoice_date
+        recipient_company
+        recipient_attention
+        recipient_address
+        recipient_email
+        total_legal_fees
+        total_fines_due
+        item_count
+        payment_status
+        payment_date
+        alert_deadline
+        notes
+        clientID
+        pdf_s3_key
+        extra_line_items
+        highlighted_sections
+        custom_middle_text
+        payment_instructions
+        review_text
+        overdue_text
+        additional_notes
+        show_overdue
+        createdAt
+        updatedAt
+        __typename
+      }
       createdAt
       updatedAt
       __typename

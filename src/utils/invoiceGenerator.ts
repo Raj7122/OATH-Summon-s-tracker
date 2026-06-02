@@ -14,9 +14,10 @@ import {
   UnderlineType,
   HeadingLevel,
   ExternalHyperlink,
+  ShadingType,
 } from 'docx';
 import { saveAs } from 'file-saver';
-import { InvoiceCartItem, InvoiceRecipient, InvoiceOptions } from '../types/invoice';
+import { InvoiceCartItem, InvoiceExtraLineItem, InvoiceRecipient, InvoiceOptions } from '../types/invoice';
 import {
   SENDER,
   INVOICE_SUBJECT,
@@ -49,16 +50,92 @@ const formatCurrencyWithDecimals = (amount: number): string => {
   return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
+// Parse a user-typed currency string into a number for totals math.
+// Accepts "250", "$250.00", "1,500", etc. Returns 0 for empty/non-numeric input.
+export const parseExtraAmount = (raw: string | null | undefined): number => {
+  if (!raw) return 0;
+  const cleaned = raw.replace(/[^0-9.\-]/g, '');
+  if (!cleaned) return 0;
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : 0;
+};
+
+// Sum extras' legal_fee contributions. Extras' amount_due is intentionally
+// excluded from totals per user spec (Fines Due rolls only from summons rows).
+export const sumExtrasLegalFees = (extras: InvoiceExtraLineItem[] | undefined): number => {
+  if (!extras || extras.length === 0) return 0;
+  return extras.reduce((sum, e) => sum + parseExtraAmount(e.legal_fee), 0);
+};
+
+// Yellow marker color used for both PDF (RGB) and DOCX (hex) highlights.
+const HIGHLIGHT_RGB: [number, number, number] = [255, 245, 157];
+const HIGHLIGHT_HEX = 'FFF59D';
+
+// Top margin used when paginating footer paragraphs onto a fresh page.
+const FOOTER_PAGE_TOP = 20;
+// Bottom keep-out: footer paragraphs that would draw past (pageHeight - this)
+// get pushed to the next page instead of being clipped.
+const FOOTER_BOTTOM_MARGIN = 20;
+
+// If a block of `blockHeight` mm would overflow the current page, start a new
+// page and reset the cursor. Returns the (possibly updated) y-position.
+const ensureRoomFor = (
+  doc: jsPDF,
+  yPos: number,
+  blockHeight: number,
+  pageHeight: number,
+): number => {
+  if (yPos + blockHeight > pageHeight - FOOTER_BOTTOM_MARGIN) {
+    doc.addPage();
+    return FOOTER_PAGE_TOP;
+  }
+  return yPos;
+};
+
+// Draw a footer paragraph with optional yellow highlight, paginating to a new
+// page if the whole block won't fit on the current page. jsPDF's text() draws
+// at the baseline, so the highlight rect is placed ~3.5mm above to cover the
+// ascenders of all wrapped lines.
+const drawFooterParagraph = (
+  doc: jsPDF,
+  text: string,
+  x: number,
+  y: number,
+  width: number,
+  highlight: boolean,
+  pageHeight: number,
+  lineHeight = 5,
+): { y: number; used: number } => {
+  const lines = doc.splitTextToSize(text, width);
+  const blockHeight = lines.length * lineHeight + (highlight ? 1 : 0);
+  const yStart = ensureRoomFor(doc, y, blockHeight, pageHeight);
+  if (highlight) {
+    doc.setFillColor(...HIGHLIGHT_RGB);
+    doc.rect(x - 1, yStart - 3.5, width + 2, lines.length * lineHeight + 1, 'F');
+  }
+  doc.text(lines, x, yStart);
+  return { y: yStart, used: lines.length * lineHeight };
+};
+
+// Build the docx shading config for a highlighted paragraph or cell.
+const docxHighlightShading = {
+  type: ShadingType.CLEAR,
+  fill: HIGHLIGHT_HEX,
+  color: 'auto',
+} as const;
+
 /**
  * Generate PDF invoice using jsPDF
  */
 export const generatePDF = async (
   items: InvoiceCartItem[],
   recipient: InvoiceRecipient,
-  options: InvoiceOptions
-): Promise<void> => {
+  options: InvoiceOptions,
+  extras: InvoiceExtraLineItem[] = []
+): Promise<{ blob: Blob; filename: string }> => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 20;
   let yPos = 20;
 
@@ -164,8 +241,9 @@ export const generatePDF = async (
   doc.text(splitText, margin, yPos);
   yPos += splitText.length * 5;
 
-  // LEGAL FEE total (right aligned, large)
-  const totalLegalFees = items.reduce((sum, item) => sum + item.legal_fee, 0);
+  // LEGAL FEE total (right aligned, large). Includes extras' legal_fee.
+  const totalLegalFees =
+    items.reduce((sum, item) => sum + item.legal_fee, 0) + sumExtrasLegalFees(extras);
   yPos += 5;
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
@@ -190,15 +268,26 @@ export const generatePDF = async (
         { content: 'LEGAL FEE', styles: { halign: 'right' } },
       ],
     ],
-    body: items.map((item) => [
-      item.summons_number,
-      formatDate(item.violation_date),
-      item.status || '',
-      item.hearing_result || '',
-      formatDate(item.hearing_date),
-      formatCurrency(item.amount_due),
-      formatCurrency(item.legal_fee),
-    ]),
+    body: [
+      ...items.map((item) => [
+        item.summons_number,
+        formatDate(item.violation_date),
+        item.status || '',
+        item.hearing_result || '',
+        formatDate(item.hearing_date),
+        formatCurrency(item.amount_due),
+        formatCurrency(item.legal_fee),
+      ]),
+      ...extras.map((e) => [
+        e.summons_number,
+        e.violation_date,
+        e.status,
+        e.hearing_result,
+        e.hearing_date,
+        e.amount_due,
+        e.legal_fee,
+      ]),
+    ],
     headStyles: {
       fillColor: [255, 255, 255],
       textColor: [0, 0, 0],
@@ -225,35 +314,67 @@ export const generatePDF = async (
     },
     margin: { left: margin, right: margin },
     theme: 'grid',
+    // Keep rows intact at page boundaries. Without this, a wrapped cell
+    // (e.g. extra line with "STATUS REVIEW") can be sliced between its
+    // lines — first line on page 1, second on page 2.
+    rowPageBreak: 'avoid',
+    // Apply yellow background to body rows whose corresponding cart item or
+    // extra has highlighted=true. Body order: items[] then extras[].
+    didParseCell: (data) => {
+      if (data.section !== 'body') return;
+      const idx = data.row.index;
+      const isHighlighted =
+        idx < items.length
+          ? !!items[idx]?.highlighted
+          : !!extras[idx - items.length]?.highlighted;
+      if (isHighlighted) {
+        data.cell.styles.fillColor = HIGHLIGHT_RGB;
+      }
+    },
   });
 
   // Get the final Y position after the table
   const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
   yPos = finalY + 15;
 
-  // Footer text - 3 editable fields from options, rest hardcoded from FOOTER_TEXT
+  // Footer text - editable fields from options, rest hardcoded from FOOTER_TEXT.
+  // Highlighted paragraphs render with a yellow rectangle behind the text.
   doc.setFontSize(10);
   doc.setFont('helvetica', 'italic');
+  const textWidth = pageWidth - 2 * margin;
+  const hl = options.highlightedSections ?? {};
+
+  // Each footer paragraph is treated as an atomic block: if it doesn't fit on
+  // the current page, the whole block moves to a new page (no mid-paragraph
+  // splits). drawFooterParagraph handles its own pagination via ensureRoomFor.
 
   // 1. Payment Instructions (editable, conditional to avoid gap when empty)
   if (options.paymentInstructions.trim()) {
-    const paymentText = doc.splitTextToSize(options.paymentInstructions, pageWidth - 2 * margin);
-    doc.text(paymentText, margin, yPos);
-    yPos += paymentText.length * 5 + 5;
+    const r = drawFooterParagraph(doc, options.paymentInstructions, margin, yPos, textWidth, !!hl.payment, pageHeight);
+    yPos = r.y + r.used + 5;
   }
 
   // 2. Review Text (editable, conditional to avoid gap when empty)
   if (options.reviewText.trim()) {
-    const reviewText = doc.splitTextToSize(options.reviewText, pageWidth - 2 * margin);
-    doc.text(reviewText, margin, yPos);
-    yPos += reviewText.length * 5 + 10;
+    const r = drawFooterParagraph(doc, options.reviewText, margin, yPos, textWidth, !!hl.review, pageHeight);
+    yPos = r.y + r.used + 10;
   }
 
-  // 3. Overdue Section (toggleable)
+  // 3. Overdue Section (toggleable). The text and the CityPay link must stay
+  // on the same page so the highlight rect (when enabled) wraps both as one
+  // continuous block. We measure text + link together, page-break the whole
+  // thing, then draw.
   if (options.showOverdue) {
-    const overdueText = doc.splitTextToSize(options.overdueText, pageWidth - 2 * margin);
-    doc.text(overdueText, margin, yPos);
-    yPos += overdueText.length * 5 + 5;
+    const overdueLines = doc.splitTextToSize(options.overdueText, textWidth);
+    const linkLineHeight = 5;
+    const blockHeight = overdueLines.length * 5 + linkLineHeight + 1;
+    yPos = ensureRoomFor(doc, yPos, blockHeight + 5, pageHeight);
+    if (hl.overdue) {
+      doc.setFillColor(...HIGHLIGHT_RGB);
+      doc.rect(margin - 1, yPos - 3.5, textWidth + 2, blockHeight, 'F');
+    }
+    doc.text(overdueLines, margin, yPos);
+    yPos += overdueLines.length * 5 + 5;
 
     // Payment link
     doc.setTextColor(0, 0, 255);
@@ -262,23 +383,40 @@ export const generatePDF = async (
     yPos += 10;
   }
 
-  // 4. Questions Text (hardcoded)
-  doc.text(FOOTER_TEXT.questions, margin, yPos);
-  yPos += 8;
-
-  // 5. Additional notes (editable, if provided)
-  if (options.additionalNotes) {
-    const additionalText = doc.splitTextToSize(options.additionalNotes, pageWidth - 2 * margin);
-    doc.text(additionalText, margin, yPos);
-    yPos += additionalText.length * 5 + 5;
+  // 4. Custom middle paragraph (editable, conditional, optional highlight)
+  const customMiddle = options.customMiddleText?.trim() ?? '';
+  if (customMiddle) {
+    const r = drawFooterParagraph(doc, customMiddle, margin, yPos, textWidth, !!hl.customMiddle, pageHeight);
+    yPos = r.y + r.used + 8;
   }
 
-  // 6. Closing Text (hardcoded)
-  doc.text(FOOTER_TEXT.closing, margin, yPos);
+  // 5. Questions Text (hardcoded). Single line, but wrap-measure for safety
+  // and page-break check before drawing.
+  {
+    const lines = doc.splitTextToSize(FOOTER_TEXT.questions, textWidth);
+    yPos = ensureRoomFor(doc, yPos, lines.length * 5, pageHeight);
+    doc.text(lines, margin, yPos);
+    yPos += lines.length * 5 + 3;
+  }
+
+  // 6. Additional notes (editable, if provided)
+  if (options.additionalNotes) {
+    const r = drawFooterParagraph(doc, options.additionalNotes, margin, yPos, textWidth, !!hl.additional, pageHeight);
+    yPos = r.y + r.used + 5;
+  }
+
+  // 7. Closing Text (hardcoded)
+  {
+    const lines = doc.splitTextToSize(FOOTER_TEXT.closing, textWidth);
+    yPos = ensureRoomFor(doc, yPos, lines.length * 5, pageHeight);
+    doc.text(lines, margin, yPos);
+  }
 
   // Save the PDF
-  const filename = `Invoice-${recipient.companyName || 'Client'}-${dayjs().format('YYYY-MM-DD')}.pdf`;
-  doc.save(filename.replace(/[^a-zA-Z0-9-_.]/g, '_'));
+  const filename = `Invoice-${recipient.companyName || 'Client'}-${dayjs().format('YYYY-MM-DD')}.pdf`.replace(/[^a-zA-Z0-9-_.]/g, '_');
+  const blob = doc.output('blob');
+  doc.save(filename);
+  return { blob, filename };
 };
 
 /**
@@ -287,9 +425,11 @@ export const generatePDF = async (
 export const generateDOCX = async (
   items: InvoiceCartItem[],
   recipient: InvoiceRecipient,
-  options: InvoiceOptions
-): Promise<void> => {
-  const totalLegalFees = items.reduce((sum, item) => sum + item.legal_fee, 0);
+  options: InvoiceOptions,
+  extras: InvoiceExtraLineItem[] = []
+): Promise<{ blob: Blob; filename: string }> => {
+  const totalLegalFees =
+    items.reduce((sum, item) => sum + item.legal_fee, 0) + sumExtrasLegalFees(extras);
   const invoiceDate = dayjs().format('MMMM D, YYYY');
 
   const doc = new Document({
@@ -442,6 +582,7 @@ export const generateDOCX = async (
             rows: [
               // Header row
               new TableRow({
+                cantSplit: true,
                 children: [
                   createHeaderCell('Summons\nNumber'),
                   createHeaderCell('Violation Date'),
@@ -452,18 +593,37 @@ export const generateDOCX = async (
                   createHeaderCell('LEGAL FEE'),
                 ],
               }),
-              // Data rows
+              // Data rows. When highlighted=true, every cell in the row gets
+              // yellow shading so the entire row reads as a marker stripe.
               ...items.map(
                 (item) =>
                   new TableRow({
+                    cantSplit: true,
                     children: [
-                      createDataCell(item.summons_number),
-                      createDataCell(formatDate(item.violation_date)),
-                      createDataCell(item.status || ''),
-                      createDataCell(item.hearing_result || ''),
-                      createDataCell(formatDate(item.hearing_date)),
-                      createDataCell(formatCurrency(item.amount_due)),
-                      createDataCell(formatCurrency(item.legal_fee)),
+                      createDataCell(item.summons_number, item.highlighted),
+                      createDataCell(formatDate(item.violation_date), item.highlighted),
+                      createDataCell(item.status || '', item.highlighted),
+                      createDataCell(item.hearing_result || '', item.highlighted),
+                      createDataCell(formatDate(item.hearing_date), item.highlighted),
+                      createDataCell(formatCurrency(item.amount_due), item.highlighted),
+                      createDataCell(formatCurrency(item.legal_fee), item.highlighted),
+                    ],
+                  })
+              ),
+              // Manual extra-line rows (research fee, etc.) — values are
+              // free text exactly as entered by the user.
+              ...extras.map(
+                (e) =>
+                  new TableRow({
+                    cantSplit: true,
+                    children: [
+                      createDataCell(e.summons_number, e.highlighted),
+                      createDataCell(e.violation_date, e.highlighted),
+                      createDataCell(e.status, e.highlighted),
+                      createDataCell(e.hearing_result, e.highlighted),
+                      createDataCell(e.hearing_date, e.highlighted),
+                      createDataCell(e.amount_due, e.highlighted),
+                      createDataCell(e.legal_fee, e.highlighted),
                     ],
                   })
               ),
@@ -471,11 +631,14 @@ export const generateDOCX = async (
           }),
           new Paragraph({ children: [] }), // Spacer
 
-          // Footer - 3 editable fields from options, rest hardcoded from FOOTER_TEXT
+          // Footer — editable fields from options, rest hardcoded from FOOTER_TEXT.
+          // Each paragraph's `shading` is set conditionally so highlights match
+          // the on-screen preview and the PDF output.
           // 1. Payment Instructions (editable, conditional to avoid gap when empty)
           ...(options.paymentInstructions.trim()
             ? [
                 new Paragraph({
+                  ...(options.highlightedSections?.payment ? { shading: docxHighlightShading } : {}),
                   children: [new TextRun({ text: options.paymentInstructions, italics: true, size: 20 })],
                 }),
                 new Paragraph({ children: [] }),
@@ -485,18 +648,22 @@ export const generateDOCX = async (
           ...(options.reviewText.trim()
             ? [
                 new Paragraph({
+                  ...(options.highlightedSections?.review ? { shading: docxHighlightShading } : {}),
                   children: [new TextRun({ text: options.reviewText, italics: true, size: 20 })],
                 }),
                 new Paragraph({ children: [] }),
               ]
             : []),
-          // 3. Overdue Section (toggleable)
+          // 3. Overdue Section (toggleable). Highlight applies to both the
+          // overdue text and the CityPay link paragraph.
           ...(options.showOverdue
             ? [
                 new Paragraph({
+                  ...(options.highlightedSections?.overdue ? { shading: docxHighlightShading } : {}),
                   children: [new TextRun({ text: options.overdueText, italics: true, size: 20 })],
                 }),
                 new Paragraph({
+                  ...(options.highlightedSections?.overdue ? { shading: docxHighlightShading } : {}),
                   children: [
                     new ExternalHyperlink({
                       children: [
@@ -513,19 +680,30 @@ export const generateDOCX = async (
                 new Paragraph({ children: [] }),
               ]
             : []),
-          // 4. Questions Text (hardcoded)
+          // 4. Custom middle paragraph (conditional, optional highlight).
+          ...(options.customMiddleText?.trim()
+            ? [
+                new Paragraph({
+                  ...(options.highlightedSections?.customMiddle ? { shading: docxHighlightShading } : {}),
+                  children: [new TextRun({ text: options.customMiddleText, italics: true, size: 20 })],
+                }),
+                new Paragraph({ children: [] }),
+              ]
+            : []),
+          // 5. Questions Text (hardcoded)
           new Paragraph({
             children: [new TextRun({ text: FOOTER_TEXT.questions, italics: true, size: 20 })],
           }),
-          // 5. Additional notes (editable, if provided)
+          // 6. Additional notes (editable, if provided)
           ...(options.additionalNotes
             ? [
                 new Paragraph({
+                  ...(options.highlightedSections?.additional ? { shading: docxHighlightShading } : {}),
                   children: [new TextRun({ text: options.additionalNotes, italics: true, size: 20 })],
                 }),
               ]
             : []),
-          // 6. Closing Text (hardcoded)
+          // 7. Closing Text (hardcoded)
           new Paragraph({
             children: [new TextRun({ text: FOOTER_TEXT.closing, italics: true, size: 20 })],
           }),
@@ -536,8 +714,9 @@ export const generateDOCX = async (
 
   // Generate and save the file
   const blob = await Packer.toBlob(doc);
-  const filename = `Invoice-${recipient.companyName || 'Client'}-${dayjs().format('YYYY-MM-DD')}.docx`;
-  saveAs(blob, filename.replace(/[^a-zA-Z0-9-_.]/g, '_'));
+  const filename = `Invoice-${recipient.companyName || 'Client'}-${dayjs().format('YYYY-MM-DD')}.docx`.replace(/[^a-zA-Z0-9-_.]/g, '_');
+  saveAs(blob, filename);
+  return { blob, filename };
 };
 
 // Helper to create header cell for DOCX table
@@ -557,8 +736,9 @@ function createHeaderCell(text: string): TableCell {
   });
 }
 
-// Helper to create data cell for DOCX table
-function createDataCell(text: string): TableCell {
+// Helper to create data cell for DOCX table. When `highlighted` is true,
+// the cell gets yellow shading; combined across the row this paints a marker stripe.
+function createDataCell(text: string, highlighted?: boolean | null): TableCell {
   return new TableCell({
     children: [
       new Paragraph({
@@ -571,5 +751,6 @@ function createDataCell(text: string): TableCell {
       left: { style: BorderStyle.SINGLE, size: 1 },
       right: { style: BorderStyle.SINGLE, size: 1 },
     },
+    ...(highlighted ? { shading: docxHighlightShading } : {}),
   });
 }

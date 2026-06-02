@@ -52,6 +52,7 @@ import {
   Alert,
   Snackbar,
   Tooltip,
+  CircularProgress,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -82,18 +83,62 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import ReceiptIcon from '@mui/icons-material/Receipt';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 
 // Import invoice context
 import { useInvoice } from '../contexts/InvoiceContext';
 import { SummonsForInvoice } from '../types/invoice';
 
+// Imports for viewing saved invoice files
+import { generateClient } from 'aws-amplify/api';
+import { getUrl } from 'aws-amplify/storage';
+import {
+  invoiceSummonsItemsBySummons,
+  getInvoicePdfKey,
+  getInvoiceWithItems,
+  updateInvoiceRecord,
+  deleteInvoiceRecord,
+  deleteInvoiceSummonsRecord,
+} from '../graphql/customQueries';
+
 // Import shared types
 import { Summons, getStatusColor, ActivityLogEntry, AttributionData, DepFileDateAttribution, NoteComment, InternalStatusAttribution, Attachment } from '../types/summons';
 import FileUploadSection from './FileUploadSection';
+import InvoiceDetailModal from './InvoiceDetailModal';
+import { Invoice } from '../types/invoiceTracker';
 import { isNewRecord, isUpdatedRecord } from '../types/summons';
 import { useAuth } from '../contexts/AuthContext';
 import { v4 as uuidv4 } from 'uuid';
 import { isInvoiced as isInvoicedLocally, getInvoiceDate as getInvoiceDateLocally, unmarkAsInvoiced } from '../utils/invoiceTracking';
+
+// Shape returned by invoiceSummonsItemsBySummons — a join row plus a summary of
+// its parent invoice (invoice_number, payment_status, payment_date). Used to
+// render the per-invoice rows in the Invoices card below.
+type LinkedInvoiceRow = {
+  id: string;
+  invoiceID: string;
+  summonsID: string;
+  summons_number: string;
+  legal_fee: number;
+  amount_due?: number | null;
+  invoice?: {
+    id: string;
+    invoice_number: string;
+    invoice_date: string;
+    payment_status: 'paid' | 'unpaid';
+    payment_date?: string | null;
+  } | null;
+};
+
+type LinkedInvoicesResponse = {
+  data?: { invoiceSummonsesBySummonsID?: { items?: LinkedInvoiceRow[] } };
+};
+type InvoicePdfKeyResponse = {
+  data?: { getInvoice?: { pdf_s3_key?: string | null } };
+};
+type GetInvoiceResponse = {
+  data?: { getInvoice?: Invoice | null };
+};
 
 /**
  * Props for SummonsDetailModal component
@@ -106,7 +151,14 @@ interface SummonsDetailModalProps {
   /** Callback when modal is closed */
   onClose: () => void;
   /** Callback when data is updated (for refreshing parent) */
-  onUpdate: (id: string, field: string, value: unknown, extraFields?: Record<string, unknown>) => void;
+  onUpdate: (id: string, field: string, value: unknown, extraFields?: Record<string, unknown>) => Promise<void> | void;
+  /**
+   * Fired after any invoice mutation inside the nested InvoiceDetailModal
+   * (mark paid/unpaid, delete). Lets the parent page refresh derived state
+   * like the Paid column on ClientDetail without requiring navigation.
+   * Optional — callers that don't surface invoice-derived state can omit.
+   */
+  onInvoicesChanged?: () => void;
 }
 
 // Internal status options per TRD v1.8
@@ -138,6 +190,10 @@ function getActivityColor(type: ActivityLogEntry['type']): string {
       return '#757575'; // Gray - archived/closed
     case 'EVIDENCE_UPLOADED':
       return '#9c27b0'; // Purple - evidence file uploaded
+    case 'INVOICE_CREATED':
+      return '#009688'; // Teal - invoice created
+    case 'INVOICE_DUE':
+      return '#e65100'; // Deep orange - invoice due
     default:
       return '#9e9e9e'; // Gray - unknown
   }
@@ -169,6 +225,10 @@ function getActivityIcon(type: ActivityLogEntry['type']): React.ReactNode {
       return <HistoryIcon sx={iconSx} />;
     case 'EVIDENCE_UPLOADED':
       return <AttachFileIcon sx={{ ...iconSx, color: '#9C27B0' }} />; // Purple
+    case 'INVOICE_CREATED':
+      return <ReceiptIcon sx={iconSx} />;
+    case 'INVOICE_DUE':
+      return <AccessTimeIcon sx={iconSx} />;
     default:
       return <UpdateIcon sx={iconSx} />;
   }
@@ -278,6 +338,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   summons,
   onClose,
   onUpdate,
+  onInvoicesChanged,
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -289,6 +350,13 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     id: userInfo?.userId || 'unknown',
     name: userInfo?.displayName || 'Unknown User',
   };
+
+  // Pre-migration comments were stamped with Cognito sub IDs from the old user
+  // pool; fall back to display-name match so users can still manage their own
+  // legacy comments after the account migration.
+  const isOwnComment = (comment: NoteComment) =>
+    comment.userId === currentUser.id ||
+    (!!comment.by && comment.by === currentUser.name);
 
   // Local state for editable fields
   const [newComment, setNewComment] = useState('');  // For new comment input
@@ -312,8 +380,238 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   // DEP File Date with attribution
   const [depFileDateAttr, setDepFileDateAttr] = useState<DepFileDateAttribution>({});
 
+  // Per-field save state — drives inline saving/error indicators so silent
+  // AWSJSON write failures (e.g. DEP File Creation Date) become impossible to miss.
+  // Fields whose primary value lives entirely inside an AWSJSON column would
+  // otherwise vanish on the next reload without any UI cue.
+  const [saveStates, setSaveStates] = useState<Record<string, 'idle' | 'saving' | 'error'>>({});
+
+  const withSaveTracking = async (
+    field: string,
+    revert: () => void,
+    run: () => Promise<void> | void,
+  ) => {
+    setSaveStates((s) => ({ ...s, [field]: 'saving' }));
+    try {
+      await run();
+      setSaveStates((s) => ({ ...s, [field]: 'idle' }));
+    } catch (err) {
+      console.error(`Save failed for ${field}:`, err);
+      revert();
+      setSaveStates((s) => ({ ...s, [field]: 'error' }));
+    }
+  };
+
+  // Invoice PDF viewing — keyed by invoice id so multiple rows can show
+  // independent loading spinners if clicked rapidly.
+  const [loadingInvoicePdfId, setLoadingInvoicePdfId] = useState<string | null>(null);
+  const invoiceApiClient = generateClient();
+
+  // Linked invoices (join rows + parent invoice summary) for this summons.
+  // Sourced from invoiceSummonsItemsBySummons, which is authoritative — the
+  // summons.is_invoiced boolean can be stale (e.g. manual DB edits).
+  const [linkedInvoices, setLinkedInvoices] = useState<LinkedInvoiceRow[]>([]);
+  const [loadingLinkedInvoices, setLoadingLinkedInvoices] = useState(false);
+
+  // Nested InvoiceDetailModal — opened when Arthur clicks an invoice row.
+  // We hydrate the full Invoice on demand via getInvoiceWithItems so the
+  // nested modal has every field it needs (totals, recipient, notes, etc.).
+  const [detailInvoice, setDetailInvoice] = useState<Invoice | null>(null);
+  const [detailInvoiceOpen, setDetailInvoiceOpen] = useState(false);
+  const [loadingDetailInvoiceId, setLoadingDetailInvoiceId] = useState<string | null>(null);
+
   // Snackbar for copy feedback
   const [copySnackbar, setCopySnackbar] = useState(false);
+
+  // Invoice-action feedback snackbar (mark paid, delete, etc.)
+  const [invoiceSnackbar, setInvoiceSnackbar] = useState<{
+    open: boolean;
+    message: string;
+    severity: 'success' | 'error';
+  }>({ open: false, message: '', severity: 'success' });
+
+  // Refresh the linked-invoices list (called after any invoice mutation).
+  const refreshLinkedInvoices = async (summonsID: string) => {
+    try {
+      const result = (await invoiceApiClient.graphql({
+        query: invoiceSummonsItemsBySummons,
+        variables: { summonsID, limit: 100 },
+      })) as LinkedInvoicesResponse;
+      const items: LinkedInvoiceRow[] = result?.data?.invoiceSummonsesBySummonsID?.items || [];
+      setLinkedInvoices(items);
+    } catch (error) {
+      console.error('Error refreshing linked invoices:', error);
+    }
+  };
+
+  // Load linked invoices whenever the modal opens with a summons.
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!open || !summons?.id) {
+        setLinkedInvoices([]);
+        return;
+      }
+      setLoadingLinkedInvoices(true);
+      try {
+        const result = (await invoiceApiClient.graphql({
+          query: invoiceSummonsItemsBySummons,
+          variables: { summonsID: summons.id, limit: 100 },
+        })) as LinkedInvoicesResponse;
+        if (cancelled) return;
+        const items: LinkedInvoiceRow[] = result?.data?.invoiceSummonsesBySummonsID?.items || [];
+        setLinkedInvoices(items);
+      } catch (error) {
+        console.error('Error loading linked invoices:', error);
+        if (!cancelled) setLinkedInvoices([]);
+      } finally {
+        if (!cancelled) setLoadingLinkedInvoices(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, summons?.id]);
+
+  // Open the saved invoice file (PDF/DOCX) for a specific invoice id. Uses
+  // already-loaded join rows to avoid a second lookup when possible.
+  const handleViewInvoiceFile = async (invoiceID: string) => {
+    setLoadingInvoicePdfId(invoiceID);
+    try {
+      const invoiceResult = (await invoiceApiClient.graphql({
+        query: getInvoicePdfKey,
+        variables: { id: invoiceID },
+      })) as InvoicePdfKeyResponse;
+      const pdfKey = invoiceResult.data?.getInvoice?.pdf_s3_key;
+      if (!pdfKey) return;
+
+      const urlResult = await getUrl({
+        key: pdfKey,
+        options: { expiresIn: 3600 },
+      });
+      window.open(urlResult.url.toString(), '_blank');
+    } catch (error) {
+      console.error('Error viewing invoice file:', error);
+    } finally {
+      setLoadingInvoicePdfId(null);
+    }
+  };
+
+  // Fetch the full invoice (with items) and open the InvoiceDetailModal.
+  const handleOpenInvoiceDetail = async (invoiceID: string) => {
+    setLoadingDetailInvoiceId(invoiceID);
+    try {
+      const result = (await invoiceApiClient.graphql({
+        query: getInvoiceWithItems,
+        variables: { id: invoiceID },
+      })) as GetInvoiceResponse;
+      const full: Invoice | null = result?.data?.getInvoice || null;
+      if (!full) {
+        setInvoiceSnackbar({ open: true, message: 'Could not load invoice details', severity: 'error' });
+        return;
+      }
+      setDetailInvoice(full);
+      setDetailInvoiceOpen(true);
+    } catch (error) {
+      console.error('Error loading invoice detail:', error);
+      setInvoiceSnackbar({ open: true, message: 'Could not load invoice details', severity: 'error' });
+    } finally {
+      setLoadingDetailInvoiceId(null);
+    }
+  };
+
+  const handleCloseInvoiceDetail = () => {
+    setDetailInvoiceOpen(false);
+    setDetailInvoice(null);
+  };
+
+  // Mutation handlers for the nested InvoiceDetailModal. Pattern copied from
+  // ClientInvoicesDialog so Arthur gets the same behavior (mark paid, edit,
+  // delete) whether he opens an invoice from the client page or from a summons.
+  const handleInvoiceMarkPaid = async (invoiceId: string, paymentDate: string) => {
+    try {
+      await invoiceApiClient.graphql({
+        query: updateInvoiceRecord,
+        variables: { input: { id: invoiceId, payment_status: 'paid', payment_date: paymentDate } },
+      });
+      setInvoiceSnackbar({ open: true, message: 'Invoice marked as paid', severity: 'success' });
+      if (summons?.id) await refreshLinkedInvoices(summons.id);
+      onInvoicesChanged?.();
+      handleCloseInvoiceDetail();
+    } catch (err) {
+      console.error('Error marking invoice paid:', err);
+      setInvoiceSnackbar({ open: true, message: 'Failed to update invoice', severity: 'error' });
+    }
+  };
+
+  const handleInvoiceMarkUnpaid = async (invoiceId: string) => {
+    try {
+      await invoiceApiClient.graphql({
+        query: updateInvoiceRecord,
+        variables: { input: { id: invoiceId, payment_status: 'unpaid', payment_date: null } },
+      });
+      setInvoiceSnackbar({ open: true, message: 'Invoice marked as unpaid', severity: 'success' });
+      if (summons?.id) await refreshLinkedInvoices(summons.id);
+      onInvoicesChanged?.();
+      handleCloseInvoiceDetail();
+    } catch (err) {
+      console.error('Error marking invoice unpaid:', err);
+      setInvoiceSnackbar({ open: true, message: 'Failed to update invoice', severity: 'error' });
+    }
+  };
+
+  const handleInvoiceUpdateDeadline = async (invoiceId: string, newDeadline: string) => {
+    try {
+      await invoiceApiClient.graphql({
+        query: updateInvoiceRecord,
+        variables: { input: { id: invoiceId, alert_deadline: newDeadline } },
+      });
+      if (summons?.id) await refreshLinkedInvoices(summons.id);
+    } catch (err) {
+      console.error('Error updating deadline:', err);
+      setInvoiceSnackbar({ open: true, message: 'Failed to update deadline', severity: 'error' });
+    }
+  };
+
+  const handleInvoiceUpdateNotes = async (invoiceId: string, notes: string) => {
+    try {
+      await invoiceApiClient.graphql({
+        query: updateInvoiceRecord,
+        variables: { input: { id: invoiceId, notes } },
+      });
+      if (summons?.id) await refreshLinkedInvoices(summons.id);
+    } catch (err) {
+      console.error('Error updating notes:', err);
+      setInvoiceSnackbar({ open: true, message: 'Failed to update notes', severity: 'error' });
+    }
+  };
+
+  const handleInvoiceDelete = async (invoice: Invoice) => {
+    try {
+      const items = invoice.items?.items || [];
+      if (items.length > 0) {
+        await Promise.all(items.map((item) =>
+          invoiceApiClient.graphql({
+            query: deleteInvoiceSummonsRecord,
+            variables: { input: { id: item.id } },
+          })
+        ));
+      }
+      await invoiceApiClient.graphql({
+        query: deleteInvoiceRecord,
+        variables: { input: { id: invoice.id } },
+      });
+      setInvoiceSnackbar({ open: true, message: 'Invoice deleted', severity: 'success' });
+      if (summons?.id) await refreshLinkedInvoices(summons.id);
+      onInvoicesChanged?.();
+      handleCloseInvoiceDetail();
+    } catch (err) {
+      console.error('Error deleting invoice:', err);
+      setInvoiceSnackbar({ open: true, message: 'Failed to delete invoice', severity: 'error' });
+    }
+  };
 
   // Helper to get attribution from summons or create default from legacy boolean
   const getAttrFromSummons = (
@@ -440,46 +738,88 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       [`${field}_attr`]: JSON.stringify(newAttr),
     };
 
+    // Capture previous local state so we can revert on save failure
+    let revert: () => void = () => {};
+
     // Update local state immediately for responsive UI
     switch (field) {
-      case 'evidence_reviewed':
+      case 'evidence_reviewed': {
+        const prevAttr = evidenceReviewedAttr;
+        const prevDate = evidenceReviewedDate;
         setEvidenceReviewedAttr(newAttr);
         if (checked && !evidenceReviewedDate) {
           setEvidenceReviewedDate(now);
           extra.evidence_reviewed_date = now;
         }
+        revert = () => {
+          setEvidenceReviewedAttr(prevAttr);
+          setEvidenceReviewedDate(prevDate);
+        };
         break;
-      case 'added_to_calendar':
+      }
+      case 'added_to_calendar': {
+        const prevAttr = addedToCalendarAttr;
+        const prevDate = addedToCalendarDate;
         setAddedToCalendarAttr(newAttr);
         if (checked && !addedToCalendarDate) {
           setAddedToCalendarDate(now);
           extra.added_to_calendar_date = now;
         }
+        revert = () => {
+          setAddedToCalendarAttr(prevAttr);
+          setAddedToCalendarDate(prevDate);
+        };
         break;
-      case 'evidence_requested':
+      }
+      case 'evidence_requested': {
+        const prevAttr = evidenceRequestedAttr;
+        const prevDate = evidenceRequestedDate;
         setEvidenceRequestedAttr(newAttr);
         if (checked && !evidenceRequestedDate) {
           setEvidenceRequestedDate(now);
           extra.evidence_requested_date = now;
         }
+        revert = () => {
+          setEvidenceRequestedAttr(prevAttr);
+          setEvidenceRequestedDate(prevDate);
+        };
         break;
-      case 'evidence_received':
+      }
+      case 'evidence_received': {
+        const prevAttr = evidenceReceivedAttr;
+        const prevDate = evidenceReceivedDate;
         setEvidenceReceivedAttr(newAttr);
         if (checked && !evidenceReceivedDate) {
           setEvidenceReceivedDate(now);
           extra.evidence_received_date = now;
         }
+        revert = () => {
+          setEvidenceReceivedAttr(prevAttr);
+          setEvidenceReceivedDate(prevDate);
+        };
         break;
+      }
     }
 
     // Single consolidated mutation: legacy boolean + attribution + date in one call
-    onUpdate(summons.id, field, checked, extra);
+    void withSaveTracking(
+      `${field}_attr`,
+      revert,
+      () => onUpdate(summons.id, field, checked, extra),
+    );
   };
 
   /**
-   * Handle DEP File Date change with attribution
+   * Handle DEP File Date change with attribution.
+   *
+   * Saves via withSaveTracking so a failed AppSync write reverts the picker
+   * to its previous value and surfaces an inline error icon. Without this,
+   * a silent rejection would leave the new date showing in the UI but never
+   * persisted — and on next reload the field would appear empty (the bug
+   * Jacky reported as "DEP disappears on reschedule").
    */
   const handleDepFileDateChange = (date: dayjs.Dayjs | null) => {
+    const previousAttr = depFileDateAttr;
     const now = dayjs().toISOString();
     const newAttr: DepFileDateAttribution = {
       value: date?.toISOString() || undefined,
@@ -489,7 +829,11 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     };
     setDepFileDateAttr(newAttr);
     // AWSJSON fields require JSON.stringify — raw objects are silently dropped by AppSync
-    onUpdate(summons.id, 'dep_file_date_attr', JSON.stringify(newAttr));
+    void withSaveTracking(
+      'dep_file_date_attr',
+      () => setDepFileDateAttr(previousAttr),
+      () => onUpdate(summons.id, 'dep_file_date_attr', JSON.stringify(newAttr)),
+    );
   };
 
   /**
@@ -498,6 +842,8 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   const handleAddComment = () => {
     if (!newComment.trim()) return;
 
+    const previousComments = comments;
+    const previousNewComment = newComment;
     const now = dayjs().toISOString();
     const comment: NoteComment = {
       id: uuidv4(),
@@ -512,16 +858,28 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     setNewComment('');
 
     // Persist to backend
-    onUpdate(summons.id, 'notes_comments', JSON.stringify(updatedComments));
+    void withSaveTracking(
+      'notes_comments',
+      () => {
+        setComments(previousComments);
+        setNewComment(previousNewComment);
+      },
+      () => onUpdate(summons.id, 'notes_comments', JSON.stringify(updatedComments)),
+    );
   };
 
   /**
    * Handle deleting a comment (only own comments can be deleted)
    */
   const handleDeleteComment = (commentId: string) => {
+    const previousComments = comments;
     const updatedComments = comments.filter(c => c.id !== commentId);
     setComments(updatedComments);
-    onUpdate(summons.id, 'notes_comments', JSON.stringify(updatedComments));
+    void withSaveTracking(
+      'notes_comments',
+      () => setComments(previousComments),
+      () => onUpdate(summons.id, 'notes_comments', JSON.stringify(updatedComments)),
+    );
   };
 
   /**
@@ -561,6 +919,8 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
    * Handle internal status change with attribution
    */
   const handleInternalStatusChange = (value: string) => {
+    const prevStatus = internalStatus;
+    const prevAttr = internalStatusAttr;
     const now = dayjs().toISOString();
     const newAttr: InternalStatusAttribution = {
       value,
@@ -573,9 +933,16 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     setInternalStatusAttr(newAttr);
 
     // Single consolidated mutation: legacy field + attribution
-    onUpdate(summons.id, 'internal_status', value, {
-      internal_status_attr: JSON.stringify(newAttr),
-    });
+    void withSaveTracking(
+      'internal_status_attr',
+      () => {
+        setInternalStatus(prevStatus);
+        setInternalStatusAttr(prevAttr);
+      },
+      () => onUpdate(summons.id, 'internal_status', value, {
+        internal_status_attr: JSON.stringify(newAttr),
+      }),
+    );
   };
   
   /**
@@ -619,9 +986,14 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
    * AWSJSON fields require JSON string, not raw array
    */
   const handleAttachmentsChange = (newAttachments: Attachment[]) => {
+    const previousAttachments = attachments;
     setAttachments(newAttachments);
     // Serialize to JSON string for AWSJSON field type
-    onUpdate(summons.id, 'attachments', JSON.stringify(newAttachments));
+    void withSaveTracking(
+      'attachments',
+      () => setAttachments(previousAttachments),
+      () => onUpdate(summons.id, 'attachments', JSON.stringify(newAttachments)),
+    );
   };
 
   /**
@@ -660,12 +1032,19 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       }
     }
 
-    // Append the new entry and save
+    // Append the new entry and save. activity_log lives on the summons prop
+    // (no local state), so revert is a no-op — but withSaveTracking still
+    // surfaces a failure indicator so an unwritten audit entry isn't silent.
     const updatedLog = [...existingLog, activityEntry];
-    onUpdate(summons.id, 'activity_log', JSON.stringify(updatedLog));
+    void withSaveTracking(
+      'activity_log',
+      () => {},
+      () => onUpdate(summons.id, 'activity_log', JSON.stringify(updatedLog)),
+    );
   };
 
   return (
+    <>
     <Dialog
       open={open}
       onClose={onClose}
@@ -893,26 +1272,114 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                 {(summons.penalty_imposed ?? 0) > 0 && (
                   <InfoRow label="Penalty Imposed" value={`$${summons.penalty_imposed?.toFixed(2)}`} />
                 )}
-                {/* Check both DB value and localStorage fallback for invoiced status */}
-                {(summons.is_invoiced || isInvoicedLocally(summons.id)) && (
-                  <InfoRow
-                    label="Invoiced"
-                    value={
-                      <Chip
-                        label={dayjs(summons.invoice_date || getInvoiceDateLocally(summons.id)).format('MMM D, YYYY')}
-                        size="small"
-                        color="success"
-                        variant="outlined"
-                        onDelete={() => {
-                          onUpdate(summons.id, 'is_invoiced', false, { invoice_date: null });
-                          unmarkAsInvoiced([summons.id]);
-                        }}
-                      />
-                    }
-                  />
-                )}
               </CardContent>
             </Card>
+
+            {/* Invoices — lists every invoice this summons appears on, with
+                payment status + payment date. Answers "did I invoice this and
+                did I get paid?" at a glance. Row click opens the full
+                InvoiceDetailModal for mark-paid / edit / delete. */}
+            {(loadingLinkedInvoices || linkedInvoices.length > 0) && (
+              <Card variant="outlined" sx={{ mb: 2 }}>
+                <CardContent>
+                  <SectionHeader
+                    icon={<ReceiptIcon sx={{ color: 'success.main' }} />}
+                    title={`Invoices${linkedInvoices.length > 0 ? ` (${linkedInvoices.length})` : ''}`}
+                  />
+                  {loadingLinkedInvoices ? (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+                      <CircularProgress size={20} />
+                    </Box>
+                  ) : (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      {linkedInvoices.map((row) => {
+                        const inv = row.invoice;
+                        const paid = inv?.payment_status === 'paid';
+                        return (
+                          <Box
+                            key={row.id}
+                            onClick={() => handleOpenInvoiceDetail(row.invoiceID)}
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 1,
+                              p: 1,
+                              borderRadius: 1,
+                              border: 1,
+                              borderColor: 'divider',
+                              cursor: 'pointer',
+                              '&:hover': { bgcolor: 'action.hover' },
+                            }}
+                          >
+                            <Box sx={{ flex: 1, minWidth: 0 }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                                <Typography
+                                  variant="body2"
+                                  sx={{ fontWeight: 600, color: 'primary.main' }}
+                                >
+                                  {inv?.invoice_number || '(invoice)'}
+                                </Typography>
+                                {inv?.invoice_date && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    {dayjs.utc(inv.invoice_date).format('MMM D, YYYY')}
+                                  </Typography>
+                                )}
+                              </Box>
+                              <Typography variant="caption" color="text.secondary">
+                                Legal fee: ${row.legal_fee?.toFixed(2) ?? '0.00'}
+                              </Typography>
+                            </Box>
+                            {paid ? (
+                              <Chip
+                                label={
+                                  inv?.payment_date
+                                    ? `PAID ${dayjs.utc(inv.payment_date).format('MMM D, YYYY')}`
+                                    : 'PAID'
+                                }
+                                size="small"
+                                color="success"
+                                sx={{ fontWeight: 600 }}
+                              />
+                            ) : (
+                              <Chip
+                                label="UNPAID"
+                                size="small"
+                                color="warning"
+                                variant="outlined"
+                                sx={{ fontWeight: 600 }}
+                              />
+                            )}
+                            <Tooltip title="View saved invoice file">
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  color="primary"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleViewInvoiceFile(row.invoiceID);
+                                  }}
+                                  disabled={loadingInvoicePdfId === row.invoiceID}
+                                  sx={{ p: 0.5 }}
+                                >
+                                  {loadingInvoicePdfId === row.invoiceID ? (
+                                    <CircularProgress size={16} />
+                                  ) : (
+                                    <PictureAsPdfIcon fontSize="small" />
+                                  )}
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            {loadingDetailInvoiceId === row.invoiceID && (
+                              <CircularProgress size={16} />
+                            )}
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Evidence Tracking with Attribution */}
             <Card variant="outlined" sx={{ mb: 2 }}>
@@ -1098,6 +1565,18 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                         }}
                       />
                     </LocalizationProvider>
+                    {saveStates['dep_file_date_attr'] === 'saving' && (
+                      <CircularProgress size={14} data-testid="dep-save-spinner" />
+                    )}
+                    {saveStates['dep_file_date_attr'] === 'error' && (
+                      <Tooltip title="Save failed — value reverted. Please retry.">
+                        <WarningIcon
+                          color="error"
+                          fontSize="small"
+                          data-testid="dep-save-error"
+                        />
+                      </Tooltip>
+                    )}
                     {/* Delay Days Indicator */}
                     {(() => {
                       const delayDays = calculateDelayDays();
@@ -1193,20 +1672,30 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                 />
 
                 {/* Internal Status Dropdown with Attribution */}
-                <FormControl fullWidth size="small" sx={{ mb: 1 }}>
-                  <InputLabel>Internal Status</InputLabel>
-                  <Select
-                    value={internalStatus}
-                    label="Internal Status"
-                    onChange={(e) => handleInternalStatusChange(e.target.value)}
-                  >
-                    {INTERNAL_STATUS_OPTIONS.map((option) => (
-                      <MenuItem key={option} value={option}>
-                        {option}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Internal Status</InputLabel>
+                    <Select
+                      value={internalStatus}
+                      label="Internal Status"
+                      onChange={(e) => handleInternalStatusChange(e.target.value)}
+                    >
+                      {INTERNAL_STATUS_OPTIONS.map((option) => (
+                        <MenuItem key={option} value={option}>
+                          {option}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  {saveStates['internal_status_attr'] === 'saving' && (
+                    <CircularProgress size={14} />
+                  )}
+                  {saveStates['internal_status_attr'] === 'error' && (
+                    <Tooltip title="Save failed — value reverted. Please retry.">
+                      <WarningIcon color="error" fontSize="small" />
+                    </Tooltip>
+                  )}
+                </Box>
                 {/* Internal Status Attribution */}
                 {internalStatusAttr.by && (
                   <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
@@ -1239,10 +1728,10 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                           sx={{
                             p: 1.5,
                             mb: 1,
-                            bgcolor: comment.userId === currentUser.id ? 'primary.50' : 'grey.50',
+                            bgcolor: isOwnComment(comment) ? 'primary.50' : 'grey.50',
                             borderRadius: 1,
                             border: '1px solid',
-                            borderColor: comment.userId === currentUser.id ? 'primary.200' : 'grey.200',
+                            borderColor: isOwnComment(comment) ? 'primary.200' : 'grey.200',
                           }}
                         >
                           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.5 }}>
@@ -1256,7 +1745,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
                               </Typography>
                             </Box>
                             {/* Delete button - only for own comments */}
-                            {comment.userId === currentUser.id && (
+                            {isOwnComment(comment) && (
                               <IconButton
                                 size="small"
                                 onClick={() => handleDeleteComment(comment.id)}
@@ -1519,6 +2008,36 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
         </Alert>
       </Snackbar>
     </Dialog>
+
+    {/* Nested invoice detail — reuses the same component mounted from the
+        Client Detail page, so every invoice action (mark paid, edit, delete)
+        behaves identically across entry points. */}
+    <InvoiceDetailModal
+      open={detailInvoiceOpen}
+      invoice={detailInvoice}
+      onClose={handleCloseInvoiceDetail}
+      onMarkPaid={handleInvoiceMarkPaid}
+      onMarkUnpaid={handleInvoiceMarkUnpaid}
+      onUpdateDeadline={handleInvoiceUpdateDeadline}
+      onUpdateNotes={handleInvoiceUpdateNotes}
+      onDelete={handleInvoiceDelete}
+    />
+
+    <Snackbar
+      open={invoiceSnackbar.open}
+      autoHideDuration={4000}
+      onClose={() => setInvoiceSnackbar((s) => ({ ...s, open: false }))}
+      anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+    >
+      <Alert
+        severity={invoiceSnackbar.severity}
+        onClose={() => setInvoiceSnackbar((s) => ({ ...s, open: false }))}
+        sx={{ width: '100%' }}
+      >
+        {invoiceSnackbar.message}
+      </Alert>
+    </Snackbar>
+    </>
   );
 };
 

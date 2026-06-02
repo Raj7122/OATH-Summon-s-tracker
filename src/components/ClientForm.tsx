@@ -25,6 +25,7 @@ interface Client {
   contact_email1?: string;
   contact_phone2?: string;
   contact_email2?: string;
+  client_notes?: string;
   plate_filter_enabled?: boolean;
   plate_filter_list?: string[];
 }
@@ -105,6 +106,7 @@ const ClientForm: React.FC<ClientFormProps> = ({ client, onSave, onCancel }) => 
     contact_email1: '',
     contact_phone2: '',
     contact_email2: '',
+    client_notes: '',
     plate_filter_enabled: false,
     plate_filter_list: [],
   });
@@ -339,6 +341,22 @@ const ClientForm: React.FC<ClientFormProps> = ({ client, onSave, onCancel }) => 
               )}
             </Box>
           )}
+        </Grid>
+
+        {/* Notes Section */}
+        <Grid item xs={12}>
+          <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>
+            Notes
+          </Typography>
+          <TextField
+            fullWidth
+            label="Client Notes"
+            value={formData.client_notes || ''}
+            onChange={handleChange('client_notes')}
+            multiline
+            rows={3}
+            helperText="Internal notes about this client (e.g., parent company, billing info)"
+          />
         </Grid>
 
         {/* Contact Information Section */}

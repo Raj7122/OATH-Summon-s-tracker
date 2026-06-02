@@ -1,15 +1,20 @@
 /**
  * OATH Notice of Appearance DOCX Generator
  *
- * Generates a Word document listing summonses scheduled for a hearing day.
- * The document is sent to OATH so the hearing manager can copy/paste case data.
+ * Two flavors:
+ *   - generateNoticeOfAppearance(summonses, dateLabel)
+ *       Single hearing day. 3-column table [#, Summons Number, Respondent Name],
+ *       padded to 16 rows. Title and footer reference one specific date.
  *
- * Template structure:
- * 1. Title
- * 2. 3-column table: [#, Summons Number, Respondent Name] — padded to 16 rows
- * 3. Footer paragraph (all caps, bold) requesting telephone link
- * 4. Note about split court call notifications
- * 5. Signature block
+ *   - generateWeekNoticeOfAppearance(summonses, weekLabel)
+ *       Full week. 4-column table adds a Hearing Date column so OATH knows
+ *       which day each case belongs to. Title and footer reference the week
+ *       range. No padding — a week notice shows only the real cases.
+ *
+ * The `docx` library is used to build the Word document; `file-saver` triggers
+ * the browser download. Callers are responsible for ordering the input
+ * summonses array (see utils/noticeOrdering.ts) — the DOCX numbers rows in
+ * whatever order they arrive in, so the dashboard's sort is preserved.
  */
 
 import {
@@ -24,9 +29,13 @@ import {
   WidthType,
   AlignmentType,
 } from 'docx';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
 import { saveAs } from 'file-saver';
 import { SENDER } from '../constants/invoiceDefaults';
 import type { Summons } from '../types/summons';
+
+dayjs.extend(utc);
 
 const MIN_TABLE_ROWS = 16;
 
@@ -59,17 +68,51 @@ function createDataCell(text: string): TableCell {
   });
 }
 
+function buildSignatureBlock(): Paragraph[] {
+  return [
+    new Paragraph({
+      children: [new TextRun({ text: 'THANK YOU.', bold: true, size: 20 })],
+    }),
+    new Paragraph({ children: [] }),
+    new Paragraph({
+      children: [new TextRun({ text: `${SENDER.name}, Esq.`, size: 20 })],
+    }),
+    new Paragraph({
+      children: [new TextRun({ text: SENDER.address, size: 20 })],
+    }),
+    new Paragraph({
+      children: [new TextRun({ text: SENDER.cityStateZip, size: 20 })],
+    }),
+    new Paragraph({
+      children: [new TextRun({ text: SENDER.email, size: 20 })],
+    }),
+  ];
+}
+
+const SPLIT_CALL_NOTE =
+  "NOTE: IF THE MATTERS ARE SPLIT INTO MORE THAN ONE COURT CALL NOTIFICATION, PLEASE MARK EACH NOTICE '1 of 2', ETC. TO AVOID CONFUSION";
+
+function sanitizeFilename(name: string): string {
+  // Allow alphanumeric, dash, underscore, period. Replace everything else.
+  return name.replace(/[^a-zA-Z0-9-_.]/g, '_');
+}
+
+function formatHearingDate(rawDate: string | null | undefined): string {
+  if (!rawDate) return '';
+  const d = dayjs.utc(rawDate);
+  return d.isValid() ? d.format('MMM D, YYYY') : '';
+}
+
 /**
  * Generate and download a Notice of Appearance DOCX for a single hearing day.
  *
- * @param summonses - Summons objects to include (already filtered by caller)
- * @param dateLabel - Human-readable date, e.g. "Tuesday, January 27, 2026"
+ * @param summonses - Summonses to include, in the desired row order.
+ * @param dateLabel - Human-readable date, e.g. "Tuesday, January 27, 2026".
  */
 export async function generateNoticeOfAppearance(
   summonses: Summons[],
   dateLabel: string
 ): Promise<void> {
-  // Build data rows from summonses
   const dataRows = summonses.map(
     (s, i) =>
       new TableRow({
@@ -81,7 +124,7 @@ export async function generateNoticeOfAppearance(
       })
   );
 
-  // Pad with empty rows to reach minimum 16
+  // Pad with empty rows to reach the minimum (per the firm's template).
   const paddingCount = Math.max(0, MIN_TABLE_ROWS - summonses.length);
   for (let i = 0; i < paddingCount; i++) {
     dataRows.push(
@@ -99,7 +142,6 @@ export async function generateNoticeOfAppearance(
     sections: [
       {
         children: [
-          // Title
           new Paragraph({
             alignment: AlignmentType.CENTER,
             spacing: { after: 200 },
@@ -111,13 +153,11 @@ export async function generateNoticeOfAppearance(
               }),
             ],
           }),
-          new Paragraph({ children: [] }), // Spacer
+          new Paragraph({ children: [] }),
 
-          // 3-column table
           new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
             rows: [
-              // Header row
               new TableRow({
                 children: [
                   createHeaderCell('#'),
@@ -128,9 +168,8 @@ export async function generateNoticeOfAppearance(
               ...dataRows,
             ],
           }),
-          new Paragraph({ children: [] }), // Spacer
+          new Paragraph({ children: [] }),
 
-          // Footer paragraph — all caps, bold
           new Paragraph({
             spacing: { before: 200, after: 200 },
             children: [
@@ -145,45 +184,110 @@ export async function generateNoticeOfAppearance(
             ],
           }),
 
-          // Note paragraph
           new Paragraph({
             spacing: { after: 200 },
-            children: [
-              new TextRun({
-                text:
-                  "NOTE: IF THE MATTERS ARE SPLIT INTO MORE THAN ONE COURT CALL NOTIFICATION, PLEASE MARK EACH NOTICE '1 of 2', ETC. TO AVOID CONFUSION",
-                size: 20,
-              }),
-            ],
+            children: [new TextRun({ text: SPLIT_CALL_NOTE, size: 20 })],
           }),
-          new Paragraph({ children: [] }), // Spacer
+          new Paragraph({ children: [] }),
 
-          // Thank you
-          new Paragraph({
-            children: [new TextRun({ text: 'THANK YOU.', bold: true, size: 20 })],
-          }),
-          new Paragraph({ children: [] }), // Spacer
-
-          // Signature block
-          new Paragraph({
-            children: [new TextRun({ text: `${SENDER.name}, Esq.`, size: 20 })],
-          }),
-          new Paragraph({
-            children: [new TextRun({ text: SENDER.address, size: 20 })],
-          }),
-          new Paragraph({
-            children: [new TextRun({ text: SENDER.cityStateZip, size: 20 })],
-          }),
-          new Paragraph({
-            children: [new TextRun({ text: SENDER.email, size: 20 })],
-          }),
+          ...buildSignatureBlock(),
         ],
       },
     ],
   });
 
   const blob = await Packer.toBlob(doc);
-  // Sanitize filename: replace anything not alphanumeric, dash, underscore, or dot
-  const filename = `OATH_Notice_of_Appearance_${dateLabel}.docx`.replace(/[^a-zA-Z0-9-_.]/g, '_');
+  const filename = sanitizeFilename(`OATH_Notice_of_Appearance_${dateLabel}.docx`);
+  saveAs(blob, filename);
+}
+
+/**
+ * Generate and download a Notice of Appearance DOCX for an entire week.
+ *
+ * One file, multiple hearing days. The table has 4 columns and includes a
+ * Hearing Date column so OATH can tell which case goes with which day.
+ * No row padding — a week notice lists only real cases.
+ *
+ * @param summonses - Summonses to include, in the desired row order (usually
+ *                    the dashboard's current sort).
+ * @param weekLabel - Human-readable week range, e.g. "Apr 13–Apr 19, 2026".
+ */
+export async function generateWeekNoticeOfAppearance(
+  summonses: Summons[],
+  weekLabel: string
+): Promise<void> {
+  const dataRows = summonses.map(
+    (s, i) =>
+      new TableRow({
+        children: [
+          createDataCell(String(i + 1)),
+          createDataCell(s.summons_number || ''),
+          createDataCell(s.respondent_name || ''),
+          createDataCell(formatHearingDate(s.hearing_date)),
+        ],
+      })
+  );
+
+  const doc = new Document({
+    sections: [
+      {
+        children: [
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 200 },
+            children: [
+              new TextRun({
+                text: `OATH NOTICE OF APPEARANCE FOR WEEK OF ${weekLabel.toUpperCase()}`,
+                bold: true,
+                size: 28,
+              }),
+            ],
+          }),
+          new Paragraph({ children: [] }),
+
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: [
+              new TableRow({
+                children: [
+                  createHeaderCell('#'),
+                  createHeaderCell('Summons Number'),
+                  createHeaderCell('Respondent Name'),
+                  createHeaderCell('Hearing Date'),
+                ],
+              }),
+              ...dataRows,
+            ],
+          }),
+          new Paragraph({ children: [] }),
+
+          new Paragraph({
+            spacing: { before: 200, after: 200 },
+            children: [
+              new TextRun({
+                text:
+                  `THE ABOVE MATTERS HAVE BEEN SCHEDULED FOR HEARINGS BY YOUR AGENCY DURING THE WEEK OF ${weekLabel.toUpperCase()}. ` +
+                  'I REPRESENT EACH OF THE NAMED RESPONDENTS. I HEREBY APPEAR ON THE LISTED MATTERS AND REQUEST THE ' +
+                  'TELEPHONE LINK SO I CAN PARTICIPATE IN THE HEARINGS ON BEHALF OF MY CLIENTS.',
+                bold: true,
+                size: 20,
+              }),
+            ],
+          }),
+
+          new Paragraph({
+            spacing: { after: 200 },
+            children: [new TextRun({ text: SPLIT_CALL_NOTE, size: 20 })],
+          }),
+          new Paragraph({ children: [] }),
+
+          ...buildSignatureBlock(),
+        ],
+      },
+    ],
+  });
+
+  const blob = await Packer.toBlob(doc);
+  const filename = sanitizeFilename(`OATH_Notice_of_Appearance_Week_${weekLabel}.docx`);
   saveAs(blob, filename);
 }

@@ -44,12 +44,20 @@ const mockRecipient: InvoiceRecipient = {
 
 // Mutable reference to capture PDF text() calls
 const pdfTextCalls: string[] = [];
+// Track addPage() invocations so pagination tests can assert page breaks
+const pdfAddPageCalls: { count: number } = { count: 0 };
+// Lets individual tests control where the table ends — defaults to mid-page so
+// most footer scenarios fit on page 1 without paginating.
+const pdfState: { finalY: number; splitToLines: (t: string) => string[] } = {
+  finalY: 200,
+  splitToLines: (t: string) => [t],
+};
 
 vi.mock('jspdf', () => {
   // Must be a real function/class for `new jsPDF()` to work
   function MockJsPDF() {
     // @ts-ignore
-    this.internal = { pageSize: { getWidth: () => 210 } };
+    this.internal = { pageSize: { getWidth: () => 210, getHeight: () => 297 } };
     // @ts-ignore
     this.setFontSize = vi.fn();
     // @ts-ignore
@@ -68,22 +76,30 @@ vi.mock('jspdf', () => {
     // @ts-ignore
     this.line = vi.fn();
     // @ts-ignore
-    this.splitTextToSize = vi.fn((text: string) => [text]);
+    this.splitTextToSize = vi.fn((text: string) => pdfState.splitToLines(text));
     // @ts-ignore
     this.setTextColor = vi.fn();
     // @ts-ignore
+    this.setFillColor = vi.fn();
+    // @ts-ignore
+    this.rect = vi.fn();
+    // @ts-ignore
     this.textWithLink = vi.fn();
+    // @ts-ignore
+    this.addPage = vi.fn(() => { pdfAddPageCalls.count += 1; });
     // @ts-ignore
     this.save = vi.fn();
     // @ts-ignore
-    this.lastAutoTable = { finalY: 200 };
+    this.output = vi.fn(() => new Blob());
+    // @ts-ignore
+    this.lastAutoTable = { finalY: pdfState.finalY };
   }
   return { default: MockJsPDF };
 });
 
 vi.mock('jspdf-autotable', () => ({
   default: vi.fn((doc: any) => {
-    doc.lastAutoTable = { finalY: 200 };
+    doc.lastAutoTable = { finalY: pdfState.finalY };
   }),
 }));
 
@@ -140,6 +156,7 @@ vi.mock('docx', () => {
     BorderStyle: { SINGLE: 'SINGLE' },
     UnderlineType: { SINGLE: 'SINGLE' },
     HeadingLevel: { HEADING_1: 'HEADING_1' },
+    ShadingType: { CLEAR: 'CLEAR' },
   };
 });
 
@@ -333,7 +350,107 @@ describe('PDF generator — conditional footer fields', () => {
     // Neither should appear — only hardcoded footer text
     expect(pdfTextCalls.some((t) => t.includes('Zelle'))).toBe(false);
     expect(pdfTextCalls.some((t) => t.includes('defenses'))).toBe(false);
-    // Hardcoded footer text should still be present
-    expect(pdfTextCalls.some((t) => t.includes('overdue'))).toBe(true);
+    // Hardcoded footer text should still be present (questions + closing are
+    // always rendered regardless of which optional fields are populated).
+    expect(pdfTextCalls.some((t) => t.includes('Let me know if you have any questions'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PDF pagination — Bug 1 fix
+// ---------------------------------------------------------------------------
+//
+// jsPDF page is A4 (297mm tall) with a 20mm bottom margin in our generator,
+// so anything below y≈277 must move to a new page. These tests drive the
+// table's finalY (via pdfState.finalY) and the wrapped-line count (via
+// pdfState.splitToLines) to simulate "long invoice with little footer room"
+// vs "short invoice with plenty of room", and assert addPage() behavior.
+
+describe('PDF generator — footer pagination', () => {
+  beforeEach(() => {
+    pdfTextCalls.length = 0;
+    pdfAddPageCalls.count = 0;
+    pdfState.finalY = 200;
+    pdfState.splitToLines = (t: string) => [t];
+  });
+
+  it('does NOT paginate when the table ends mid-page and footer fits', async () => {
+    pdfState.finalY = 100; // table ends very high — tons of room
+    const options: InvoiceOptions = {
+      paymentInstructions: 'Pay via Zelle.',
+      reviewText: 'Review the evidence.',
+      additionalNotes: '',
+    };
+
+    await generatePDF(mockItems, mockRecipient, options);
+
+    expect(pdfAddPageCalls.count).toBe(0);
+    // Closing line must still be drawn
+    expect(pdfTextCalls.some((t) => t.includes('We look forward to working with you.'))).toBe(true);
+  });
+
+  it('paginates when the table consumes most of the page', async () => {
+    // Simulate a table that ends near the bottom — yPos starts at 285, well past
+    // the 277mm cutoff, so the very first footer paragraph must move to a new page.
+    pdfState.finalY = 270;
+    const options: InvoiceOptions = {
+      paymentInstructions: 'Pay via Zelle.',
+      reviewText: 'Review the evidence carefully.',
+      additionalNotes: '',
+    };
+
+    await generatePDF(mockItems, mockRecipient, options);
+
+    expect(pdfAddPageCalls.count).toBeGreaterThanOrEqual(1);
+    // Critically: the closing must not be clipped — it must appear in the
+    // captured text calls even though it had to move to page 2.
+    expect(pdfTextCalls.some((t) => t.includes('We look forward to working with you.'))).toBe(true);
+    // And the body of the review text must also still be present.
+    expect(pdfTextCalls.some((t) => t.includes('Review the evidence carefully.'))).toBe(true);
+  });
+
+  it('paginates when a single footer paragraph wraps to many lines', async () => {
+    // Big additionalNotes that wrap to 30 lines (~150mm at 5mm/line) won't fit
+    // alongside a half-full table — should trigger a page break before drawing.
+    pdfState.finalY = 200;
+    pdfState.splitToLines = (t: string) => {
+      if (t.includes('LONG_NOTES_MARKER')) {
+        return Array.from({ length: 30 }, (_, i) => `LONG_NOTES_MARKER line ${i + 1}`);
+      }
+      return [t];
+    };
+    const options: InvoiceOptions = {
+      paymentInstructions: 'Pay via Zelle.',
+      reviewText: 'Review.',
+      additionalNotes: 'LONG_NOTES_MARKER',
+    };
+
+    await generatePDF(mockItems, mockRecipient, options);
+
+    expect(pdfAddPageCalls.count).toBeGreaterThanOrEqual(1);
+    // The wrapped lines must still all be drawn, just on the new page.
+    const drawnLongLines = pdfTextCalls.filter((t) => t.startsWith('LONG_NOTES_MARKER line '));
+    expect(drawnLongLines.length).toBe(30);
+  });
+
+  it('keeps the overdue text and the CityPay link together on the same page', async () => {
+    // Overdue block = text + CityPay hyperlink. Pre-fix: text could fit while
+    // link gets clipped. Post-fix: ensureRoomFor sizes the WHOLE block before
+    // drawing, so they always co-page.
+    pdfState.finalY = 260; // tight — overdue block has to move to page 2
+    const options: InvoiceOptions = {
+      paymentInstructions: '',
+      reviewText: '',
+      additionalNotes: '',
+      showOverdue: true,
+      overdueText: 'Some fines are overdue.',
+    };
+
+    await generatePDF(mockItems, mockRecipient, options);
+
+    // Pagination should have occurred
+    expect(pdfAddPageCalls.count).toBeGreaterThanOrEqual(1);
+    // The overdue text must still be drawn (not silently clipped)
+    expect(pdfTextCalls.some((t) => t.includes('Some fines are overdue.'))).toBe(true);
   });
 });

@@ -43,7 +43,13 @@
 const AWS = require('aws-sdk');
 const fetch = require('node-fetch');
 
-const dynamodb = new AWS.DynamoDB.DocumentClient();
+// Raised maxRetries (default 3) so the parallelized Phase 1 processing loop can
+// absorb short bursts of ProvisionedThroughputExceededException via aws-sdk v2's
+// built-in exponential backoff instead of surfacing them as errors.
+const dynamodb = new AWS.DynamoDB.DocumentClient({
+  maxRetries: 8,
+  retryDelayOptions: { base: 50 },
+});
 const lambda = new AWS.Lambda();
 
 // Environment variables
@@ -65,9 +71,21 @@ const MAX_LOG_ENTRIES = 100;
 const OCR_THROTTLE_MS = 2000; // 2 seconds between requests
 const MAX_OCR_FAILURES = 3; // Max retry attempts before giving up
 const GHOST_GRACE_DAYS = 3; // Days before archiving missing records
+// Archive reasons set automatically by ghost detection (inferArchiveReason).
+// A record carrying one of these is eligible to be auto-un-archived if it
+// reappears in the API; any other reason is treated as a deliberate archive
+// and left untouched.
+const AUTO_ARCHIVE_REASONS = new Set(['API_MISSING', 'DISMISSED', 'PAID', 'CASE_CLOSED']);
 const API_CONCURRENCY = 8; // Max parallel NYC API requests (4 per token with dual tokens)
 const PHASE1_TIMEOUT_BUFFER_MS = 120000; // 2 min buffer before Lambda timeout
-const FETCH_TIMEOUT_MS = 30000; // 30s per-request timeout to prevent slow Socrata queries from blocking batches
+// Name queries use anchored prefix matching (see buildNameClause), so each is a
+// cheap range scan rather than a slow full-table scan. Terms are still OR-grouped
+// to cut the number of requests; a 60s timeout is ample headroom for an anchored
+// grouped query and fails fast if Socrata is degraded.
+const FETCH_TIMEOUT_MS = 60000; // 60s per-request timeout for anchored grouped queries
+const PROCESS_CONCURRENCY = 25; // Max parallel record-processing DB ops in Phase 1 (lower if DynamoDB throttles)
+const TERMS_PER_QUERY = 20; // Client search terms OR-grouped per Socrata query (fewer requests)
+const MAX_WHERE_CHARS = 3500; // Socrata $where length budget; a term group is split if its name clause exceeds this
 
 /**
  * Main handler for the daily sweep Lambda function
@@ -253,6 +271,12 @@ async function executePhase1MetadataSync(context) {
   results.clientsProcessed = clients.length;
   console.log(`Fetched ${clients.length} clients from database`);
 
+  // Defense in depth: process newest clients first. Search terms are built in
+  // this order, so if a timeout guard ever truncates the tail, the dropped
+  // clients are the oldest (already-synced) ones — never a brand-new client
+  // whose summonses have never been fetched. (Sort is stable for equal dates.)
+  clients.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
   if (clients.length === 0) {
     console.log('No clients found. Skipping Phase 1.');
     return results;
@@ -301,37 +325,52 @@ async function executePhase1MetadataSync(context) {
     console.log(`Trimmed oversized activity_log on ${trimmedCount} records (cap: ${MAX_LOG_ENTRIES})`);
   }
 
-  // Step 4: Process each summons - UPDATE METADATA ONLY (with timeout guard)
+  // Step 4: Process each summons - UPDATE METADATA ONLY.
+  // Processed in bounded-concurrency batches (PROCESS_CONCURRENCY) so ~3000+
+  // records' DynamoDB round-trips overlap instead of running serially — the
+  // serial loop previously timed out and silently dropped the tail. The timeout
+  // guard now sits at the top of the outer batch loop (fires at most once per
+  // batch, which completes in well under a second).
   let phase1TimedOut = false;
-  for (const apiSummons of apiSummonses) {
-    // Timeout guard: break if less than 60s remaining
+  for (let i = 0; i < apiSummonses.length; i += PROCESS_CONCURRENCY) {
+    // Timeout guard: stop on a batch boundary if less than 60s remaining
     if (context.getRemainingTimeInMillis() < 60000) {
-      console.warn(`⚠️ Phase 1 timeout guard triggered — ${Math.round(context.getRemainingTimeInMillis() / 1000)}s remaining, stopping processing`);
+      console.warn(`⚠️ Phase 1 timeout guard triggered — ${Math.round(context.getRemainingTimeInMillis() / 1000)}s remaining, stopping processing at ${i}/${apiSummonses.length}`);
       phase1TimedOut = true;
       break;
     }
 
-    try {
-      const ticketNumber = apiSummons.ticket_number;
-      seenSummonsNumbers.add(ticketNumber);
+    const batch = apiSummonses.slice(i, i + PROCESS_CONCURRENCY);
 
-      const processResult = await processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime, existingSummonsMap);
+    // Only records in batches that actually run are marked "seen" — this keeps
+    // Ghost Detection correct (it must not archive records we never processed).
+    batch.forEach(apiSummons => seenSummonsNumbers.add(apiSummons.ticket_number));
 
-      if (processResult.action === 'created') {
-        results.newRecordsCreated++;
-        results.recordsFlaggedForOCR++;
-      } else if (processResult.action === 'updated') {
-        results.recordsUpdated++;
-        if (processResult.flaggedForOCR) {
+    // Promise.allSettled isolates per-record failures: one rejection never
+    // aborts the batch, satisfying the try/catch + console.error contract.
+    const settled = await Promise.allSettled(
+      batch.map(apiSummons => processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime, existingSummonsMap))
+    );
+
+    settled.forEach((result, idx) => {
+      if (result.status === 'fulfilled') {
+        const processResult = result.value;
+        if (processResult.action === 'created') {
+          results.newRecordsCreated++;
           results.recordsFlaggedForOCR++;
+        } else if (processResult.action === 'updated') {
+          results.recordsUpdated++;
+          if (processResult.flaggedForOCR) {
+            results.recordsFlaggedForOCR++;
+          }
+        } else if (processResult.action === 'skipped') {
+          results.recordsSkipped++;
         }
-      } else if (processResult.action === 'skipped') {
-        results.recordsSkipped++;
+      } else {
+        console.error(`Error processing summons ${batch[idx].ticket_number}:`, result.reason?.message || result.reason);
+        results.errors++;
       }
-    } catch (error) {
-      console.error(`Error processing summons ${apiSummons.ticket_number}:`, error.message);
-      results.errors++;
-    }
+    });
   }
 
   // Step 5: Ghost Detection - skip if timed out (incomplete data would cause false positives)
@@ -371,16 +410,27 @@ async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime, e
 
   // Plate filter: If client has plate filtering enabled, only accept
   // summonses whose plate (from violation_details) matches the filter list.
-  // This runs before the DB lookup to reject non-matching plates cheaply.
+  // NOTE: The NYC Open Data API often truncates violation_details text, so
+  // the extracted plate may be a prefix of the actual plate (e.g., "XDL"
+  // instead of "XDLR87"). We use prefix matching to handle this.
   if (matchedClient.plate_filter_enabled && matchedClient.plate_filter_list?.length > 0) {
     const detailsPlate = extractPlateFromViolationDetails(apiSummons.violation_details || '');
     if (!detailsPlate) {
-      return { action: 'skipped', reason: 'plate filter active but no plate in details' };
-    }
-    const normalizedPlate = detailsPlate.replace(/[^A-Z0-9]/g, '');
-    const plateList = matchedClient.plate_filter_list.map(p => p.toUpperCase().replace(/[^A-Z0-9]/g, ''));
-    if (!plateList.includes(normalizedPlate)) {
-      return { action: 'skipped', reason: `plate ${detailsPlate} not in filter` };
+      // No plate in violation_details — accept the summons since it already
+      // matched the client by name. The actual plate comes from OCR later.
+      console.log(`  Plate filter: no plate in violation_details for ${ticketNumber}, accepting (name-matched to ${matchedClient.name})`);
+    } else {
+      const normalizedPlate = detailsPlate.replace(/[^A-Z0-9]/g, '');
+      const plateList = matchedClient.plate_filter_list.map(p => p.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+      // Use prefix matching to handle API text truncation: accept if the
+      // extracted plate starts with a filter plate or vice versa, but only
+      // if the extracted plate is at least 3 chars to avoid false positives.
+      const plateMatches = plateList.some(filterPlate =>
+        filterPlate.startsWith(normalizedPlate) || normalizedPlate.startsWith(filterPlate)
+      );
+      if (!plateMatches && normalizedPlate.length >= 3) {
+        return { action: 'skipped', reason: `plate ${detailsPlate} not in filter` };
+      }
     }
   }
 
@@ -408,6 +458,34 @@ async function processSummonsMetadataOnly(apiSummons, clientNameMap, syncTime, e
 
     // Reset api_miss_count since we found this record
     const resetMissCount = existingSummons.api_miss_count > 0;
+
+    // Self-heal: if this record was AUTO-archived by ghost detection but has
+    // reappeared in the API, restore it. Ghost detection can archive records
+    // whose client temporarily fell out of the fetch (e.g. a slow/timed-out
+    // query); without this, such records would stay hidden forever even after
+    // they return. Deliberate (non-ghost-reason) archives are left alone.
+    if (existingSummons.is_archived && AUTO_ARCHIVE_REASONS.has(existingSummons.archived_reason)) {
+      const needsOCR = !existingSummons.violation_narrative && existingSummons.ocr_status !== 'complete';
+      const existingLog = existingSummons.activity_log || [];
+      const updatedLog = [...existingLog, {
+        date: syncTime,
+        type: 'UNARCHIVED',
+        description: 'Case reappeared in OATH API — restored from archive',
+        old_value: 'ARCHIVED',
+        new_value: incomingData.status || 'Unknown',
+      }].slice(-MAX_LOG_ENTRIES);
+
+      // Write current metadata + log + miss reset, then clear the archive flags.
+      await updateSummonsMetadataWithLog(existingSummons.id, incomingData, 'Restored from archive (reappeared in API)', needsOCR, updatedLog, syncTime, true);
+      await dynamodb.update({
+        TableName: SUMMONS_TABLE,
+        Key: { id: existingSummons.id },
+        UpdateExpression: 'SET is_archived = :false, updatedAt = :now REMOVE archived_at, archived_reason',
+        ExpressionAttributeValues: { ':false': false, ':now': syncTime },
+      }).promise();
+      console.log(`♻️ Un-archived: ${ticketNumber} (reappeared in API)`);
+      return { action: 'updated', flaggedForOCR: needsOCR };
+    }
 
     if (changeResult.hasChanges) {
       // Determine if record needs OCR (has no violation_narrative)
@@ -1296,8 +1374,9 @@ function normalizeCompanyName(name) {
     .toLowerCase()
     .trim()
     .replace(/[&\-]/g, ' ')                 // normalize ampersand and hyphen to space (e.g., "COCA-COLA" -> "COCA COLA")
+    .replace(/['.]/g, '')                  // strip apostrophes and periods ("MARSALA'S" -> "MARSALAS", "L.L.C." -> "LLC")
     .replace(/\s+/g, ' ')                  // collapse multiple spaces
-    .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '')
+    .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '')
     .trim();
 }
 
@@ -1358,6 +1437,69 @@ function extractPlateFromViolationDetails(violationDetails) {
 }
 
 /**
+ * Split a normalized company name into non-empty word tokens.
+ */
+function tokenizeNormalized(normName) {
+  if (!normName) return [];
+  return normName.split(' ').filter(Boolean);
+}
+
+/**
+ * True when `shorterTokens` is an exact head-sequence (token-aligned prefix)
+ * of `longerTokens`. This guarantees the shorter name ends on a WORD BOUNDARY
+ * in the longer name and that no shared token diverges.
+ *   ["sprague","operating"]  prefixOf  ["sprague","operating","resources"] -> true
+ *   ["all","season","restoration"]  prefixOf  ["all","season","movers"]    -> false (token 3 diverges)
+ *   ["all","season"]  prefixOf  ["all","seasons","door"]                    -> false (season != seasons)
+ */
+function isTokenPrefix(shorterTokens, longerTokens) {
+  if (shorterTokens.length === 0 || shorterTokens.length > longerTokens.length) return false;
+  for (let i = 0; i < shorterTokens.length; i++) {
+    if (shorterTokens[i] !== longerTokens[i]) return false;
+  }
+  return true;
+}
+
+// Thresholds for asserting a partial (prefix) match is strong enough.
+const MIN_PREFIX_TOKENS = 2;     // multi-word prefixes need >= 2 full tokens
+const MIN_SINGLE_TOKEN_LEN = 7;  // single-word AKAs like "cercone" (7 chars)
+const MIN_PREFIX_CHARS = 10;     // historical char floor, kept for multi-word prefixes
+
+/**
+ * Decide whether a token-aligned prefix relationship between two normalized
+ * names is strong enough to assert a client match.
+ *
+ * This replaces the old bare String.startsWith() check, which matched on raw
+ * character prefixes and produced false positives like "ALL SEASON RESTORATION"
+ * capturing "ALL SEASON MOVERS" (shared 10-char "all season" prefix). Matching
+ * is now token-aligned: the shorter name's tokens must be an exact head-sequence
+ * of the longer name's tokens, so divergent company names never match.
+ *
+ * @param {string} aNorm - A normalized company name
+ * @param {string} bNorm - Another normalized company name
+ * @returns {boolean} True if a strong token-prefix match exists
+ */
+function isStrongPrefixMatch(aNorm, bNorm) {
+  if (!aNorm || !bNorm) return false;
+  const aTok = tokenizeNormalized(aNorm);
+  const bTok = tokenizeNormalized(bNorm);
+
+  // Pick the shorter token list as the candidate prefix
+  const [shorter, longer, shorterStr] = aTok.length <= bTok.length
+    ? [aTok, bTok, aNorm]
+    : [bTok, aTok, bNorm];
+
+  if (!isTokenPrefix(shorter, longer)) return false;
+  if (shorter.length === longer.length) return false; // identical handled by exact map lookup
+
+  // A single-token prefix (e.g. AKA "CERCONE") must be a substantial word.
+  if (shorter.length === 1) return shorter[0].length >= MIN_SINGLE_TOKEN_LEN;
+
+  // Multi-word prefixes need >= 2 full tokens and >= 10 chars of content.
+  return shorter.length >= MIN_PREFIX_TOKENS && shorterStr.length >= MIN_PREFIX_CHARS;
+}
+
+/**
  * Match respondent name to a client using multiple strategies
  *
  * MATCHING STRATEGIES (in order of priority):
@@ -1403,19 +1545,14 @@ function matchRespondentToClient(firstName, lastName, clientNameMap) {
     }
   }
 
-  // Strategy 3: Partial word match - check if any client name starts with or
-  // is contained in the respondent name (handles truncated/variant names)
-  // This catches "SPRAGUE OPERATING" matching client AKA "SPRAGUE OPERATING RESOURCES"
+  // Strategy 3: Token-aligned prefix match (handles truncated/variant names).
+  // Catches "SPRAGUE OPERATING" matching client AKA "SPRAGUE OPERATING RESOURCES".
+  // Uses isStrongPrefixMatch (word-boundary alignment) instead of a bare
+  // startsWith so divergent names like "ALL SEASON RESTORATION" vs
+  // "ALL SEASON MOVERS" do NOT match.
   for (const [clientNormName, client] of clientNameMap.entries()) {
-    // Check if respondent name starts with client name (respondent is more specific)
-    if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) {
-      console.log(`  Partial Match (respondent contains client): "${fullName}" → "${client.name}"`);
-      return client;
-    }
-    // Check if client name starts with respondent name (client is more specific)
-    // But only if respondent name is substantial (at least 10 chars after normalization)
-    if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) {
-      console.log(`  Partial Match (client contains respondent): "${fullName}" → "${client.name}"`);
+    if (isStrongPrefixMatch(normalizedFull, clientNormName)) {
+      console.log(`  Partial Match (token-prefix): "${fullName}" → "${client.name}"`);
       return client;
     }
   }
@@ -1434,16 +1571,10 @@ function matchRespondentToClient(firstName, lastName, clientNameMap) {
       return match;
     }
 
-    // Also check partial matches with lastName only
+    // Also check token-aligned partial matches with lastName only
     for (const [clientNormName, client] of clientNameMap.entries()) {
-      // Check if lastName starts with client name (rare but possible)
-      if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) {
-        console.log(`  Fallback Partial Match (lastName contains client): "${lastName}" → "${client.name}"`);
-        return client;
-      }
-      // Check if any client name starts with lastName
-      if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) {
-        console.log(`  Fallback Partial Match (client contains lastName): "${lastName}" → "${client.name}"`);
+      if (isStrongPrefixMatch(normalizedLast, clientNormName)) {
+        console.log(`  Fallback Partial Match (token-prefix): "${lastName}" → "${client.name}"`);
         return client;
       }
     }
@@ -1482,6 +1613,131 @@ function buildClientNameMap(clients) {
   return nameMap;
 }
 
+// Minimum length for an API search term (suffix-stripped). The NYC API matches
+// with a substring LIKE '%TERM%', so a very short term pulls in too much.
+// NOTE: This guard CANNOT cleanly stop a 2-token term like "ALL SEASON" without
+// also dropping legitimate two-word client names — the token-prefix matcher
+// (isStrongPrefixMatch) is the authoritative filter for the ALL SEASON bug.
+// This stays at the historical >3-char floor so it never drops a term that was
+// previously fetched (e.g. the bare "CERCONE" pattern from summons 000726080J).
+const MIN_TERM_CHARS = 4;
+
+/**
+ * Build a NYC API search term from a client name/AKA, or null if the name is
+ * too short to query safely. Centralizes the term-normalization that was
+ * previously duplicated for client names and AKAs.
+ *
+ * @param {string} rawName - A client name or AKA
+ * @returns {string|null} Uppercase search term, or null if too short
+ */
+function buildSearchTerm(rawName) {
+  if (!rawName) return null;
+  const term = rawName
+    .replace(/&/g, ' ')                          // strip ampersand for API LIKE matching (keep hyphens — LIKE is literal)
+    .replace(/['.]/g, '')                        // strip apostrophes/periods for API LIKE matching ("MARSALA'S" -> "MARSALAS")
+    .replace(/\s+(llc|inc|corp|co|ltd)$/i, '')   // suffix regex simplified (periods already stripped)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+  return term.length >= MIN_TERM_CHARS ? term : null;
+}
+
+/**
+ * Build the search-term variants to query for a single client name/AKA.
+ *
+ * Always includes the apostrophe-stripped term (buildSearchTerm). If the raw
+ * name contains an apostrophe, ALSO includes an apostrophe-PRESERVING term so
+ * the anchored prefix query matches data stored with the apostrophe (e.g.
+ * "MARSALA'S MAIL SERVICE"). Both are plain anchored-prefix terms, so neither
+ * forces a full table scan (unlike the old replace()-on-column approach).
+ *
+ * @param {string} rawName - A client name or AKA
+ * @returns {string[]} 0-2 uppercase search terms
+ */
+function buildSearchTermVariants(rawName) {
+  if (!rawName) return [];
+  const variants = new Set();
+
+  const stripped = buildSearchTerm(rawName);
+  if (stripped) variants.add(stripped);
+
+  if (/['’]/.test(rawName)) {
+    const kept = rawName
+      .replace(/[’]/g, "'")                        // normalize curly apostrophe to straight
+      .replace(/&/g, ' ')                          // ampersand -> space (matches buildSearchTerm)
+      .replace(/[.]/g, '')                         // strip periods only (keep apostrophes)
+      .replace(/\s+(llc|inc|corp|co|ltd)$/i, '')   // strip trailing business suffix
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toUpperCase();
+    if (kept.length >= MIN_TERM_CHARS) variants.add(kept);
+  }
+
+  return Array.from(variants);
+}
+
+/**
+ * Build the per-term name sub-clause for the Socrata $where.
+ *
+ * Uses an ANCHORED prefix match ('TERM%', not '%TERM%'). An OATH
+ * respondent_last_name is the registered company name, so the client's search
+ * term is always at the START of it ("MORENO PRODUCE NY CORP" starts with
+ * "MORENO PRODUCE NY"). A leading-wildcard '%TERM%' forces a full table scan of
+ * all 308k+ IDLING rows and is so slow under concurrency that high-volume terms
+ * (e.g. "WALL STREET MAIL") time out and silently return nothing. The anchored
+ * form lets Socrata range-scan, returns the same REAL matches, and only drops
+ * mid-string false positives (e.g. "ACE ACME INC" for term "ACME") — which
+ * matchRespondentToClient rejects client-side anyway.
+ *
+ * IMPORTANT: this is a single prefix LIKE with no replace()/function over the
+ * column — wrapping the column in replace() would force a full scan and undo the
+ * anchor. Apostrophes are instead handled by emitting an apostrophe-preserving
+ * term variant in buildSearchTermVariants. The term is SoQL-escaped first.
+ */
+function buildNameClause(term) {
+  const escaped = term.replace(/'/g, "''");
+  return `(upper(respondent_last_name) like '${escaped}%')`;
+}
+
+/**
+ * Build a complete Socrata $where for a GROUP of search terms by OR-ing their
+ * name clauses, then AND-ing the IDLING and hearing-date filters. Over-fetching
+ * from a coarse group is harmless: every returned row is re-matched client-side
+ * by matchRespondentToClient (non-matches are skipped), so grouping only reduces
+ * the number of API round-trips — it never changes which records are kept.
+ */
+function buildGroupedWhereClause(terms) {
+  const nameClause = terms.map(buildNameClause).join(' OR ');
+  return [
+    `(${nameClause})`,
+    `(upper(charge_1_code_description) like '%IDLING%' OR upper(charge_2_code_description) like '%IDLING%')`,
+    `hearing_date >= '2022-01-01T00:00:00'`,
+  ].join(' AND ');
+}
+
+/**
+ * Pack search terms into groups for OR-grouped queries, bounded by both
+ * TERMS_PER_QUERY (count) and MAX_WHERE_CHARS (assembled name-clause length, to
+ * stay under Socrata's $where size limit). A single oversized term still gets
+ * its own group rather than being dropped.
+ */
+function groupSearchTerms(terms) {
+  const groups = [];
+  let current = [];
+  for (const term of terms) {
+    const tentative = [...current, term];
+    const nameClauseLen = tentative.map(buildNameClause).join(' OR ').length;
+    if (current.length > 0 && (tentative.length > TERMS_PER_QUERY || nameClauseLen > MAX_WHERE_CHARS)) {
+      groups.push(current);
+      current = [term];
+    } else {
+      current = tentative;
+    }
+  }
+  if (current.length > 0) groups.push(current);
+  return groups;
+}
+
 /**
  * Fetch OATH summonses from NYC Open Data API for specific client names
  * FILTERS:
@@ -1492,62 +1748,57 @@ async function fetchNYCDataForClients(clients, context) {
   const allSummonses = [];
   const seenTickets = new Set();
 
-  // Build unique search terms from client names and AKAs
+  // Build unique search terms from client names and AKAs (generic terms dropped).
+  // Each name yields an apostrophe-stripped term plus, when relevant, an
+  // apostrophe-preserving variant (see buildSearchTermVariants).
   const searchTerms = new Set();
   clients.forEach(client => {
-    const mainName = client.name
-      .replace(/&/g, ' ')                              // strip ampersand for API LIKE matching (keep hyphens — LIKE is literal)
-      .replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (mainName.length > 3) searchTerms.add(mainName.toUpperCase());
+    buildSearchTermVariants(client.name).forEach(term => searchTerms.add(term));
 
     if (client.akas && Array.isArray(client.akas)) {
       client.akas.forEach(aka => {
-        const akaMain = aka
-          .replace(/&/g, ' ')                          // strip ampersand for API LIKE matching (keep hyphens — LIKE is literal)
-          .replace(/\s+(llc|inc|corp|co|ltd)\.?$/i, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        if (akaMain.length > 3) searchTerms.add(akaMain.toUpperCase());
+        buildSearchTermVariants(aka).forEach(term => searchTerms.add(term));
       });
     }
   });
 
-  console.log(`Searching for ${searchTerms.size} unique client name patterns (concurrency: ${API_CONCURRENCY})...`);
+  // OR-group terms into far fewer queries (e.g. ~210 terms -> ~15 queries) so
+  // the whole client list is fetched well within the Lambda window. The old
+  // one-query-per-term approach timed out and dropped the tail of the list.
+  const termsArray = Array.from(searchTerms);
+  const termGroups = groupSearchTerms(termsArray);
+  console.log(`Searching for ${searchTerms.size} unique client name patterns in ${termGroups.length} grouped queries (concurrency: ${API_CONCURRENCY})...`);
   console.log('FILTERS: IDLING violations only, hearing_date >= 2022-01-01');
 
-  // Pagination constants: fetch 500 per page, cap at 5000 per search term
+  // Pagination constants: fetch 500 per page, cap per grouped query. The cap is
+  // higher than the old per-term cap because a group spans many clients.
   const PAGE_SIZE = 500;
-  const MAX_PER_TERM = 5000;
+  const MAX_PER_QUERY = 15000;
 
   // Dual-token array for round-robin distribution across Socrata rate-limit buckets
   const tokens = [NYC_API_TOKEN, NYC_API_TOKEN_2];
 
-  // Inner function to fetch all pages for a single search term
-  // Accepts apiToken to distribute requests across independent rate-limit buckets
-  async function fetchForTerm(searchTerm, apiToken) {
-    const termSummonses = [];
-    const escapedTerm = searchTerm.replace(/'/g, "''");
+  // Inner function to fetch all pages for a single group of search terms.
+  // Accepts apiToken to distribute requests across independent rate-limit buckets.
+  async function fetchForTermGroup(terms, apiToken) {
+    const groupSummonses = [];
+    const label = terms.length === 1 ? `"${terms[0]}"` : `${terms.length} terms ("${terms[0]}"…)`;
 
     const termHeaders = {
       'X-App-Token': apiToken,
       'Content-Type': 'application/json',
     };
 
-    // CRITICAL FILTERS:
-    // 1. Match client name in respondent_last_name
-    // 2. IDLING violations only (check both charge fields)
-    // 3. Hearing date >= 2022-01-01
-    const whereClause = [
-      `upper(respondent_last_name) like '%${escapedTerm}%'`,
-      `(upper(charge_1_code_description) like '%IDLING%' OR upper(charge_2_code_description) like '%IDLING%')`,
-      `hearing_date >= '2022-01-01T00:00:00'`
-    ].join(' AND ');
+    // CRITICAL FILTERS (see buildGroupedWhereClause):
+    // 1. respondent_last_name LIKE any term in the group (NYC removed
+    //    respondent_first_name from the dataset around 2026-05-04 — referencing
+    //    it returns SoQL 400). Apostrophe-stripped variant matches "MARSALA'S".
+    // 2. IDLING violations only (both charge fields). 3. hearing_date >= 2022.
+    const whereClause = buildGroupedWhereClause(terms);
 
     let offset = 0;
     let pageData;
-    let termTotal = 0;
+    let groupTotal = 0;
 
     do {
       const url = new URL(NYC_API_URL);
@@ -1566,9 +1817,9 @@ async function fetchNYCDataForClients(clients, context) {
       } catch (err) {
         clearTimeout(timeoutId);
         if (err.name === 'AbortError') {
-          console.warn(`  ⏱️ Timeout (${FETCH_TIMEOUT_MS / 1000}s) for "${searchTerm}" (offset ${offset}) — skipping remaining pages`);
+          console.warn(`  ⏱️ Timeout (${FETCH_TIMEOUT_MS / 1000}s) for ${label} (offset ${offset}) — skipping remaining pages`);
         } else {
-          console.error(`  Fetch error for "${searchTerm}" (offset ${offset}):`, err.message);
+          console.error(`  Fetch error for ${label} (offset ${offset}):`, err.message);
         }
         break;
       }
@@ -1576,36 +1827,35 @@ async function fetchNYCDataForClients(clients, context) {
 
       if (!response.ok) {
         const errorBody = await response.text().catch(() => '');
-        console.error(`NYC API error for "${searchTerm}" (offset ${offset}): ${response.status} - ${errorBody}`);
+        console.error(`NYC API error for ${label} (offset ${offset}): ${response.status} - ${errorBody}`);
         break;
       }
 
       pageData = await response.json();
-      termSummonses.push(...pageData);
-      termTotal += pageData.length;
+      groupSummonses.push(...pageData);
+      groupTotal += pageData.length;
       offset += pageData.length;
-    } while (pageData.length === PAGE_SIZE && offset < MAX_PER_TERM);
+    } while (pageData.length === PAGE_SIZE && offset < MAX_PER_QUERY);
 
-    console.log(`  Found ${termTotal} IDLING (2022+) for "${searchTerm}"${termTotal >= MAX_PER_TERM ? ' (capped)' : ''}`);
-    return termSummonses;
+    console.log(`  Found ${groupTotal} IDLING (2022+) for ${label}${groupTotal >= MAX_PER_QUERY ? ' (capped)' : ''}`);
+    return groupSummonses;
   }
 
-  // Process search terms in parallel chunks of API_CONCURRENCY
+  // Process term groups in parallel chunks of API_CONCURRENCY
   // Round-robin token assignment: 4 requests per token per batch
-  const termsArray = Array.from(searchTerms);
-  for (let i = 0; i < termsArray.length; i += API_CONCURRENCY) {
+  for (let i = 0; i < termGroups.length; i += API_CONCURRENCY) {
     // Timeout guard: stop fetching if running low on time
     if (context.getRemainingTimeInMillis() < PHASE1_TIMEOUT_BUFFER_MS) {
-      console.warn(`⚠️ fetchNYCDataForClients timeout guard — ${Math.round(context.getRemainingTimeInMillis() / 1000)}s remaining, processed ${i}/${termsArray.length} terms`);
+      console.warn(`⚠️ fetchNYCDataForClients timeout guard — ${Math.round(context.getRemainingTimeInMillis() / 1000)}s remaining, processed ${i}/${termGroups.length} query groups`);
       break;
     }
 
-    const chunk = termsArray.slice(i, i + API_CONCURRENCY);
+    const chunk = termGroups.slice(i, i + API_CONCURRENCY);
     const batchNum = Math.floor(i / API_CONCURRENCY) + 1;
-    const totalBatches = Math.ceil(termsArray.length / API_CONCURRENCY);
-    console.log(`\n  Batch ${batchNum}/${totalBatches}: fetching ${chunk.length} terms in parallel...`);
+    const totalBatches = Math.ceil(termGroups.length / API_CONCURRENCY);
+    console.log(`\n  Batch ${batchNum}/${totalBatches}: fetching ${chunk.length} query groups in parallel...`);
 
-    const settled = await Promise.allSettled(chunk.map((term, idx) => fetchForTerm(term, tokens[idx % tokens.length])));
+    const settled = await Promise.allSettled(chunk.map((group, idx) => fetchForTermGroup(group, tokens[idx % tokens.length])));
 
     // Dedup results from this batch into the global collections
     for (const result of settled) {
@@ -1814,6 +2064,15 @@ exports._testExports = {
   matchRespondentToClient,
   buildClientNameMap,
   extractPlateFromViolationDetails,
+  updateSummonsMetadataWithLog,
+  isStrongPrefixMatch,
+  buildSearchTerm,
+  buildSearchTermVariants,
+  buildNameClause,
+  buildGroupedWhereClause,
+  groupSearchTerms,
+  TERMS_PER_QUERY,
+  processSummonsMetadataOnly,
 };
 
 /**

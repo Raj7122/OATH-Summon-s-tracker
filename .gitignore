@@ -39,6 +39,11 @@ amplifyconfiguration.json
 # Testing
 coverage
 
+# Migration workspace (contains backups with PII + raw secrets)
+migration/backups/
+migration/.env.target
+migration/.env.source
+
 #amplify-do-not-edit-begin
 amplify/\#current-cloud-backend
 amplify/.config/local-*

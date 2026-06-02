@@ -61,9 +61,10 @@ describe('Daily Sweep Lambda Function', () => {
       let normalized = name
         .toLowerCase()
         .trim()
-        .replace(/&/g, ' ')                    // normalize ampersand to space
+        .replace(/[&\-]/g, ' ')                // normalize ampersand and hyphen to space
+        .replace(/['.]/g, '')                  // strip apostrophes and periods
         .replace(/\s+/g, ' ')
-        .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '')
+        .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '')
         .trim();
       return normalized;
     };
@@ -97,7 +98,7 @@ describe('Daily Sweep Lambda Function', () => {
     });
 
     test('should handle company names with special characters', () => {
-      expect(normalizeCompanyName('G.C. Warehouse LLC')).toBe('g.c. warehouse');
+      expect(normalizeCompanyName('G.C. Warehouse LLC')).toBe('gc warehouse');
     });
 
     test('should normalize ampersand to space', () => {
@@ -115,6 +116,29 @@ describe('Daily Sweep Lambda Function', () => {
       expect(normalizeCompanyName('A & B Trucking LLC')).toBe('a b trucking');
       expect(normalizeCompanyName('Smith & Sons')).toBe('smith sons');
       expect(normalizeCompanyName('R&D Corp')).toBe('r d');
+    });
+
+    test('should strip apostrophes from company names', () => {
+      expect(normalizeCompanyName("MARSALA'S MAIL SERVICE INC")).toBe('marsalas mail service');
+      expect(normalizeCompanyName("Marsalas Mail Service")).toBe('marsalas mail service');
+      expect(normalizeCompanyName("MARSALA'S MAIL SERVICE")).toBe('marsalas mail service');
+    });
+
+    test('should match apostrophe name against non-apostrophe name after normalization', () => {
+      // NYC Open Data has "MARSALA'S", client entered "Marsalas" — both normalize the same
+      const clientNorm = normalizeCompanyName("Marsalas Mail Service");
+      const apiNorm = normalizeCompanyName("MARSALA'S MAIL SERVICE INC");
+      expect(clientNorm).toBe(apiNorm);
+    });
+
+    test('should normalize hyphenated names', () => {
+      expect(normalizeCompanyName('WALL STREET MAIL PICK-UP SERVI')).toBe('wall street mail pick up servi');
+      expect(normalizeCompanyName('Wall Street Mail')).toBe('wall street mail');
+    });
+
+    test('should strip periods from names (L.L.C., abbreviations)', () => {
+      expect(normalizeCompanyName('A.B.C. Transport L.L.C.')).toBe('abc transport');
+      expect(normalizeCompanyName("O'Brien's Trucking Inc")).toBe('obriens trucking');
     });
   });
 
@@ -204,80 +228,18 @@ describe('Daily Sweep Lambda Function', () => {
 
     const normalizeCompanyName = (name) => {
       if (!name) return '';
-      return name.toLowerCase().trim().replace(/\s+/g, ' ')
-        .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '').trim();
+      return name.toLowerCase().trim()
+        .replace(/[&\-]/g, ' ')
+        .replace(/['.]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
-    const buildClientNameMap = (clients) => {
-      const nameMap = new Map();
-      clients.forEach((client) => {
-        const primaryName = normalizeCompanyName(client.name);
-        nameMap.set(primaryName, client);
-        const noSpaceName = primaryName.replace(/\s/g, '');
-        if (noSpaceName !== primaryName) {
-          nameMap.set(noSpaceName, client);
-        }
-        if (client.akas && Array.isArray(client.akas)) {
-          client.akas.forEach((aka) => {
-            const akaName = normalizeCompanyName(aka);
-            nameMap.set(akaName, client);
-            const akaNoSpace = akaName.replace(/\s/g, '');
-            if (akaNoSpace !== akaName) {
-              nameMap.set(akaNoSpace, client);
-            }
-          });
-        }
-      });
-      return nameMap;
-    };
+    // Use the real production buildClientNameMap so tests exercise actual code.
+    const buildClientNameMap = require('./index')._testExports.buildClientNameMap;
 
-    const matchRespondentToClient = (firstName, lastName, clientNameMap) => {
-      const fullName = `${firstName} ${lastName}`.trim();
-      if (!fullName) return null;
-
-      const normalizedFull = normalizeCompanyName(fullName);
-      const noSpaceFull = normalizedFull.replace(/\s/g, '');
-
-      let match = clientNameMap.get(normalizedFull) || clientNameMap.get(noSpaceFull);
-      if (match) return match;
-
-      // Strategy 2: Suffix Fragment fix
-      if (firstName && looksLikeSuffixFragment(firstName) && lastName) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-      }
-
-      // Strategy 3: Partial word match
-      for (const [clientNormName, client] of clientNameMap.entries()) {
-        if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) {
-          return client;
-        }
-        if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) {
-          return client;
-        }
-      }
-
-      // Strategy 4: Fallback lastName-only match
-      if (lastName && lastName.length >= 5) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-
-        for (const [clientNormName, client] of clientNameMap.entries()) {
-          if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) {
-            return client;
-          }
-          if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) {
-            return client;
-          }
-        }
-      }
-
-      return null;
-    };
+    // Use the real production matcher so these tests exercise the actual code.
+    const matchRespondentToClient = require('./index')._testExports.matchRespondentToClient;
 
     // Test data: Cercone Exterior Restoration Corp with AKAs
     const cerconeClient = {
@@ -365,6 +327,100 @@ describe('Daily Sweep Lambda Function', () => {
     });
   });
 
+  describe('matchRespondentToClient - Marsalas & Wall Street Mail Edge Cases', () => {
+    const SUFFIX_FRAGMENTS = [
+      'llc', 'inc', 'corp', 'co', 'ltd',
+      'orp', 'rp', 'p', 'nc', 'c', 'lc', 'l', 'td', 'd',
+    ];
+
+    const looksLikeSuffixFragment = (firstName) => {
+      if (!firstName) return false;
+      const lower = firstName.toLowerCase().trim();
+      return SUFFIX_FRAGMENTS.includes(lower) || lower.length <= 3;
+    };
+
+    const normalizeCompanyName = (name) => {
+      if (!name) return '';
+      return name.toLowerCase().trim()
+        .replace(/[&\-]/g, ' ')
+        .replace(/['.]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
+    };
+
+    // Use the real production buildClientNameMap so tests exercise actual code.
+    const buildClientNameMap = require('./index')._testExports.buildClientNameMap;
+
+    // Use the real production matcher so these tests exercise the actual code.
+    const matchRespondentToClient = require('./index')._testExports.matchRespondentToClient;
+
+    const marsalasClient = {
+      id: 'marsalas-1',
+      name: 'Marsalas Mail Service',
+      akas: [],
+    };
+
+    const wallStreetClient = {
+      id: 'wallst-1',
+      name: 'Wall Street Mail',
+      akas: [],
+    };
+
+    test('should match "MARSALA\'S MAIL SERVICE INC" to client "Marsalas Mail Service" (apostrophe mismatch)', () => {
+      const clients = [marsalasClient];
+      const clientNameMap = buildClientNameMap(clients);
+      // API returns: lastName="MARSALA'S MAIL SERVICE INC", firstName=""
+      const match = matchRespondentToClient('', "MARSALA'S MAIL SERVICE INC", clientNameMap);
+      expect(match).not.toBeNull();
+      expect(match.id).toBe('marsalas-1');
+    });
+
+    test('should match "MARSALA\'S MAIL SERVICE" without INC suffix', () => {
+      const clients = [marsalasClient];
+      const clientNameMap = buildClientNameMap(clients);
+      const match = matchRespondentToClient('', "MARSALA'S MAIL SERVICE", clientNameMap);
+      expect(match).not.toBeNull();
+      expect(match.id).toBe('marsalas-1');
+    });
+
+    test('should match Wall Street Mail with truncated + split name', () => {
+      const clients = [wallStreetClient];
+      const clientNameMap = buildClientNameMap(clients);
+      // API returns: lastName="WALL STREET MAIL PICK-UP SERVI", firstName="CE"
+      const match = matchRespondentToClient('CE', 'WALL STREET MAIL PICK-UP SERVI', clientNameMap);
+      expect(match).not.toBeNull();
+      expect(match.id).toBe('wallst-1');
+    });
+
+    test('should match Wall Street Mail without hyphen variation', () => {
+      const clients = [wallStreetClient];
+      const clientNameMap = buildClientNameMap(clients);
+      // API sometimes has no hyphen: "WALL STREET MAIL PICK UP SERVI"
+      const match = matchRespondentToClient('CE', 'WALL STREET MAIL PICK UP SERVI', clientNameMap);
+      expect(match).not.toBeNull();
+      expect(match.id).toBe('wallst-1');
+    });
+
+    test('should match Wall Street Mail via firstName="CE INC"', () => {
+      const clients = [wallStreetClient];
+      const clientNameMap = buildClientNameMap(clients);
+      const match = matchRespondentToClient('CE INC', 'WALL STREET MAIL PICK-UP SERVI', clientNameMap);
+      expect(match).not.toBeNull();
+      expect(match.id).toBe('wallst-1');
+    });
+
+    test('should not cross-match between Marsalas and Wall Street Mail', () => {
+      const clients = [marsalasClient, wallStreetClient];
+      const clientNameMap = buildClientNameMap(clients);
+
+      const marsalasMatch = matchRespondentToClient('', "MARSALA'S MAIL SERVICE INC", clientNameMap);
+      expect(marsalasMatch.id).toBe('marsalas-1');
+
+      const wallStMatch = matchRespondentToClient('CE', 'WALL STREET MAIL PICK-UP SERVI', clientNameMap);
+      expect(wallStMatch.id).toBe('wallst-1');
+    });
+  });
+
   /**
    * Real NYC API Name Patterns - Regression Prevention Tests
    *
@@ -394,80 +450,18 @@ describe('Daily Sweep Lambda Function', () => {
 
     const normalizeCompanyName = (name) => {
       if (!name) return '';
-      return name.toLowerCase().trim().replace(/\s+/g, ' ')
-        .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '').trim();
+      return name.toLowerCase().trim()
+        .replace(/[&\-]/g, ' ')
+        .replace(/['.]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
-    const buildClientNameMap = (clients) => {
-      const nameMap = new Map();
-      clients.forEach((client) => {
-        const primaryName = normalizeCompanyName(client.name);
-        nameMap.set(primaryName, client);
-        const noSpaceName = primaryName.replace(/\s/g, '');
-        if (noSpaceName !== primaryName) {
-          nameMap.set(noSpaceName, client);
-        }
-        if (client.akas && Array.isArray(client.akas)) {
-          client.akas.forEach((aka) => {
-            const akaName = normalizeCompanyName(aka);
-            nameMap.set(akaName, client);
-            const akaNoSpace = akaName.replace(/\s/g, '');
-            if (akaNoSpace !== akaName) {
-              nameMap.set(akaNoSpace, client);
-            }
-          });
-        }
-      });
-      return nameMap;
-    };
+    // Use the real production buildClientNameMap so tests exercise actual code.
+    const buildClientNameMap = require('./index')._testExports.buildClientNameMap;
 
-    const matchRespondentToClient = (firstName, lastName, clientNameMap) => {
-      const fullName = `${firstName} ${lastName}`.trim();
-      if (!fullName) return null;
-
-      const normalizedFull = normalizeCompanyName(fullName);
-      const noSpaceFull = normalizedFull.replace(/\s/g, '');
-
-      let match = clientNameMap.get(normalizedFull) || clientNameMap.get(noSpaceFull);
-      if (match) return match;
-
-      // Strategy 2: Suffix Fragment fix
-      if (firstName && looksLikeSuffixFragment(firstName) && lastName) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-      }
-
-      // Strategy 3: Partial word match
-      for (const [clientNormName, client] of clientNameMap.entries()) {
-        if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) {
-          return client;
-        }
-        if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) {
-          return client;
-        }
-      }
-
-      // Strategy 4: Fallback lastName-only match
-      if (lastName && lastName.length >= 5) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-
-        for (const [clientNormName, client] of clientNameMap.entries()) {
-          if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) {
-            return client;
-          }
-          if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) {
-            return client;
-          }
-        }
-      }
-
-      return null;
-    };
+    // Use the real production matcher so these tests exercise the actual code.
+    const matchRespondentToClient = require('./index')._testExports.matchRespondentToClient;
 
     /**
      * PRODUCTION_PATTERNS: Add new patterns here when clients report missing summonses.
@@ -585,77 +579,18 @@ describe('Daily Sweep Lambda Function', () => {
 
     const normalizeCompanyName = (name) => {
       if (!name) return '';
-      return name.toLowerCase().trim().replace(/\s+/g, ' ')
-        .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '').trim();
+      return name.toLowerCase().trim()
+        .replace(/[&\-]/g, ' ')
+        .replace(/['.]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
-    const buildClientNameMap = (clients) => {
-      const nameMap = new Map();
-      clients.forEach((client) => {
-        const primaryName = normalizeCompanyName(client.name);
-        nameMap.set(primaryName, client);
-        const noSpaceName = primaryName.replace(/\s/g, '');
-        if (noSpaceName !== primaryName) {
-          nameMap.set(noSpaceName, client);
-        }
-        if (client.akas && Array.isArray(client.akas)) {
-          client.akas.forEach((aka) => {
-            const akaName = normalizeCompanyName(aka);
-            nameMap.set(akaName, client);
-            const akaNoSpace = akaName.replace(/\s/g, '');
-            if (akaNoSpace !== akaName) {
-              nameMap.set(akaNoSpace, client);
-            }
-          });
-        }
-      });
-      return nameMap;
-    };
+    // Use the real production buildClientNameMap so tests exercise actual code.
+    const buildClientNameMap = require('./index')._testExports.buildClientNameMap;
 
-    const matchRespondentToClient = (firstName, lastName, clientNameMap) => {
-      const fullName = `${firstName} ${lastName}`.trim();
-      if (!fullName) return null;
-
-      const normalizedFull = normalizeCompanyName(fullName);
-      const noSpaceFull = normalizedFull.replace(/\s/g, '');
-
-      let match = clientNameMap.get(normalizedFull) || clientNameMap.get(noSpaceFull);
-      if (match) return match;
-
-      if (firstName && looksLikeSuffixFragment(firstName) && lastName) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-      }
-
-      for (const [clientNormName, client] of clientNameMap.entries()) {
-        if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) {
-          return client;
-        }
-        if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) {
-          return client;
-        }
-      }
-
-      if (lastName && lastName.length >= 5) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-
-        for (const [clientNormName, client] of clientNameMap.entries()) {
-          if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) {
-            return client;
-          }
-          if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) {
-            return client;
-          }
-        }
-      }
-
-      return null;
-    };
+    // Use the real production matcher so these tests exercise the actual code.
+    const matchRespondentToClient = require('./index')._testExports.matchRespondentToClient;
 
     test('SUCCEEDS via partial match: "ORP" + "CERCONE EXTERIOR RESTORATION C" even without explicit AKA', () => {
       // This documents how the matching logic handles truncated names
@@ -798,77 +733,18 @@ describe('Daily Sweep Lambda Function', () => {
 
     const normalizeCompanyName = (name) => {
       if (!name) return '';
-      return name.toLowerCase().trim().replace(/\s+/g, ' ')
-        .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '').trim();
+      return name.toLowerCase().trim()
+        .replace(/[&\-]/g, ' ')
+        .replace(/['.]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
-    const buildClientNameMap = (clients) => {
-      const nameMap = new Map();
-      clients.forEach((client) => {
-        const primaryName = normalizeCompanyName(client.name);
-        nameMap.set(primaryName, client);
-        const noSpaceName = primaryName.replace(/\s/g, '');
-        if (noSpaceName !== primaryName) {
-          nameMap.set(noSpaceName, client);
-        }
-        if (client.akas && Array.isArray(client.akas)) {
-          client.akas.forEach((aka) => {
-            const akaName = normalizeCompanyName(aka);
-            nameMap.set(akaName, client);
-            const akaNoSpace = akaName.replace(/\s/g, '');
-            if (akaNoSpace !== akaName) {
-              nameMap.set(akaNoSpace, client);
-            }
-          });
-        }
-      });
-      return nameMap;
-    };
+    // Use the real production buildClientNameMap so tests exercise actual code.
+    const buildClientNameMap = require('./index')._testExports.buildClientNameMap;
 
-    const matchRespondentToClient = (firstName, lastName, clientNameMap) => {
-      const fullName = `${firstName} ${lastName}`.trim();
-      if (!fullName) return null;
-
-      const normalizedFull = normalizeCompanyName(fullName);
-      const noSpaceFull = normalizedFull.replace(/\s/g, '');
-
-      let match = clientNameMap.get(normalizedFull) || clientNameMap.get(noSpaceFull);
-      if (match) return match;
-
-      if (firstName && looksLikeSuffixFragment(firstName) && lastName) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-      }
-
-      for (const [clientNormName, client] of clientNameMap.entries()) {
-        if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) {
-          return client;
-        }
-        if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) {
-          return client;
-        }
-      }
-
-      if (lastName && lastName.length >= 5) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-
-        for (const [clientNormName, client] of clientNameMap.entries()) {
-          if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) {
-            return client;
-          }
-          if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) {
-            return client;
-          }
-        }
-      }
-
-      return null;
-    };
+    // Use the real production matcher so these tests exercise the actual code.
+    const matchRespondentToClient = require('./index')._testExports.matchRespondentToClient;
 
     const testClient = {
       id: 'test-1',
@@ -1031,77 +907,18 @@ describe('Daily Sweep Lambda Function', () => {
 
     const normalizeCompanyName = (name) => {
       if (!name) return '';
-      return name.toLowerCase().trim().replace(/\s+/g, ' ')
-        .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '').trim();
+      return name.toLowerCase().trim()
+        .replace(/[&\-]/g, ' ')
+        .replace(/['.]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*(llc|inc|corp|co|ltd)\s*$/i, '').trim();
     };
 
-    const buildClientNameMap = (clients) => {
-      const nameMap = new Map();
-      clients.forEach((client) => {
-        const primaryName = normalizeCompanyName(client.name);
-        nameMap.set(primaryName, client);
-        const noSpaceName = primaryName.replace(/\s/g, '');
-        if (noSpaceName !== primaryName) {
-          nameMap.set(noSpaceName, client);
-        }
-        if (client.akas && Array.isArray(client.akas)) {
-          client.akas.forEach((aka) => {
-            const akaName = normalizeCompanyName(aka);
-            nameMap.set(akaName, client);
-            const akaNoSpace = akaName.replace(/\s/g, '');
-            if (akaNoSpace !== akaName) {
-              nameMap.set(akaNoSpace, client);
-            }
-          });
-        }
-      });
-      return nameMap;
-    };
+    // Use the real production buildClientNameMap so tests exercise actual code.
+    const buildClientNameMap = require('./index')._testExports.buildClientNameMap;
 
-    const matchRespondentToClient = (firstName, lastName, clientNameMap) => {
-      const fullName = `${firstName} ${lastName}`.trim();
-      if (!fullName) return null;
-
-      const normalizedFull = normalizeCompanyName(fullName);
-      const noSpaceFull = normalizedFull.replace(/\s/g, '');
-
-      let match = clientNameMap.get(normalizedFull) || clientNameMap.get(noSpaceFull);
-      if (match) return match;
-
-      if (firstName && looksLikeSuffixFragment(firstName) && lastName) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-      }
-
-      for (const [clientNormName, client] of clientNameMap.entries()) {
-        if (normalizedFull.startsWith(clientNormName) && clientNormName.length >= 10) {
-          return client;
-        }
-        if (clientNormName.startsWith(normalizedFull) && normalizedFull.length >= 10) {
-          return client;
-        }
-      }
-
-      if (lastName && lastName.length >= 5) {
-        const normalizedLast = normalizeCompanyName(lastName);
-        const noSpaceLast = normalizedLast.replace(/\s/g, '');
-        match = clientNameMap.get(normalizedLast) || clientNameMap.get(noSpaceLast);
-        if (match) return match;
-
-        for (const [clientNormName, client] of clientNameMap.entries()) {
-          if (normalizedLast.startsWith(clientNormName) && clientNormName.length >= 5) {
-            return client;
-          }
-          if (clientNormName.startsWith(normalizedLast) && normalizedLast.length >= 5) {
-            return client;
-          }
-        }
-      }
-
-      return null;
-    };
+    // Use the real production matcher so these tests exercise the actual code.
+    const matchRespondentToClient = require('./index')._testExports.matchRespondentToClient;
 
     /**
      * Utility function to validate AKA configuration
@@ -1190,37 +1007,8 @@ describe('Daily Sweep Lambda Function', () => {
   });
 
   describe('buildClientNameMap', () => {
-    const buildClientNameMap = (clients) => {
-      const nameMap = new Map();
-      const normalizeCompanyName = (name) => {
-        if (!name) return '';
-        return name.toLowerCase().trim().replace(/\s+/g, ' ')
-          .replace(/\s*(llc|inc|corp|co|ltd|l\.l\.c\.|i\.n\.c\.)\s*$/i, '').trim();
-      };
-
-      clients.forEach((client) => {
-        const primaryName = normalizeCompanyName(client.name);
-        nameMap.set(primaryName, client);
-
-        const noSpaceName = primaryName.replace(/\s/g, '');
-        if (noSpaceName !== primaryName) {
-          nameMap.set(noSpaceName, client);
-        }
-
-        if (client.akas && Array.isArray(client.akas)) {
-          client.akas.forEach((aka) => {
-            const akaName = normalizeCompanyName(aka);
-            nameMap.set(akaName, client);
-            const akaNoSpace = akaName.replace(/\s/g, '');
-            if (akaNoSpace !== akaName) {
-              nameMap.set(akaNoSpace, client);
-            }
-          });
-        }
-      });
-
-      return nameMap;
-    };
+    // Use the real production buildClientNameMap so tests exercise actual code.
+    const buildClientNameMap = require('./index')._testExports.buildClientNameMap;
 
     test('should map primary client name', () => {
       const clients = [{ id: '1', name: 'Acme LLC' }];
@@ -1563,6 +1351,10 @@ describe('Daily Sweep Lambda Function', () => {
     // Re-require the actual handler for integration tests
     let handler;
 
+    // Lambda context stub — the sweep reads getRemainingTimeInMillis() for its
+    // timeout guards, so a context with plenty of time must be supplied.
+    const mockContext = { getRemainingTimeInMillis: () => 900000 };
+
     beforeEach(() => {
       jest.resetModules();
 
@@ -1589,7 +1381,7 @@ describe('Daily Sweep Lambda Function', () => {
     test('should return success with no clients', async () => {
       mockDynamoDBScan.mockResolvedValue({ Items: [] });
 
-      const result = await handler({});
+      const result = await handler({}, mockContext);
 
       expect(result.statusCode).toBe(200);
       const body = JSON.parse(result.body);
@@ -1600,7 +1392,7 @@ describe('Daily Sweep Lambda Function', () => {
     test('should handle DynamoDB scan errors', async () => {
       mockDynamoDBScan.mockRejectedValue(new Error('DynamoDB connection failed'));
 
-      const result = await handler({});
+      const result = await handler({}, mockContext);
 
       expect(result.statusCode).toBe(500);
       const body = JSON.parse(result.body);
@@ -1620,7 +1412,7 @@ describe('Daily Sweep Lambda Function', () => {
         json: jest.fn().mockResolvedValue([]),
       });
 
-      const result = await handler({});
+      const result = await handler({}, mockContext);
 
       expect(result.statusCode).toBe(200);
       expect(mockFetch).toHaveBeenCalled();
@@ -1651,11 +1443,89 @@ describe('Daily Sweep Lambda Function', () => {
       mockDynamoDBPut.mockResolvedValue({});
       mockLambdaInvoke.mockResolvedValue({});
 
-      const result = await handler({});
+      const result = await handler({}, mockContext);
 
       expect(result.statusCode).toBe(200);
       const body = JSON.parse(result.body);
       expect(body.phase1.newRecordsCreated).toBeGreaterThanOrEqual(0);
+    });
+
+    // --- Parallelized Phase 1 processing (regression for the timeout bug) ---
+
+    // Build N matching API summonses with unique ticket numbers.
+    const buildMockSummonses = (n) =>
+      Array.from({ length: n }, (_, i) => ({
+        ticket_number: `TKT${String(i).padStart(4, '0')}`,
+        respondent_last_name: 'TEST COMPANY',
+        hearing_date: '2025-01-15T00:00:00.000',
+        hearing_status: 'PENDING',
+        balance_due: '600',
+        charge_1_code_description: 'IDLING OF MOTOR VEHICLE ENGINE',
+      }));
+
+    test('processes ALL records under bounded concurrency (none dropped)', async () => {
+      const mockClients = [{ id: 'client-1', name: 'Test Company LLC' }];
+      const summonses = buildMockSummonses(50); // 2 batches at PROCESS_CONCURRENCY=25
+
+      mockDynamoDBScan.mockResolvedValue({ Items: mockClients });
+      mockFetch.mockResolvedValue({ ok: true, json: jest.fn().mockResolvedValue(summonses) });
+      mockDynamoDBQuery.mockResolvedValue({ Items: [] }); // no existing records
+      mockDynamoDBPut.mockResolvedValue({});
+
+      const result = await handler({}, mockContext);
+      const body = JSON.parse(result.body);
+
+      // Every fetched record is accounted for — created + updated + skipped == 50.
+      const { newRecordsCreated, recordsUpdated, recordsSkipped } = body.phase1;
+      expect(newRecordsCreated + recordsUpdated + recordsSkipped).toBe(50);
+      expect(newRecordsCreated).toBe(50);
+      expect(body.phase1.errors).toBe(0);
+      expect(body.phase1.timedOut).toBe(false);
+    });
+
+    test('isolates a single failing record (allSettled) without aborting the batch', async () => {
+      const mockClients = [{ id: 'client-1', name: 'Test Company LLC' }];
+      const summonses = buildMockSummonses(50);
+
+      mockDynamoDBScan.mockResolvedValue({ Items: mockClients });
+      mockFetch.mockResolvedValue({ ok: true, json: jest.fn().mockResolvedValue(summonses) });
+      mockDynamoDBQuery.mockResolvedValue({ Items: [] });
+      // Exactly one createSummons put rejects; the rest succeed.
+      mockDynamoDBPut.mockRejectedValueOnce(new Error('throttled')).mockResolvedValue({});
+
+      const result = await handler({}, mockContext);
+      const body = JSON.parse(result.body);
+
+      expect(body.phase1.errors).toBe(1);
+      expect(body.phase1.newRecordsCreated).toBe(49); // 50 - 1 failure
+    });
+
+    test('stops on a batch boundary when time runs low and skips ghost detection', async () => {
+      const mockClients = [{ id: 'client-1', name: 'Test Company LLC' }];
+      const summonses = buildMockSummonses(50); // 2 processing batches
+
+      mockDynamoDBScan.mockResolvedValue({ Items: mockClients });
+      mockFetch.mockResolvedValue({ ok: true, json: jest.fn().mockResolvedValue(summonses) });
+      mockDynamoDBQuery.mockResolvedValue({ Items: [] });
+      mockDynamoDBPut.mockResolvedValue({});
+
+      // Call sequence: 1 fetch-batch guard, then 1 guard per processing batch.
+      // Drop below 60s only on the 2nd processing batch so the first batch (25)
+      // completes and the loop stops at the boundary.
+      let calls = 0;
+      const tightContext = {
+        getRemainingTimeInMillis: () => {
+          calls += 1;
+          return calls <= 2 ? 900000 : 30000;
+        },
+      };
+
+      const result = await handler({}, tightContext);
+      const body = JSON.parse(result.body);
+
+      expect(body.phase1.timedOut).toBe(true);
+      expect(body.phase1.newRecordsCreated).toBe(25); // exactly one batch processed
+      expect(body.phase1.recordsArchived).toBe(0);    // ghost detection skipped
     });
   });
 
@@ -1743,6 +1613,552 @@ describe('Daily Sweep Lambda Function', () => {
         // The lastName should START WITH the client name
         expect(lastNameNorm.startsWith(clientNorm)).toBe(true);
       });
+    });
+
+    describe('extractPlateFromViolationDetails', () => {
+      const { extractPlateFromViolationDetails } = require('./index')._testExports;
+
+      test('extracts full plate from violation_details', () => {
+        const details = 'CITIZEN OBSERVED TRUCK WITH NJ LICENSE PLATE XDLR87 IDLING';
+        expect(extractPlateFromViolationDetails(details)).toBe('XDLR87');
+      });
+
+      test('extracts truncated plate from violation_details', () => {
+        // NYC API sometimes truncates violation_details, cutting the plate short
+        const details = 'CITIZEN OBSERVED TRUCK WITH NJ LICENSE PLATE XDL';
+        expect(extractPlateFromViolationDetails(details)).toBe('XDL');
+      });
+
+      test('extracts plate with hash symbol', () => {
+        const details = 'LICENSE PLATE # ABC1234 SOME TEXT';
+        expect(extractPlateFromViolationDetails(details)).toBe('ABC1234');
+      });
+
+      test('returns null when no plate in details', () => {
+        const details = 'RESPONDENT CAUSED IDLING OF A MOTOR VEHICLE';
+        expect(extractPlateFromViolationDetails(details)).toBeNull();
+      });
+
+      test('returns null for empty/null input', () => {
+        expect(extractPlateFromViolationDetails('')).toBeNull();
+        expect(extractPlateFromViolationDetails(null)).toBeNull();
+      });
+    });
+
+    describe('Plate filter prefix matching - Summons 000775055Z regression', () => {
+      // This tests the real-world scenario where the NYC API truncated
+      // "XDLR87" to "XDL" in violation_details, causing a false rejection.
+      // The plate filter should use prefix matching, not exact matching.
+
+      test('truncated plate "XDL" should prefix-match filter plate "XDLR87"', () => {
+        const normalizedPlate = 'XDL'; // extracted from truncated API text
+        const plateList = ['XDLR87'];
+        // Prefix match: filter plate starts with extracted plate
+        const plateMatches = plateList.some(filterPlate =>
+          filterPlate.startsWith(normalizedPlate) || normalizedPlate.startsWith(filterPlate)
+        );
+        expect(plateMatches).toBe(true);
+      });
+
+      test('full plate "XDLR87" should match filter plate "XDLR87"', () => {
+        const normalizedPlate = 'XDLR87';
+        const plateList = ['XDLR87'];
+        const plateMatches = plateList.some(filterPlate =>
+          filterPlate.startsWith(normalizedPlate) || normalizedPlate.startsWith(filterPlate)
+        );
+        expect(plateMatches).toBe(true);
+      });
+
+      test('completely different plate should NOT match', () => {
+        const normalizedPlate = 'ABC123';
+        const plateList = ['XDLR87'];
+        const plateMatches = plateList.some(filterPlate =>
+          filterPlate.startsWith(normalizedPlate) || normalizedPlate.startsWith(filterPlate)
+        );
+        expect(plateMatches).toBe(false);
+      });
+    });
+  });
+
+  // Regression suite for the bug Jacky reported: the tracker pulled unrelated
+  // "ALL SEASON(S)" companies (movers, doors, windows, solar, EMS, etc.) into
+  // the client "ALL SEASON RESTORATION INC". Root cause was a bare-startsWith
+  // partial match: "all season" (10 chars) prefix-matched "all season movers".
+  // The matcher now uses token-aligned (word-boundary) prefix matching.
+  describe('ALL SEASON false-positive regression (Real Exports)', () => {
+    const { matchRespondentToClient, buildClientNameMap } = require('./index')._testExports;
+    const allSeason = { id: 'as-1', name: 'ALL SEASON RESTORATION INC', akas: [] };
+    const map = buildClientNameMap([allSeason]);
+
+    test.each([
+      ['', 'ALL SEASON MOVERS INC'],
+      ['', 'ALL SEASONS MOVERS INC'],
+      ['', 'EMS INC ALL SEASONS WINDOW DOOR SYST'],
+      ['', 'ALL SEASONS DOOR AND WINDOW'],
+      ['', 'ALL SEASONS EXPRESS LLC'],
+      ['', 'ALL SEASONS IRON WORKS CORP'],
+      ['', 'ALL SEASON SOLAR LLC'],
+      ['', 'ALL SEASONS LANDSCAPING TS INC'],
+      ['', 'ALL SEASONS'], // plural — "seasons" != "season", so not a token-prefix
+      ['ALL', 'SEASON MOVERS INC'],
+    ])('does NOT match "%s" + "%s"', (firstName, lastName) => {
+      expect(matchRespondentToClient(firstName, lastName, map)).toBeNull();
+    });
+
+    // Bare "ALL SEASON" (singular) IS a clean token-prefix of the client name,
+    // so the matcher treats it as a truncation and matches — consistent with the
+    // Sprague case below. This is harmless in production: such records are no
+    // longer FETCHED (the API search term is the full "ALL SEASON RESTORATION").
+    test('treats bare "ALL SEASON" as a truncation (matches, like Sprague)', () => {
+      expect(matchRespondentToClient('', 'ALL SEASON', map).id).toBe('as-1');
+    });
+
+    test('still matches the genuine client exactly', () => {
+      expect(matchRespondentToClient('', 'ALL SEASON RESTORATION INC', map).id).toBe('as-1');
+    });
+
+    test('still matches a truncated variant via token-prefix', () => {
+      // "all season restoration" is a clean token-prefix of "all season restoration c"
+      expect(matchRespondentToClient('ORP', 'ALL SEASON RESTORATION C', map).id).toBe('as-1');
+    });
+  });
+
+  // Guards that the token-prefix fix did NOT break the legitimate truncation
+  // case Strategy 3 exists for: a shorter AKA that is a clean word-boundary
+  // prefix of the respondent name should still match.
+  describe('Sprague legitimate prefix match (Real Exports)', () => {
+    const { matchRespondentToClient, buildClientNameMap } = require('./index')._testExports;
+    const sprague = {
+      id: 'sp-1',
+      name: 'Sprague Operating Resources LLC',
+      akas: ['SPRAGUE OPERATING'],
+    };
+    const map = buildClientNameMap([sprague]);
+
+    test('AKA "SPRAGUE OPERATING" matches respondent "SPRAGUE OPERATING RESOURCES"', () => {
+      expect(matchRespondentToClient('', 'SPRAGUE OPERATING RESOURCES', map).id).toBe('sp-1');
+    });
+    test('respondent "SPRAGUE OPERATING" matches via the AKA', () => {
+      expect(matchRespondentToClient('', 'SPRAGUE OPERATING', map).id).toBe('sp-1');
+    });
+  });
+
+  // The API search-term guard drops terms too generic for a substring LIKE.
+  describe('buildSearchTerm guard (Real Exports)', () => {
+    const { buildSearchTerm } = require('./index')._testExports;
+
+    test('keeps specific multi-word names (suffix stripped)', () => {
+      expect(buildSearchTerm('ALL SEASON RESTORATION INC')).toBe('ALL SEASON RESTORATION');
+      expect(buildSearchTerm("MARSALA'S MAIL SERVICE INC")).toBe('MARSALAS MAIL SERVICE');
+    });
+    test('keeps single-word names at/above the floor', () => {
+      expect(buildSearchTerm('CERCONE')).toBe('CERCONE'); // bare-lastName pattern must stay fetchable
+      expect(buildSearchTerm('ACME')).toBe('ACME');       // 4 chars — historical floor preserved
+    });
+    test('drops too-short stubs (<= 3 chars after suffix strip)', () => {
+      expect(buildSearchTerm('ABC INC')).toBeNull();   // "ABC" 3 chars
+      expect(buildSearchTerm('Co LLC')).toBeNull();    // "CO" 2 chars
+      expect(buildSearchTerm('')).toBeNull();
+    });
+  });
+
+  // Regression suite for the bug Jacky reported: DEP File Creation Date
+  // "disappears on reschedule". The sweep is mathematically incapable of
+  // wiping user-input AWSJSON fields because its UpdateExpression uses SET
+  // over an explicit field allowlist — but these tests pin that invariant
+  // in place so a future allowlist widening can't silently reintroduce it.
+  describe('updateSummonsMetadataWithLog preserves user-input fields', () => {
+    const PROTECTED_USER_FIELDS = [
+      'dep_file_date_attr',
+      'evidence_reviewed_attr',
+      'added_to_calendar_attr',
+      'evidence_requested_attr',
+      'evidence_received_attr',
+      'internal_status_attr',
+      'attachments',
+      'notes_comments',
+      'notes',
+      'evidence_reviewed',
+      'added_to_calendar',
+      'evidence_requested',
+      'evidence_received',
+      'evidence_reviewed_date',
+      'added_to_calendar_date',
+      'evidence_requested_date',
+      'evidence_received_date',
+      'is_invoiced',
+      'invoice_date',
+      'internal_status',
+    ];
+
+    // The full set of fields the sweep is *allowed* to touch — the allowlist
+    // baked into updateSummonsMetadataWithLog plus the tracking/system fields
+    // it sets unconditionally.
+    const ALLOWED_FIELDS = new Set([
+      // metadata allowlist (line ~534)
+      'status', 'hearing_result', 'hearing_time', 'hearing_date',
+      'amount_due', 'paid_amount', 'penalty_imposed', 'code_description',
+      // tracking/system
+      'last_change_summary', 'last_change_at',
+      'activity_log',
+      'ocr_status',
+      'last_metadata_sync',
+      'api_miss_count',
+      'updatedAt',
+    ]);
+
+    // Build a reschedule-triggering metadata payload. We seed it with EVERY
+    // protected user-input field set to a sentinel value so the regression
+    // test actually exercises the field-allowlist enforcement: if a future
+    // refactor widens `fieldsToUpdate` to include any of these, the
+    // sentinel will leak into the UpdateExpression and the test will fail.
+    const buildRescheduleMetadata = () => ({
+      status: 'RESCHEDULED',
+      hearing_result: '',
+      hearing_time: '10:00',
+      hearing_date: '2026-08-01T00:00:00.000Z',
+      amount_due: 1000,
+      paid_amount: 0,
+      penalty_imposed: 0,
+      code_description: 'IDLING OF MOTOR VEHICLE',
+      // Sentinel values for protected fields — must NEVER reach the
+      // UpdateExpression. The sweep is supposed to be incapable of
+      // touching user-input attribution / evidence fields.
+      dep_file_date_attr: 'SENTINEL',
+      evidence_reviewed_attr: 'SENTINEL',
+      added_to_calendar_attr: 'SENTINEL',
+      evidence_requested_attr: 'SENTINEL',
+      evidence_received_attr: 'SENTINEL',
+      internal_status_attr: 'SENTINEL',
+      attachments: 'SENTINEL',
+      notes_comments: 'SENTINEL',
+      notes: 'SENTINEL',
+      evidence_reviewed: 'SENTINEL',
+      added_to_calendar: 'SENTINEL',
+      evidence_requested: 'SENTINEL',
+      evidence_received: 'SENTINEL',
+      evidence_reviewed_date: 'SENTINEL',
+      added_to_calendar_date: 'SENTINEL',
+      evidence_requested_date: 'SENTINEL',
+      evidence_received_date: 'SENTINEL',
+      is_invoiced: 'SENTINEL',
+      invoice_date: 'SENTINEL',
+      internal_status: 'SENTINEL',
+    });
+
+    let updateSummonsMetadataWithLog;
+    let lastUpdateParams;
+
+    beforeEach(() => {
+      // Reset modules + re-mock aws-sdk fresh for each test in this suite,
+      // matching the Handler Integration pattern below. The Handler suite
+      // also calls jest.resetModules() in its own beforeEach, so a captured
+      // DocumentClient reference does not survive across describe blocks —
+      // we re-acquire the active instance per-test via a closure that
+      // captures params directly.
+      lastUpdateParams = null;
+      jest.resetModules();
+      jest.doMock('aws-sdk', () => ({
+        DynamoDB: {
+          DocumentClient: jest.fn(() => ({
+            scan: jest.fn(() => ({ promise: () => Promise.resolve({ Items: [] }) })),
+            query: jest.fn(() => ({ promise: () => Promise.resolve({ Items: [] }) })),
+            put: jest.fn(() => ({ promise: () => Promise.resolve({}) })),
+            get: jest.fn(() => ({ promise: () => Promise.resolve({}) })),
+            update: jest.fn((params) => {
+              lastUpdateParams = params;
+              return { promise: () => Promise.resolve({}) };
+            }),
+          })),
+        },
+        Lambda: jest.fn(() => ({
+          invoke: jest.fn(() => ({ promise: () => Promise.resolve({}) })),
+        })),
+      }));
+      ({ updateSummonsMetadataWithLog } = require('./index')._testExports);
+    });
+
+    test('UpdateExpression never names dep_file_date_attr', async () => {
+      await updateSummonsMetadataWithLog(
+        'summons-id-1',
+        buildRescheduleMetadata(),
+        'Hearing: Jun 1, 2026 -> Aug 1, 2026',
+        false,
+        [{ type: 'RESCHEDULE', date: '2026-05-12T00:00:00Z', description: 'rescheduled' }],
+        '2026-05-12T00:00:00Z',
+      );
+      expect(lastUpdateParams).not.toBeNull();
+      expect(lastUpdateParams.UpdateExpression).not.toMatch(/dep_file_date_attr/);
+    });
+
+    test('UpdateExpression never names any *_attr field', async () => {
+      await updateSummonsMetadataWithLog(
+        'summons-id-2',
+        buildRescheduleMetadata(),
+        'Status: PENDING -> RESCHEDULED',
+        false,
+        [],
+        '2026-05-12T00:00:00Z',
+      );
+      const attrFields = [
+        'evidence_reviewed_attr',
+        'added_to_calendar_attr',
+        'evidence_requested_attr',
+        'evidence_received_attr',
+        'internal_status_attr',
+      ];
+      for (const f of attrFields) {
+        expect(lastUpdateParams.UpdateExpression).not.toMatch(new RegExp(f));
+      }
+    });
+
+    test('UpdateExpression never names attachments or notes_comments', async () => {
+      await updateSummonsMetadataWithLog(
+        'summons-id-3',
+        buildRescheduleMetadata(),
+        'summary',
+        false,
+        [],
+        '2026-05-12T00:00:00Z',
+      );
+      expect(lastUpdateParams.UpdateExpression).not.toMatch(/attachments/);
+      expect(lastUpdateParams.UpdateExpression).not.toMatch(/notes_comments/);
+      expect(lastUpdateParams.UpdateExpression).not.toMatch(/\bnotes\b/);
+    });
+
+    test('UpdateExpression only references fields from the metadata + tracking allowlist', async () => {
+      await updateSummonsMetadataWithLog(
+        'summons-id-4',
+        buildRescheduleMetadata(),
+        'summary',
+        true, // needsOCR — triggers ocr_status = pending too
+        [{ type: 'RESCHEDULE', date: '2026-05-12T00:00:00Z' }],
+        '2026-05-12T00:00:00Z',
+        true, // resetMissCount — triggers api_miss_count
+      );
+      // Parse out every LHS of an assignment in the SET expression.
+      // Resolver builds things like: "SET #status = :status, hearing_date = :hearing_date, ..."
+      // ExpressionAttributeNames maps the # placeholders back to real names.
+      const setMatch = lastUpdateParams.UpdateExpression.match(/^SET\s+(.+)$/);
+      expect(setMatch).not.toBeNull();
+      const assignments = setMatch[1].split(',').map(s => s.trim());
+
+      const lhsNames = assignments.map(a => {
+        const lhs = a.split('=')[0].trim();
+        // Resolve placeholder #foo back to the real field name
+        if (lhs.startsWith('#') && lastUpdateParams.ExpressionAttributeNames) {
+          return lastUpdateParams.ExpressionAttributeNames[lhs] || lhs;
+        }
+        return lhs;
+      });
+
+      for (const name of lhsNames) {
+        expect(ALLOWED_FIELDS.has(name)).toBe(true);
+        // Also assert no protected user-input field snuck in
+        expect(PROTECTED_USER_FIELDS).not.toContain(name);
+      }
+    });
+
+    test('still updates hearing_date when reschedule detected (regression sanity)', async () => {
+      await updateSummonsMetadataWithLog(
+        'summons-id-5',
+        buildRescheduleMetadata(),
+        'Hearing: Jun 1, 2026 -> Aug 1, 2026',
+        false,
+        [],
+        '2026-05-12T00:00:00Z',
+      );
+      expect(lastUpdateParams.UpdateExpression).toMatch(/hearing_date/);
+      expect(lastUpdateParams.ExpressionAttributeValues[':hearing_date'])
+        .toBe('2026-08-01T00:00:00.000Z');
+    });
+  });
+
+  // OR-grouped fetch queries — the fix that guarantees every client's terms are
+  // queried (the old one-query-per-term approach timed out and dropped the tail).
+  describe('OR-grouped fetch queries (Real Exports)', () => {
+    const { buildNameClause, buildGroupedWhereClause, groupSearchTerms, buildSearchTermVariants, TERMS_PER_QUERY } =
+      require('./index')._testExports;
+
+    test('uses a single anchored prefix LIKE with no replace() over the column', () => {
+      const clause = buildNameClause('MORENO PRODUCE NY');
+      expect(clause).toContain("upper(respondent_last_name) like 'MORENO PRODUCE NY%'");
+      // Must NOT be a leading-wildcard (that forces a slow full table scan)
+      expect(clause).not.toContain("like '%MORENO");
+      // Must NOT wrap the column in replace() (that also forces a full scan)
+      expect(clause).not.toContain('replace(');
+    });
+
+    test('buildSearchTermVariants emits an apostrophe-preserving variant', () => {
+      const variants = buildSearchTermVariants("MARSALA'S MAIL SERVICE INC");
+      expect(variants).toContain('MARSALAS MAIL SERVICE');     // stripped (suffix removed)
+      expect(variants).toContain("MARSALA'S MAIL SERVICE");    // apostrophe preserved
+    });
+
+    test('buildSearchTermVariants returns a single term when there is no apostrophe', () => {
+      expect(buildSearchTermVariants('MORENO PRODUCE NY CORP')).toEqual(['MORENO PRODUCE NY']);
+    });
+
+    test('escapes single quotes in a term for SoQL safety', () => {
+      expect(buildNameClause("O'BRIEN")).toContain("like 'O''BRIEN%'");
+    });
+
+    test('ORs all term clauses and ANDs the IDLING + hearing-date filters', () => {
+      const where = buildGroupedWhereClause(['ACME TRUCKING', 'MORENO PRODUCE NY']);
+      // Both terms present (anchored), joined by OR within the name group
+      expect(where).toContain("'ACME TRUCKING%'");
+      expect(where).toContain("'MORENO PRODUCE NY%'");
+      expect(where).toMatch(/like 'ACME TRUCKING%'\) OR \(upper\(respondent_last_name\) like 'MORENO PRODUCE NY%'/);
+      // IDLING + date filters AND-ed on
+      expect(where).toContain("like '%IDLING%'");
+      expect(where).toContain("hearing_date >= '2022-01-01T00:00:00'");
+    });
+
+    test('packs terms into groups of at most TERMS_PER_QUERY', () => {
+      const n = TERMS_PER_QUERY * 2 + 1; // forces 3 groups
+      const terms = Array.from({ length: n }, (_, i) => `CLIENTNAME${i}`);
+      const groups = groupSearchTerms(terms);
+      expect(groups.length).toBe(3);
+      groups.forEach(g => expect(g.length).toBeLessThanOrEqual(TERMS_PER_QUERY));
+      // No term is lost
+      expect(groups.flat().sort()).toEqual(terms.slice().sort());
+    });
+
+    test('splits a group early when the name clause exceeds the char budget', () => {
+      // Very long terms blow the MAX_WHERE_CHARS budget before hitting the count cap.
+      const longTerms = Array.from({ length: 10 }, (_, i) => `${'X'.repeat(400)}${i}`);
+      const groups = groupSearchTerms(longTerms);
+      expect(groups.length).toBeGreaterThan(1);
+      expect(groups.flat().length).toBe(longTerms.length); // nothing dropped
+    });
+
+    test('an oversized single term still gets its own group (never dropped)', () => {
+      const groups = groupSearchTerms(['Y'.repeat(5000)]);
+      expect(groups.length).toBe(1);
+      expect(groups[0].length).toBe(1);
+    });
+  });
+
+  // Regression for Jacky's report: client "MORENO PRODUCE NY CORP" added but its
+  // summons 000902655L never appeared. Root cause was the sweep timeout dropping
+  // the tail of the client list — not matching. These pin both halves: the name
+  // matches, and its (suffix-stripped) term is included in the grouped query.
+  describe('MORENO PRODUCE regression (Real Exports)', () => {
+    const { matchRespondentToClient, buildClientNameMap, buildSearchTerm, buildGroupedWhereClause } =
+      require('./index')._testExports;
+
+    const moreno = {
+      id: 'moreno-1',
+      name: 'MORENO PRODUCE NY CORP',
+      akas: ['MORENO PRODUCE NY', 'MORENO PRODUCE NY P', 'MORENO PRODUCE'],
+    };
+    const map = buildClientNameMap([moreno]);
+
+    test('matches respondent "MORENO PRODUCE NY CORP" (empty firstName)', () => {
+      expect(matchRespondentToClient('', 'MORENO PRODUCE NY CORP', map).id).toBe('moreno-1');
+    });
+
+    test('matches the "CORPORATION" sibling variant via token-prefix', () => {
+      expect(matchRespondentToClient('', 'MORENO PRODUCE NY CORPORATION', map).id).toBe('moreno-1');
+    });
+
+    test('its search term (CORP stripped) is included in a grouped query', () => {
+      const term = buildSearchTerm(moreno.name);
+      expect(term).toBe('MORENO PRODUCE NY');
+      const where = buildGroupedWhereClause([term]);
+      expect(where).toContain("'MORENO PRODUCE NY%'");
+    });
+  });
+
+  // Self-heal: a record auto-archived by ghost detection that reappears in the
+  // API must be un-archived. Ghost detection can wrongly archive a record whose
+  // client temporarily fell out of a timed-out fetch; without un-archive it
+  // would stay hidden forever.
+  describe('Ghost un-archive on reappearance (Real Exports)', () => {
+    let processSummonsMetadataOnly, buildClientNameMap;
+    let updateParams;
+
+    beforeEach(() => {
+      updateParams = [];
+      jest.resetModules();
+      jest.doMock('aws-sdk', () => ({
+        DynamoDB: {
+          DocumentClient: jest.fn(() => ({
+            scan: jest.fn(() => ({ promise: () => Promise.resolve({ Items: [] }) })),
+            // findExistingSummons (dedup guard) returns the ARCHIVED record
+            query: jest.fn(() => ({ promise: () => Promise.resolve({ Items: [{
+              id: 'arch-1',
+              summons_number: 'TKT-ARCH',
+              clientID: 'c-1',
+              status: 'PENDING',
+              is_archived: true,
+              archived_reason: 'API_MISSING',
+              api_miss_count: 3,
+              activity_log: [],
+            }] }) })),
+            put: jest.fn(() => ({ promise: () => Promise.resolve({}) })),
+            update: jest.fn((params) => {
+              updateParams.push(params);
+              return { promise: () => Promise.resolve({}) };
+            }),
+          })),
+        },
+        Lambda: jest.fn(() => ({ invoke: jest.fn(() => ({ promise: () => Promise.resolve({}) })) })),
+      }));
+      ({ processSummonsMetadataOnly, buildClientNameMap } = require('./index')._testExports);
+    });
+
+    test('un-archives an API_MISSING record that reappears', async () => {
+      const client = { id: 'c-1', name: 'ACME WIDGETS', akas: [] };
+      const map = buildClientNameMap([client]);
+      const apiSummons = {
+        ticket_number: 'TKT-ARCH',
+        respondent_last_name: 'ACME WIDGETS',
+        status: 'PENDING',
+        hearing_date: '2026-08-01T00:00:00.000',
+      };
+
+      // Empty existingSummonsMap → forces the dedup-guard DB lookup that finds
+      // the archived record.
+      const result = await processSummonsMetadataOnly(apiSummons, map, '2026-06-02T00:00:00Z', new Map());
+
+      expect(result.action).toBe('updated');
+      // One of the update calls must clear is_archived and REMOVE archive fields.
+      const clearing = updateParams.find(p => /is_archived = :false/.test(p.UpdateExpression));
+      expect(clearing).toBeDefined();
+      expect(clearing.UpdateExpression).toMatch(/REMOVE archived_at, archived_reason/);
+      expect(clearing.ExpressionAttributeValues[':false']).toBe(false);
+    });
+
+    test('does NOT un-archive a deliberately-archived record (non-ghost reason)', async () => {
+      jest.resetModules();
+      jest.doMock('aws-sdk', () => ({
+        DynamoDB: {
+          DocumentClient: jest.fn(() => ({
+            scan: jest.fn(() => ({ promise: () => Promise.resolve({ Items: [] }) })),
+            query: jest.fn(() => ({ promise: () => Promise.resolve({ Items: [{
+              id: 'arch-2',
+              summons_number: 'TKT-MANUAL',
+              clientID: 'c-1',
+              status: 'PENDING',
+              is_archived: true,
+              archived_reason: 'USER_ARCHIVED',
+              activity_log: [],
+            }] }) })),
+            put: jest.fn(() => ({ promise: () => Promise.resolve({}) })),
+            update: jest.fn((params) => { updateParams.push(params); return { promise: () => Promise.resolve({}) }; }),
+          })),
+        },
+        Lambda: jest.fn(() => ({ invoke: jest.fn(() => ({ promise: () => Promise.resolve({}) })) })),
+      }));
+      const mod = require('./index')._testExports;
+      const map = mod.buildClientNameMap([{ id: 'c-1', name: 'ACME WIDGETS', akas: [] }]);
+      const apiSummons = { ticket_number: 'TKT-MANUAL', respondent_last_name: 'ACME WIDGETS', status: 'PENDING', hearing_date: '2026-08-01T00:00:00.000' };
+
+      await mod.processSummonsMetadataOnly(apiSummons, map, '2026-06-02T00:00:00Z', new Map());
+
+      const clearing = updateParams.find(p => /is_archived = :false/.test(p.UpdateExpression || ''));
+      expect(clearing).toBeUndefined();
     });
   });
 });
