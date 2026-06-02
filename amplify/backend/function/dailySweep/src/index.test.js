@@ -1351,6 +1351,10 @@ describe('Daily Sweep Lambda Function', () => {
     // Re-require the actual handler for integration tests
     let handler;
 
+    // Lambda context stub — the sweep reads getRemainingTimeInMillis() for its
+    // timeout guards, so a context with plenty of time must be supplied.
+    const mockContext = { getRemainingTimeInMillis: () => 900000 };
+
     beforeEach(() => {
       jest.resetModules();
 
@@ -1377,7 +1381,7 @@ describe('Daily Sweep Lambda Function', () => {
     test('should return success with no clients', async () => {
       mockDynamoDBScan.mockResolvedValue({ Items: [] });
 
-      const result = await handler({});
+      const result = await handler({}, mockContext);
 
       expect(result.statusCode).toBe(200);
       const body = JSON.parse(result.body);
@@ -1388,7 +1392,7 @@ describe('Daily Sweep Lambda Function', () => {
     test('should handle DynamoDB scan errors', async () => {
       mockDynamoDBScan.mockRejectedValue(new Error('DynamoDB connection failed'));
 
-      const result = await handler({});
+      const result = await handler({}, mockContext);
 
       expect(result.statusCode).toBe(500);
       const body = JSON.parse(result.body);
@@ -1408,7 +1412,7 @@ describe('Daily Sweep Lambda Function', () => {
         json: jest.fn().mockResolvedValue([]),
       });
 
-      const result = await handler({});
+      const result = await handler({}, mockContext);
 
       expect(result.statusCode).toBe(200);
       expect(mockFetch).toHaveBeenCalled();
@@ -1439,11 +1443,89 @@ describe('Daily Sweep Lambda Function', () => {
       mockDynamoDBPut.mockResolvedValue({});
       mockLambdaInvoke.mockResolvedValue({});
 
-      const result = await handler({});
+      const result = await handler({}, mockContext);
 
       expect(result.statusCode).toBe(200);
       const body = JSON.parse(result.body);
       expect(body.phase1.newRecordsCreated).toBeGreaterThanOrEqual(0);
+    });
+
+    // --- Parallelized Phase 1 processing (regression for the timeout bug) ---
+
+    // Build N matching API summonses with unique ticket numbers.
+    const buildMockSummonses = (n) =>
+      Array.from({ length: n }, (_, i) => ({
+        ticket_number: `TKT${String(i).padStart(4, '0')}`,
+        respondent_last_name: 'TEST COMPANY',
+        hearing_date: '2025-01-15T00:00:00.000',
+        hearing_status: 'PENDING',
+        balance_due: '600',
+        charge_1_code_description: 'IDLING OF MOTOR VEHICLE ENGINE',
+      }));
+
+    test('processes ALL records under bounded concurrency (none dropped)', async () => {
+      const mockClients = [{ id: 'client-1', name: 'Test Company LLC' }];
+      const summonses = buildMockSummonses(50); // 2 batches at PROCESS_CONCURRENCY=25
+
+      mockDynamoDBScan.mockResolvedValue({ Items: mockClients });
+      mockFetch.mockResolvedValue({ ok: true, json: jest.fn().mockResolvedValue(summonses) });
+      mockDynamoDBQuery.mockResolvedValue({ Items: [] }); // no existing records
+      mockDynamoDBPut.mockResolvedValue({});
+
+      const result = await handler({}, mockContext);
+      const body = JSON.parse(result.body);
+
+      // Every fetched record is accounted for — created + updated + skipped == 50.
+      const { newRecordsCreated, recordsUpdated, recordsSkipped } = body.phase1;
+      expect(newRecordsCreated + recordsUpdated + recordsSkipped).toBe(50);
+      expect(newRecordsCreated).toBe(50);
+      expect(body.phase1.errors).toBe(0);
+      expect(body.phase1.timedOut).toBe(false);
+    });
+
+    test('isolates a single failing record (allSettled) without aborting the batch', async () => {
+      const mockClients = [{ id: 'client-1', name: 'Test Company LLC' }];
+      const summonses = buildMockSummonses(50);
+
+      mockDynamoDBScan.mockResolvedValue({ Items: mockClients });
+      mockFetch.mockResolvedValue({ ok: true, json: jest.fn().mockResolvedValue(summonses) });
+      mockDynamoDBQuery.mockResolvedValue({ Items: [] });
+      // Exactly one createSummons put rejects; the rest succeed.
+      mockDynamoDBPut.mockRejectedValueOnce(new Error('throttled')).mockResolvedValue({});
+
+      const result = await handler({}, mockContext);
+      const body = JSON.parse(result.body);
+
+      expect(body.phase1.errors).toBe(1);
+      expect(body.phase1.newRecordsCreated).toBe(49); // 50 - 1 failure
+    });
+
+    test('stops on a batch boundary when time runs low and skips ghost detection', async () => {
+      const mockClients = [{ id: 'client-1', name: 'Test Company LLC' }];
+      const summonses = buildMockSummonses(50); // 2 processing batches
+
+      mockDynamoDBScan.mockResolvedValue({ Items: mockClients });
+      mockFetch.mockResolvedValue({ ok: true, json: jest.fn().mockResolvedValue(summonses) });
+      mockDynamoDBQuery.mockResolvedValue({ Items: [] });
+      mockDynamoDBPut.mockResolvedValue({});
+
+      // Call sequence: 1 fetch-batch guard, then 1 guard per processing batch.
+      // Drop below 60s only on the 2nd processing batch so the first batch (25)
+      // completes and the loop stops at the boundary.
+      let calls = 0;
+      const tightContext = {
+        getRemainingTimeInMillis: () => {
+          calls += 1;
+          return calls <= 2 ? 900000 : 30000;
+        },
+      };
+
+      const result = await handler({}, tightContext);
+      const body = JSON.parse(result.body);
+
+      expect(body.phase1.timedOut).toBe(true);
+      expect(body.phase1.newRecordsCreated).toBe(25); // exactly one batch processed
+      expect(body.phase1.recordsArchived).toBe(0);    // ghost detection skipped
     });
   });
 
@@ -1889,6 +1971,194 @@ describe('Daily Sweep Lambda Function', () => {
       expect(lastUpdateParams.UpdateExpression).toMatch(/hearing_date/);
       expect(lastUpdateParams.ExpressionAttributeValues[':hearing_date'])
         .toBe('2026-08-01T00:00:00.000Z');
+    });
+  });
+
+  // OR-grouped fetch queries — the fix that guarantees every client's terms are
+  // queried (the old one-query-per-term approach timed out and dropped the tail).
+  describe('OR-grouped fetch queries (Real Exports)', () => {
+    const { buildNameClause, buildGroupedWhereClause, groupSearchTerms, buildSearchTermVariants, TERMS_PER_QUERY } =
+      require('./index')._testExports;
+
+    test('uses a single anchored prefix LIKE with no replace() over the column', () => {
+      const clause = buildNameClause('MORENO PRODUCE NY');
+      expect(clause).toContain("upper(respondent_last_name) like 'MORENO PRODUCE NY%'");
+      // Must NOT be a leading-wildcard (that forces a slow full table scan)
+      expect(clause).not.toContain("like '%MORENO");
+      // Must NOT wrap the column in replace() (that also forces a full scan)
+      expect(clause).not.toContain('replace(');
+    });
+
+    test('buildSearchTermVariants emits an apostrophe-preserving variant', () => {
+      const variants = buildSearchTermVariants("MARSALA'S MAIL SERVICE INC");
+      expect(variants).toContain('MARSALAS MAIL SERVICE');     // stripped (suffix removed)
+      expect(variants).toContain("MARSALA'S MAIL SERVICE");    // apostrophe preserved
+    });
+
+    test('buildSearchTermVariants returns a single term when there is no apostrophe', () => {
+      expect(buildSearchTermVariants('MORENO PRODUCE NY CORP')).toEqual(['MORENO PRODUCE NY']);
+    });
+
+    test('escapes single quotes in a term for SoQL safety', () => {
+      expect(buildNameClause("O'BRIEN")).toContain("like 'O''BRIEN%'");
+    });
+
+    test('ORs all term clauses and ANDs the IDLING + hearing-date filters', () => {
+      const where = buildGroupedWhereClause(['ACME TRUCKING', 'MORENO PRODUCE NY']);
+      // Both terms present (anchored), joined by OR within the name group
+      expect(where).toContain("'ACME TRUCKING%'");
+      expect(where).toContain("'MORENO PRODUCE NY%'");
+      expect(where).toMatch(/like 'ACME TRUCKING%'\) OR \(upper\(respondent_last_name\) like 'MORENO PRODUCE NY%'/);
+      // IDLING + date filters AND-ed on
+      expect(where).toContain("like '%IDLING%'");
+      expect(where).toContain("hearing_date >= '2022-01-01T00:00:00'");
+    });
+
+    test('packs terms into groups of at most TERMS_PER_QUERY', () => {
+      const n = TERMS_PER_QUERY * 2 + 1; // forces 3 groups
+      const terms = Array.from({ length: n }, (_, i) => `CLIENTNAME${i}`);
+      const groups = groupSearchTerms(terms);
+      expect(groups.length).toBe(3);
+      groups.forEach(g => expect(g.length).toBeLessThanOrEqual(TERMS_PER_QUERY));
+      // No term is lost
+      expect(groups.flat().sort()).toEqual(terms.slice().sort());
+    });
+
+    test('splits a group early when the name clause exceeds the char budget', () => {
+      // Very long terms blow the MAX_WHERE_CHARS budget before hitting the count cap.
+      const longTerms = Array.from({ length: 10 }, (_, i) => `${'X'.repeat(400)}${i}`);
+      const groups = groupSearchTerms(longTerms);
+      expect(groups.length).toBeGreaterThan(1);
+      expect(groups.flat().length).toBe(longTerms.length); // nothing dropped
+    });
+
+    test('an oversized single term still gets its own group (never dropped)', () => {
+      const groups = groupSearchTerms(['Y'.repeat(5000)]);
+      expect(groups.length).toBe(1);
+      expect(groups[0].length).toBe(1);
+    });
+  });
+
+  // Regression for Jacky's report: client "MORENO PRODUCE NY CORP" added but its
+  // summons 000902655L never appeared. Root cause was the sweep timeout dropping
+  // the tail of the client list — not matching. These pin both halves: the name
+  // matches, and its (suffix-stripped) term is included in the grouped query.
+  describe('MORENO PRODUCE regression (Real Exports)', () => {
+    const { matchRespondentToClient, buildClientNameMap, buildSearchTerm, buildGroupedWhereClause } =
+      require('./index')._testExports;
+
+    const moreno = {
+      id: 'moreno-1',
+      name: 'MORENO PRODUCE NY CORP',
+      akas: ['MORENO PRODUCE NY', 'MORENO PRODUCE NY P', 'MORENO PRODUCE'],
+    };
+    const map = buildClientNameMap([moreno]);
+
+    test('matches respondent "MORENO PRODUCE NY CORP" (empty firstName)', () => {
+      expect(matchRespondentToClient('', 'MORENO PRODUCE NY CORP', map).id).toBe('moreno-1');
+    });
+
+    test('matches the "CORPORATION" sibling variant via token-prefix', () => {
+      expect(matchRespondentToClient('', 'MORENO PRODUCE NY CORPORATION', map).id).toBe('moreno-1');
+    });
+
+    test('its search term (CORP stripped) is included in a grouped query', () => {
+      const term = buildSearchTerm(moreno.name);
+      expect(term).toBe('MORENO PRODUCE NY');
+      const where = buildGroupedWhereClause([term]);
+      expect(where).toContain("'MORENO PRODUCE NY%'");
+    });
+  });
+
+  // Self-heal: a record auto-archived by ghost detection that reappears in the
+  // API must be un-archived. Ghost detection can wrongly archive a record whose
+  // client temporarily fell out of a timed-out fetch; without un-archive it
+  // would stay hidden forever.
+  describe('Ghost un-archive on reappearance (Real Exports)', () => {
+    let processSummonsMetadataOnly, buildClientNameMap;
+    let updateParams;
+
+    beforeEach(() => {
+      updateParams = [];
+      jest.resetModules();
+      jest.doMock('aws-sdk', () => ({
+        DynamoDB: {
+          DocumentClient: jest.fn(() => ({
+            scan: jest.fn(() => ({ promise: () => Promise.resolve({ Items: [] }) })),
+            // findExistingSummons (dedup guard) returns the ARCHIVED record
+            query: jest.fn(() => ({ promise: () => Promise.resolve({ Items: [{
+              id: 'arch-1',
+              summons_number: 'TKT-ARCH',
+              clientID: 'c-1',
+              status: 'PENDING',
+              is_archived: true,
+              archived_reason: 'API_MISSING',
+              api_miss_count: 3,
+              activity_log: [],
+            }] }) })),
+            put: jest.fn(() => ({ promise: () => Promise.resolve({}) })),
+            update: jest.fn((params) => {
+              updateParams.push(params);
+              return { promise: () => Promise.resolve({}) };
+            }),
+          })),
+        },
+        Lambda: jest.fn(() => ({ invoke: jest.fn(() => ({ promise: () => Promise.resolve({}) })) })),
+      }));
+      ({ processSummonsMetadataOnly, buildClientNameMap } = require('./index')._testExports);
+    });
+
+    test('un-archives an API_MISSING record that reappears', async () => {
+      const client = { id: 'c-1', name: 'ACME WIDGETS', akas: [] };
+      const map = buildClientNameMap([client]);
+      const apiSummons = {
+        ticket_number: 'TKT-ARCH',
+        respondent_last_name: 'ACME WIDGETS',
+        status: 'PENDING',
+        hearing_date: '2026-08-01T00:00:00.000',
+      };
+
+      // Empty existingSummonsMap → forces the dedup-guard DB lookup that finds
+      // the archived record.
+      const result = await processSummonsMetadataOnly(apiSummons, map, '2026-06-02T00:00:00Z', new Map());
+
+      expect(result.action).toBe('updated');
+      // One of the update calls must clear is_archived and REMOVE archive fields.
+      const clearing = updateParams.find(p => /is_archived = :false/.test(p.UpdateExpression));
+      expect(clearing).toBeDefined();
+      expect(clearing.UpdateExpression).toMatch(/REMOVE archived_at, archived_reason/);
+      expect(clearing.ExpressionAttributeValues[':false']).toBe(false);
+    });
+
+    test('does NOT un-archive a deliberately-archived record (non-ghost reason)', async () => {
+      jest.resetModules();
+      jest.doMock('aws-sdk', () => ({
+        DynamoDB: {
+          DocumentClient: jest.fn(() => ({
+            scan: jest.fn(() => ({ promise: () => Promise.resolve({ Items: [] }) })),
+            query: jest.fn(() => ({ promise: () => Promise.resolve({ Items: [{
+              id: 'arch-2',
+              summons_number: 'TKT-MANUAL',
+              clientID: 'c-1',
+              status: 'PENDING',
+              is_archived: true,
+              archived_reason: 'USER_ARCHIVED',
+              activity_log: [],
+            }] }) })),
+            put: jest.fn(() => ({ promise: () => Promise.resolve({}) })),
+            update: jest.fn((params) => { updateParams.push(params); return { promise: () => Promise.resolve({}) }; }),
+          })),
+        },
+        Lambda: jest.fn(() => ({ invoke: jest.fn(() => ({ promise: () => Promise.resolve({}) })) })),
+      }));
+      const mod = require('./index')._testExports;
+      const map = mod.buildClientNameMap([{ id: 'c-1', name: 'ACME WIDGETS', akas: [] }]);
+      const apiSummons = { ticket_number: 'TKT-MANUAL', respondent_last_name: 'ACME WIDGETS', status: 'PENDING', hearing_date: '2026-08-01T00:00:00.000' };
+
+      await mod.processSummonsMetadataOnly(apiSummons, map, '2026-06-02T00:00:00Z', new Map());
+
+      const clearing = updateParams.find(p => /is_archived = :false/.test(p.UpdateExpression || ''));
+      expect(clearing).toBeUndefined();
     });
   });
 });
