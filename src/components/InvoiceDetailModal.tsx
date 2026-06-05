@@ -35,14 +35,16 @@ import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditIcon from '@mui/icons-material/Edit';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import MarkEmailReadIcon from '@mui/icons-material/MarkEmailRead';
 import { useNavigate } from 'react-router-dom';
 import CircularProgress from '@mui/material/CircularProgress';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import { getUrl } from 'aws-amplify/storage';
-import { Invoice } from '../types/invoiceTracker';
-import { getInvoiceHorizonColor } from '../utils/invoiceTrackerHelpers';
+import { Invoice, SentToClientAttribution } from '../types/invoiceTracker';
+import { getInvoiceHorizonColor, parseSentToClient } from '../utils/invoiceTrackerHelpers';
 import { horizonColors } from '../theme';
+import { useAuth } from '../contexts/AuthContext';
 
 dayjs.extend(utc);
 
@@ -54,6 +56,7 @@ interface InvoiceDetailModalProps {
   onMarkUnpaid: (invoiceId: string) => Promise<void>;
   onUpdateDeadline: (invoiceId: string, newDeadline: string) => Promise<void>;
   onUpdateNotes: (invoiceId: string, notes: string) => Promise<void>;
+  onMarkSentToClient: (invoiceId: string, attr: SentToClientAttribution | null) => Promise<void>;
   onDelete: (invoice: Invoice) => Promise<void>;
 }
 
@@ -68,6 +71,13 @@ const formatCurrency = (amount: number | null | undefined): string => {
   return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
+// Local timestamp (date + time) for the sent-to-client stamp.
+const formatDateTime = (dateStr: string | null | undefined): string => {
+  if (!dateStr) return '—';
+  const d = dayjs(dateStr);
+  return d.isValid() ? d.format('M/DD/YY h:mm A') : '—';
+};
+
 const InvoiceDetailModal = ({
   open,
   invoice,
@@ -76,9 +86,11 @@ const InvoiceDetailModal = ({
   onMarkUnpaid,
   onUpdateDeadline,
   onUpdateNotes,
+  onMarkSentToClient,
   onDelete,
 }: InvoiceDetailModalProps) => {
   const navigate = useNavigate();
+  const { userInfo } = useAuth();
   const [paymentDate, setPaymentDate] = useState<dayjs.Dayjs | null>(dayjs());
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesValue, setNotesValue] = useState('');
@@ -97,6 +109,7 @@ const InvoiceDetailModal = ({
   if (!invoice) return null;
 
   const horizonColor = getInvoiceHorizonColor(invoice);
+  const sentToClient = parseSentToClient(invoice.sent_to_client_attr);
 
   const statusChipProps = (() => {
     switch (horizonColor) {
@@ -130,6 +143,21 @@ const InvoiceDetailModal = ({
   const handleMarkPaid = async () => {
     const dateStr = paymentDate ? paymentDate.toISOString() : new Date().toISOString();
     await onMarkPaid(invoice.id, dateStr);
+  };
+
+  // Toggle the "sent to client" stamp. Marks sent with the current user + time,
+  // or clears it when already sent (undo).
+  const handleToggleSentToClient = async () => {
+    if (sentToClient) {
+      await onMarkSentToClient(invoice.id, null);
+    } else {
+      await onMarkSentToClient(invoice.id, {
+        sent: true,
+        by: userInfo?.displayName || 'Unknown User',
+        userId: userInfo?.userId,
+        date: dayjs().toISOString(),
+      });
+    }
   };
 
   const handleSaveNotes = async () => {
@@ -239,6 +267,32 @@ const InvoiceDetailModal = ({
               </Typography>
             ) : (
               <Typography variant="body1" color="text.secondary">Unpaid</Typography>
+            )}
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary">Sent to Client</Typography>
+            {sentToClient ? (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: horizonColors.future }}>
+                  <MarkEmailReadIcon fontSize="small" />
+                  <Typography variant="body1">
+                    Sent {formatDateTime(sentToClient.date)}
+                    {sentToClient.by ? ` by ${sentToClient.by}` : ''}
+                  </Typography>
+                </Box>
+                <Button size="small" onClick={handleToggleSentToClient}>Undo</Button>
+              </Box>
+            ) : (
+              <Box>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<MarkEmailReadIcon />}
+                  onClick={handleToggleSentToClient}
+                >
+                  Mark Sent to Client
+                </Button>
+              </Box>
             )}
           </Box>
         </Box>

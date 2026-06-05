@@ -6,7 +6,7 @@
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import isoWeek from 'dayjs/plugin/isoWeek';
-import { Invoice, InvoicePeriodSummary } from '../types/invoiceTracker';
+import { Invoice, InvoicePeriodSummary, SentToClientAttribution } from '../types/invoiceTracker';
 import { DEFAULT_ALERT_DAYS, DUE_SOON_THRESHOLD_DAYS, INVOICE_STATUS } from '../constants/invoiceTrackerDefaults';
 
 dayjs.extend(utc);
@@ -136,4 +136,19 @@ export function summarizeInvoicePeriod(periodLabel: string, periodStart: string,
     totalAmountOutstanding,
     totalAmountPaid,
   };
+}
+
+/**
+ * Safely parse the AWSJSON sent_to_client_attr field.
+ * Returns the attribution only when it represents an active "sent" stamp,
+ * otherwise null (covers unset, cleared, and malformed values).
+ */
+export function parseSentToClient(raw?: string | null): SentToClientAttribution | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as SentToClientAttribution;
+    return value?.sent ? value : null;
+  } catch {
+    return null;
+  }
 }

@@ -8,7 +8,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { generateClient } from 'aws-amplify/api';
-import { Invoice, InvoiceHorizonStats } from '../types/invoiceTracker';
+import { Invoice, InvoiceHorizonStats, SentToClientAttribution } from '../types/invoiceTracker';
 import { listInvoicesWithItems, updateInvoiceRecord, deleteInvoiceRecord, deleteInvoiceSummonsRecord } from '../graphql/customQueries';
 import { isOverdue, isDueSoon } from '../utils/invoiceTrackerHelpers';
 
@@ -24,6 +24,7 @@ interface InvoiceTrackerContextType {
   markAsUnpaid: (invoiceId: string) => Promise<void>;
   updateAlertDeadline: (invoiceId: string, newDeadline: string) => Promise<void>;
   updateNotes: (invoiceId: string, notes: string) => Promise<void>;
+  markSentToClient: (invoiceId: string, attr: SentToClientAttribution | null) => Promise<void>;
   deleteInvoice: (invoice: Invoice) => Promise<void>;
   getHorizonStats: () => InvoiceHorizonStats;
 }
@@ -189,6 +190,31 @@ export const InvoiceTrackerProvider: React.FC<{ children: React.ReactNode }> = (
     }
   }, []);
 
+  // Toggle the "sent to client" attribution stamp. Pass an attribution to mark
+  // sent (with by/userId/date), or null to clear it.
+  const markSentToClient = useCallback(async (invoiceId: string, attr: SentToClientAttribution | null) => {
+    const serialized = attr ? JSON.stringify(attr) : null;
+    try {
+      await client.graphql({
+        query: updateInvoiceRecord,
+        variables: {
+          input: {
+            id: invoiceId,
+            sent_to_client_attr: serialized,
+          },
+        },
+      });
+      setInvoices((prev) =>
+        prev.map((inv) =>
+          inv.id === invoiceId ? { ...inv, sent_to_client_attr: serialized } : inv
+        )
+      );
+    } catch (err) {
+      console.error('Error updating sent-to-client status:', err);
+      throw err;
+    }
+  }, []);
+
   // Delete an invoice and its linked InvoiceSummons join records
   const deleteInvoice = useCallback(async (invoice: Invoice) => {
     try {
@@ -251,6 +277,7 @@ export const InvoiceTrackerProvider: React.FC<{ children: React.ReactNode }> = (
     markAsUnpaid,
     updateAlertDeadline,
     updateNotes,
+    markSentToClient,
     deleteInvoice,
     getHorizonStats,
   };

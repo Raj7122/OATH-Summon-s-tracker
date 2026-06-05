@@ -25,6 +25,7 @@ export interface Invoice {
   payment_date?: string | null;
   alert_deadline: string;
   notes?: string | null;
+  sent_to_client_attr?: string | null;  // AWSJSON — SentToClientAttribution
   pdf_s3_key?: string | null;
   clientID?: string | null;
   extra_line_items?: string | null;  // AWSJSON — array of InvoiceExtraLineItem
@@ -40,6 +41,14 @@ export interface Invoice {
   };
   createdAt?: string;
   updatedAt?: string;
+}
+
+/** Attribution stamp for when an invoice was sent to the client */
+export interface SentToClientAttribution {
+  sent: boolean;
+  by?: string;
+  userId?: string;
+  date?: string; // ISO timestamp
 }
 
 /** Join table record linking an invoice to a summons */

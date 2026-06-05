@@ -23,10 +23,11 @@ import {
   Tooltip,
 } from '@mui/material';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import MarkEmailReadIcon from '@mui/icons-material/MarkEmailRead';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import { Invoice, InvoiceHorizonFilter } from '../types/invoiceTracker';
-import { getInvoiceHorizonColor } from '../utils/invoiceTrackerHelpers';
+import { getInvoiceHorizonColor, parseSentToClient } from '../utils/invoiceTrackerHelpers';
 import { downloadCSV } from '../lib/csvExport';
 import { generateInvoiceCSV, buildInvoiceCsvFilename } from '../lib/invoiceCsvExport';
 import { horizonColors } from '../theme';
@@ -59,6 +60,13 @@ const formatDate = (dateStr: string | null | undefined): string => {
 const formatCurrency = (amount: number | null | undefined): string => {
   if (amount === null || amount === undefined) return '—';
   return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+// Local timestamp (date + time) for the sent-to-client tooltip.
+const formatDateTime = (dateStr: string | null | undefined): string => {
+  if (!dateStr) return '';
+  const d = dayjs(dateStr);
+  return d.isValid() ? d.format('M/DD/YY h:mm A') : '';
 };
 
 const InvoiceListPanel = ({
@@ -165,7 +173,9 @@ const InvoiceListPanel = ({
               </TableRow>
             </TableHead>
             <TableBody>
-              {filteredInvoices.map((invoice) => (
+              {filteredInvoices.map((invoice) => {
+                const sentToClient = parseSentToClient(invoice.sent_to_client_attr);
+                return (
                 <TableRow
                   key={invoice.id}
                   hover
@@ -177,9 +187,18 @@ const InvoiceListPanel = ({
                   </TableCell>
                   <TableCell>{formatDate(invoice.invoice_date)}</TableCell>
                   <TableCell>
-                    <Tooltip title={invoice.recipient_attention || ''}>
-                      <span>{invoice.recipient_company}</span>
-                    </Tooltip>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <Tooltip title={invoice.recipient_attention || ''}>
+                        <span>{invoice.recipient_company}</span>
+                      </Tooltip>
+                      {sentToClient && (
+                        <Tooltip
+                          title={`Sent to client on ${formatDateTime(sentToClient.date)}${sentToClient.by ? ` by ${sentToClient.by}` : ''}`}
+                        >
+                          <MarkEmailReadIcon sx={{ fontSize: 16, color: horizonColors.future }} />
+                        </Tooltip>
+                      )}
+                    </Box>
                   </TableCell>
                   <TableCell align="center">{invoice.item_count}</TableCell>
                   <TableCell align="right">
@@ -209,7 +228,8 @@ const InvoiceListPanel = ({
                     )}
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         </TableContainer>

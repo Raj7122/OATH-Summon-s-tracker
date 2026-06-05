@@ -39,6 +39,7 @@ const mockContextValues = vi.hoisted(() => ({
   markAsUnpaid: vi.fn(),
   updateAlertDeadline: vi.fn(),
   updateNotes: vi.fn(),
+  markSentToClient: vi.fn(),
   getHorizonStats: vi.fn().mockReturnValue({
     overdueCount: 0,
     dueSoonCount: 0,
@@ -50,6 +51,12 @@ const mockContextValues = vi.hoisted(() => ({
 vi.mock('../src/contexts/InvoiceTrackerContext', () => ({
   useInvoiceTracker: () => mockContextValues,
   InvoiceTrackerProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+// The page renders InvoiceDetailModal, which reads useAuth for the
+// "Sent to Client" stamp. Mock it so the page renders without an AuthProvider.
+vi.mock('../src/contexts/AuthContext', () => ({
+  useAuth: () => ({ userInfo: { userId: 'u-1', username: 'jacky@test.com', displayName: 'Jacky' } }),
 }));
 
 import InvoiceTracker from '../src/pages/InvoiceTracker';

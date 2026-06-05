@@ -105,7 +105,7 @@ import {
 import { Summons, getStatusColor, ActivityLogEntry, AttributionData, DepFileDateAttribution, NoteComment, InternalStatusAttribution, Attachment } from '../types/summons';
 import FileUploadSection from './FileUploadSection';
 import InvoiceDetailModal from './InvoiceDetailModal';
-import { Invoice } from '../types/invoiceTracker';
+import { Invoice, SentToClientAttribution } from '../types/invoiceTracker';
 import { isNewRecord, isUpdatedRecord } from '../types/summons';
 import { useAuth } from '../contexts/AuthContext';
 import { v4 as uuidv4 } from 'uuid';
@@ -585,6 +585,19 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     } catch (err) {
       console.error('Error updating notes:', err);
       setInvoiceSnackbar({ open: true, message: 'Failed to update notes', severity: 'error' });
+    }
+  };
+
+  const handleInvoiceMarkSentToClient = async (invoiceId: string, attr: SentToClientAttribution | null) => {
+    try {
+      await invoiceApiClient.graphql({
+        query: updateInvoiceRecord,
+        variables: { input: { id: invoiceId, sent_to_client_attr: attr ? JSON.stringify(attr) : null } },
+      });
+      if (summons?.id) await refreshLinkedInvoices(summons.id);
+    } catch (err) {
+      console.error('Error updating sent-to-client status:', err);
+      setInvoiceSnackbar({ open: true, message: 'Failed to update invoice', severity: 'error' });
     }
   };
 
@@ -2020,6 +2033,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
       onMarkUnpaid={handleInvoiceMarkUnpaid}
       onUpdateDeadline={handleInvoiceUpdateDeadline}
       onUpdateNotes={handleInvoiceUpdateNotes}
+      onMarkSentToClient={handleInvoiceMarkSentToClient}
       onDelete={handleInvoiceDelete}
     />
 

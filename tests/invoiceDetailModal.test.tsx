@@ -28,6 +28,12 @@ vi.mock('aws-amplify/api', () => ({
   }),
 }));
 
+// The modal reads the current user (for the "Sent to Client" stamp) via useAuth,
+// which requires an AuthProvider. Mock it so the modal can render standalone.
+vi.mock('../src/contexts/AuthContext', () => ({
+  useAuth: () => ({ userInfo: { userId: 'u-1', username: 'jacky@test.com', displayName: 'Jacky' } }),
+}));
+
 // ---------------------------------------------------------------------------
 // Test Data
 // ---------------------------------------------------------------------------

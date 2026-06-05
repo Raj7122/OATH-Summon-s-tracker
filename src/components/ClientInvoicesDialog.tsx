@@ -45,7 +45,7 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
 import { invoicesByClientBasic, invoiceSummonsForInvoice, updateInvoiceRecord, deleteInvoiceRecord, deleteInvoiceSummonsRecord } from '../graphql/customQueries';
-import { Invoice, InvoiceSummonsItem } from '../types/invoiceTracker';
+import { Invoice, InvoiceSummonsItem, SentToClientAttribution } from '../types/invoiceTracker';
 import { getInvoiceHorizonColor } from '../utils/invoiceTrackerHelpers';
 import { horizonColors } from '../theme';
 import InvoiceDetailModal from './InvoiceDetailModal';
@@ -384,6 +384,21 @@ const ClientInvoicesDialog = ({ open, onClose, clientID, clientName, onCountChan
     }
   }, [fetchInvoices]);
 
+  // Toggle the sent-to-client stamp. Does not close the modal so the user sees
+  // the stamp update in place; refreshes the list to reflect the new state.
+  const handleMarkSentToClient = useCallback(async (invoiceId: string, attr: SentToClientAttribution | null) => {
+    try {
+      await apiClient.graphql({
+        query: updateInvoiceRecord,
+        variables: { input: { id: invoiceId, sent_to_client_attr: attr ? JSON.stringify(attr) : null } },
+      });
+      await fetchInvoices();
+    } catch (err) {
+      console.error('Error updating sent-to-client status:', err);
+      setSnackbar({ open: true, message: 'Failed to update invoice', severity: 'error' });
+    }
+  }, [fetchInvoices]);
+
   const handleDelete = useCallback(async (invoice: Invoice) => {
     try {
       const items = invoice.items?.items || [];
@@ -499,6 +514,7 @@ const ClientInvoicesDialog = ({ open, onClose, clientID, clientName, onCountChan
         onMarkUnpaid={handleMarkUnpaid}
         onUpdateDeadline={handleUpdateDeadline}
         onUpdateNotes={handleUpdateNotes}
+        onMarkSentToClient={handleMarkSentToClient}
         onDelete={handleDelete}
       />
 
