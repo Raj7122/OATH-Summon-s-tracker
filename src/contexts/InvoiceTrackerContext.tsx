@@ -9,8 +9,9 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { Invoice, InvoiceHorizonStats, SentToClientAttribution } from '../types/invoiceTracker';
-import { listInvoicesWithItems, updateInvoiceRecord, deleteInvoiceRecord, deleteInvoiceSummonsRecord } from '../graphql/customQueries';
+import { listInvoicesWithItems, updateInvoiceRecord } from '../graphql/customQueries';
 import { isOverdue, isDueSoon } from '../utils/invoiceTrackerHelpers';
+import { deleteInvoiceAndUnmarkSummonses } from '../utils/invoiceDeletion';
 
 const client = generateClient();
 const MAX_FETCHES = 50;
@@ -215,25 +216,11 @@ export const InvoiceTrackerProvider: React.FC<{ children: React.ReactNode }> = (
     }
   }, []);
 
-  // Delete an invoice and its linked InvoiceSummons join records
+  // Delete an invoice and its linked InvoiceSummons join records, and clear the
+  // is_invoiced flag on the underlying summonses (unless still on another invoice).
   const deleteInvoice = useCallback(async (invoice: Invoice) => {
     try {
-      // Delete join records first
-      const items = invoice.items?.items || [];
-      if (items.length > 0) {
-        await Promise.all(items.map((item) =>
-          client.graphql({
-            query: deleteInvoiceSummonsRecord,
-            variables: { input: { id: item.id } },
-          })
-        ));
-      }
-
-      // Delete the invoice itself
-      await client.graphql({
-        query: deleteInvoiceRecord,
-        variables: { input: { id: invoice.id } },
-      });
+      await deleteInvoiceAndUnmarkSummonses(client, invoice);
 
       // Remove from local state
       setInvoices((prev) => prev.filter((inv) => inv.id !== invoice.id));
