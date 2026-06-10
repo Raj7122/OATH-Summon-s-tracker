@@ -44,7 +44,8 @@ import { getUrl } from 'aws-amplify/storage';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
-import { invoicesByClientBasic, invoiceSummonsForInvoice, updateInvoiceRecord, deleteInvoiceRecord, deleteInvoiceSummonsRecord } from '../graphql/customQueries';
+import { invoicesByClientBasic, invoiceSummonsForInvoice, updateInvoiceRecord } from '../graphql/customQueries';
+import { deleteInvoiceAndUnmarkSummonses } from '../utils/invoiceDeletion';
 import { Invoice, InvoiceSummonsItem, SentToClientAttribution } from '../types/invoiceTracker';
 import { getInvoiceHorizonColor } from '../utils/invoiceTrackerHelpers';
 import { horizonColors } from '../theme';
@@ -401,19 +402,7 @@ const ClientInvoicesDialog = ({ open, onClose, clientID, clientName, onCountChan
 
   const handleDelete = useCallback(async (invoice: Invoice) => {
     try {
-      const items = invoice.items?.items || [];
-      if (items.length > 0) {
-        await Promise.all(items.map((item) =>
-          apiClient.graphql({
-            query: deleteInvoiceSummonsRecord,
-            variables: { input: { id: item.id } },
-          })
-        ));
-      }
-      await apiClient.graphql({
-        query: deleteInvoiceRecord,
-        variables: { input: { id: invoice.id } },
-      });
+      await deleteInvoiceAndUnmarkSummonses(apiClient, invoice);
       setSnackbar({ open: true, message: 'Invoice deleted', severity: 'success' });
       await fetchInvoices();
       onInvoicesChanged?.();

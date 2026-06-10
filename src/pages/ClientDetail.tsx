@@ -7,7 +7,7 @@
  * @module pages/ClientDetail
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
@@ -69,6 +69,7 @@ import {
 import { useCSVExport } from '../hooks/useCSVExport';
 import { ExportConfig } from '../lib/csvExport';
 import { isInvoiced as isInvoicedLocally, getInvoiceDate as getInvoiceDateLocally, unmarkAsInvoiced } from '../utils/invoiceTracking';
+import { reconcileInvoicedSummonses } from '../utils/invoiceDeletion';
 import { useInvoice } from '../contexts/InvoiceContext';
 import { SummonsForInvoice } from '../types/invoice';
 
@@ -376,6 +377,53 @@ const ClientDetail: React.FC = () => {
   useEffect(() => {
     refreshInvoiceData();
   }, [refreshInvoiceData]);
+
+  // Called by child dialogs/modals after an invoice is created, deleted, or
+  // paid. In addition to refreshing the invoice tiles + payment map, we reload
+  // the summons rows so the "Invoiced" column reflects is_invoiced flags that
+  // a deletion may have just cleared.
+  const handleInvoicesChanged = useCallback(async () => {
+    await refreshInvoiceData();
+    await loadSummonses(true);
+  }, [refreshInvoiceData, loadSummonses]);
+
+  // Keep an open summons modal in sync with the reloaded grid rows so its
+  // INVOICED chip clears live after an invoice is deleted (selectedSummons is a
+  // snapshot taken when the row was clicked).
+  useEffect(() => {
+    setSelectedSummons((prev) => {
+      if (!prev) return prev;
+      const fresh = summonses.find((s) => s.id === prev.id);
+      return fresh && fresh !== prev ? fresh : prev;
+    });
+  }, [summonses]);
+
+  // Self-heal stale "invoiced" flags. Summonses invoiced before the delete-time
+  // un-flagging existed can be stuck showing the INVOICED chip / receipt icon
+  // with no real invoice behind them. Once per client load, verify each flagged
+  // summons against the authoritative invoice join rows and clear the dead flag.
+  const reconciledClientRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!id || summonses.length === 0) return;
+    if (reconciledClientRef.current === id) return; // run at most once per client
+    const flagged = summonses.some((s) => s.is_invoiced || isInvoicedLocally(s.id));
+    reconciledClientRef.current = id;
+    if (!flagged) return;
+    (async () => {
+      try {
+        const cleared = await reconcileInvoicedSummonses(apiClient, summonses);
+        if (cleared.size > 0) {
+          setSummonses((prev) =>
+            prev.map((s) =>
+              cleared.has(s.id) ? { ...s, is_invoiced: false, invoice_date: undefined } : s,
+            ),
+          );
+        }
+      } catch (err) {
+        console.warn('Invoiced-flag reconciliation failed:', err);
+      }
+    })();
+  }, [id, summonses]);
 
   // Load summonses when client is loaded
   useEffect(() => {
@@ -1287,7 +1335,7 @@ const ClientDetail: React.FC = () => {
           setSelectedSummons(null);
         }}
         onUpdate={handleSummonsUpdate}
-        onInvoicesChanged={refreshInvoiceData}
+        onInvoicesChanged={handleInvoicesChanged}
       />
 
       {/* Export Configuration Modal */}
@@ -1308,7 +1356,7 @@ const ClientDetail: React.FC = () => {
         clientID={id ?? ''}
         clientName={client.name}
         onCountChange={setInvoiceCount}
-        onInvoicesChanged={refreshInvoiceData}
+        onInvoicesChanged={handleInvoicesChanged}
       />
     </Box>
   );

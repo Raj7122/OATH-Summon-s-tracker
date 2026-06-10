@@ -97,9 +97,8 @@ import {
   getInvoicePdfKey,
   getInvoiceWithItems,
   updateInvoiceRecord,
-  deleteInvoiceRecord,
-  deleteInvoiceSummonsRecord,
 } from '../graphql/customQueries';
+import { deleteInvoiceAndUnmarkSummonses } from '../utils/invoiceDeletion';
 
 // Import shared types
 import { Summons, getStatusColor, ActivityLogEntry, AttributionData, DepFileDateAttribution, NoteComment, InternalStatusAttribution, Attachment } from '../types/summons';
@@ -603,19 +602,7 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
 
   const handleInvoiceDelete = async (invoice: Invoice) => {
     try {
-      const items = invoice.items?.items || [];
-      if (items.length > 0) {
-        await Promise.all(items.map((item) =>
-          invoiceApiClient.graphql({
-            query: deleteInvoiceSummonsRecord,
-            variables: { input: { id: item.id } },
-          })
-        ));
-      }
-      await invoiceApiClient.graphql({
-        query: deleteInvoiceRecord,
-        variables: { input: { id: invoice.id } },
-      });
+      await deleteInvoiceAndUnmarkSummonses(invoiceApiClient, invoice);
       setInvoiceSnackbar({ open: true, message: 'Invoice deleted', severity: 'success' });
       if (summons?.id) await refreshLinkedInvoices(summons.id);
       onInvoicesChanged?.();
