@@ -21,6 +21,7 @@ import {
   Tabs,
   Tab,
   Tooltip,
+  TableSortLabel,
 } from '@mui/material';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import MarkEmailReadIcon from '@mui/icons-material/MarkEmailRead';
@@ -35,6 +36,15 @@ import { horizonColors } from '../theme';
 dayjs.extend(utc);
 
 type FilterTab = 'all' | 'unpaid' | 'overdue' | 'paid';
+
+// Columns the user can sort by via the clickable header labels.
+type SortField =
+  | 'invoice_number'
+  | 'invoice_date'
+  | 'recipient_company'
+  | 'item_count'
+  | 'total'
+  | 'alert_deadline';
 
 const TAB_LABELS: Record<FilterTab, string> = {
   all: 'All',
@@ -77,8 +87,22 @@ const InvoiceListPanel = ({
   onMarkUnpaid,
 }: InvoiceListPanelProps) => {
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
+  // null sortField = keep the default order from context (sorting is opt-in).
+  const [sortField, setSortField] = useState<SortField | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
-  // Apply both horizon filter (from calendar) and tab filter
+  // Toggle direction when re-clicking the active column; otherwise switch to the
+  // new column starting ascending (A→Z / oldest / smallest first).
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
+  // Apply both horizon filter (from calendar) and tab filter, then optional sort
   const filteredInvoices = useMemo(() => {
     let result = invoices;
 
@@ -102,8 +126,37 @@ const InvoiceListPanel = ({
       result = result.filter((inv) => inv.payment_status === 'paid');
     }
 
+    // Sort (opt-in): compare on a copy so we never mutate the context array.
+    if (sortField) {
+      result = [...result].sort((a, b) => {
+        let cmp = 0;
+        switch (sortField) {
+          case 'invoice_number':
+          case 'recipient_company':
+            // Case-insensitive alphabetical (e.g. "AAA EGG DEPOT" before "Benjamin").
+            cmp = (a[sortField] || '').localeCompare(b[sortField] || '', undefined, {
+              sensitivity: 'base',
+            });
+            break;
+          case 'invoice_date':
+          case 'alert_deadline':
+            cmp = dayjs.utc(a[sortField]).valueOf() - dayjs.utc(b[sortField]).valueOf();
+            break;
+          case 'item_count':
+            cmp = a.item_count - b.item_count;
+            break;
+          case 'total':
+            // Grand total = legal fees + fines, matching the displayed Total column.
+            cmp =
+              a.total_legal_fees + a.total_fines_due - (b.total_legal_fees + b.total_fines_due);
+            break;
+        }
+        return sortDir === 'desc' ? -cmp : cmp;
+      });
+    }
+
     return result;
-  }, [invoices, horizonFilter, filterTab]);
+  }, [invoices, horizonFilter, filterTab, sortField, sortDir]);
 
   const handleExportCsv = () => {
     const csv = generateInvoiceCSV(filteredInvoices);
@@ -162,13 +215,61 @@ const InvoiceListPanel = ({
           <Table size="small">
             <TableHead>
               <TableRow sx={{ bgcolor: 'grey.50' }}>
-                <TableCell sx={{ fontWeight: 600 }}>Invoice #</TableCell>
-                <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>
-                <TableCell sx={{ fontWeight: 600 }}>Recipient</TableCell>
-                <TableCell sx={{ fontWeight: 600 }} align="center">Items</TableCell>
-                <TableCell sx={{ fontWeight: 600 }} align="right">Total</TableCell>
+                <TableCell sx={{ fontWeight: 600 }}>
+                  <TableSortLabel
+                    active={sortField === 'invoice_number'}
+                    direction={sortField === 'invoice_number' ? sortDir : 'asc'}
+                    onClick={() => handleSort('invoice_number')}
+                  >
+                    Invoice #
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell sx={{ fontWeight: 600 }}>
+                  <TableSortLabel
+                    active={sortField === 'invoice_date'}
+                    direction={sortField === 'invoice_date' ? sortDir : 'asc'}
+                    onClick={() => handleSort('invoice_date')}
+                  >
+                    Date
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell sx={{ fontWeight: 600 }}>
+                  <TableSortLabel
+                    active={sortField === 'recipient_company'}
+                    direction={sortField === 'recipient_company' ? sortDir : 'asc'}
+                    onClick={() => handleSort('recipient_company')}
+                  >
+                    Recipient
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell sx={{ fontWeight: 600 }} align="center">
+                  <TableSortLabel
+                    active={sortField === 'item_count'}
+                    direction={sortField === 'item_count' ? sortDir : 'asc'}
+                    onClick={() => handleSort('item_count')}
+                  >
+                    Items
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell sx={{ fontWeight: 600 }} align="right">
+                  <TableSortLabel
+                    active={sortField === 'total'}
+                    direction={sortField === 'total' ? sortDir : 'asc'}
+                    onClick={() => handleSort('total')}
+                  >
+                    Total
+                  </TableSortLabel>
+                </TableCell>
                 <TableCell sx={{ fontWeight: 600 }} align="center">Status</TableCell>
-                <TableCell sx={{ fontWeight: 600 }}>Deadline</TableCell>
+                <TableCell sx={{ fontWeight: 600 }}>
+                  <TableSortLabel
+                    active={sortField === 'alert_deadline'}
+                    direction={sortField === 'alert_deadline' ? sortDir : 'asc'}
+                    onClick={() => handleSort('alert_deadline')}
+                  >
+                    Deadline
+                  </TableSortLabel>
+                </TableCell>
                 <TableCell sx={{ fontWeight: 600 }} align="center">Action</TableCell>
               </TableRow>
             </TableHead>
