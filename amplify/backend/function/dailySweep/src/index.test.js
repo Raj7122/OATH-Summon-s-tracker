@@ -1743,6 +1743,31 @@ describe('Daily Sweep Lambda Function', () => {
     });
   });
 
+  // PLATINUM SUPPLY CORP historically captured a pile of unrelated "PLATINUM
+  // MAINTENANCE" companies under the old substring-fetch + bare-startsWith
+  // matcher. The token-aligned matcher diverges at token 2 ("supply" !=
+  // "maintenance"), so none of them match. This locks that in.
+  describe('PLATINUM false-positive regression (Real Exports)', () => {
+    const { matchRespondentToClient, buildClientNameMap } = require('./index')._testExports;
+    const platinum = { id: 'pl-1', name: 'PLATINUM SUPPLY CORP', akas: ['PLATINUM SUPPLY'] };
+    const map = buildClientNameMap([platinum]);
+
+    test.each([
+      ['', 'PLATINUM MAINTENANCE'],
+      ['', 'PLATINUM MAINTENANCE SERVICES'],
+      ['', 'PLATINUM MAINTENANCE INC'],
+      ['CORP', 'PLATINUM MAINTENANCE SERVICES'],
+      ['', 'CORP PLATINUM MAINTENANCE SERVICES'],
+      ['', 'CORP PLATINUM MAINTENANCE SERVICEC'], // real-world typo'd variant
+    ])('does NOT match "%s" + "%s"', (firstName, lastName) => {
+      expect(matchRespondentToClient(firstName, lastName, map)).toBeNull();
+    });
+
+    test('still matches the genuine client exactly', () => {
+      expect(matchRespondentToClient('', 'PLATINUM SUPPLY CORP', map).id).toBe('pl-1');
+    });
+  });
+
   // The API search-term guard drops terms too generic for a substring LIKE.
   describe('buildSearchTerm guard (Real Exports)', () => {
     const { buildSearchTerm } = require('./index')._testExports;
