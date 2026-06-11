@@ -39,6 +39,15 @@ amplifyconfiguration.json
 # Testing
 coverage
 
+# Deploy artifacts (manual Lambda/frontend deploy zips; dataExtractor.zip is tracked intentionally)
+deploy*.zip
+
+# Local invoice PDFs generated during testing
+Invoice-*.pdf
+
+# Claude Code local project dir
+.claude/
+
 # Migration workspace (contains backups with PII + raw secrets)
 migration/backups/
 migration/.env.target

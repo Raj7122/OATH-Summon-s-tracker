@@ -1,0 +1,24 @@
+# Amplify Hosting custom HTTP headers.
+#
+# NOTE: This app is deployed manually (zip upload, no Git repo connected), so
+# Amplify does NOT auto-read this file. The live config is applied via the API:
+#
+#   aws amplify update-app --app-id d54y71e1ddtll --region us-east-1 \
+#     --profile arthur --custom-headers "$(cat customHttp.yml)"
+#
+# This file is the version-controlled source of truth — keep it in sync with
+# what's set on the app, and re-run the command above after editing it.
+#
+# Why: index.html must never be cached, or the CDN/browsers keep serving an
+# old index.html that points at a previous JS bundle after a deploy (users see
+# a stale app until a hard refresh). The hashed /assets/* files are immutable
+# (their name changes every build) so they can be cached forever.
+customHeaders:
+  - pattern: '/index.html'
+    headers:
+      - key: 'Cache-Control'
+        value: 'no-cache, no-store, must-revalidate'
+  - pattern: '/assets/**'
+    headers:
+      - key: 'Cache-Control'
+        value: 'public, max-age=31536000, immutable'
