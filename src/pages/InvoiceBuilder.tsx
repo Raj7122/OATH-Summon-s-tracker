@@ -85,6 +85,7 @@ import { markAsInvoiced } from '../utils/invoiceTracking';
 import { computeAlertDeadline, generateInvoiceNumber } from '../utils/invoiceTrackerHelpers';
 import { appendInvoiceAuditEntries, appendInvoiceModifiedEntry, appendInvoiceRemovedEntry } from '../utils/invoiceAuditLog';
 import { compareByHearingDateAsc } from '../utils/invoiceOrdering';
+import { parseContactAddress } from '../utils/parseContactAddress';
 import { v4 as uuidv4 } from 'uuid';
 import { Invoice as TrackerInvoice } from '../types/invoiceTracker';
 
@@ -460,16 +461,18 @@ const InvoiceBuilder = () => {
     if (!client) return;
 
     setDetectedClient(client);
+    // contact_address is stored as one multiline field ("street\nCITY ST ZIP").
+    // Split it so the street and city/state/zip land in their own recipient fields
+    // instead of dumping the whole string into `address` and leaving a stale
+    // cityStateZip carried over from a previous client.
+    const parsed = parseContactAddress(client.contact_address);
     setRecipient({
       companyName: client.name || '',
       attention: client.contact_name || '',
-      address: client.contact_address || '',
-      cityStateZip: recipient.cityStateZip || '', // Keep manual - not in client model
+      address: parsed.address,
+      cityStateZip: parsed.cityStateZip,
       email: client.contact_email1 || '',
     });
-  // recipient.cityStateZip intentionally excluded to avoid infinite loops while
-  // the user edits that field manually.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeClientID, clientsByID, setRecipient, isEditMode]);
 
   // Edit mode: load the existing invoice and hydrate the working state.

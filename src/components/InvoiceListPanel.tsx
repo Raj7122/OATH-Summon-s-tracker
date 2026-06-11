@@ -53,6 +53,14 @@ const TAB_LABELS: Record<FilterTab, string> = {
   paid: 'Paid',
 };
 
+// Keep the sort arrow visible on every sortable column (faint until the column
+// is active) so users can see a column is sortable without hovering over it.
+// The active column's full-opacity arrow still wins via MUI's higher-specificity
+// `.Mui-active` rule.
+const sortLabelSx = {
+  '& .MuiTableSortLabel-icon': { opacity: 0.4 },
+};
+
 interface InvoiceListPanelProps {
   invoices: Invoice[];
   horizonFilter: InvoiceHorizonFilter;
@@ -220,6 +228,7 @@ const InvoiceListPanel = ({
                     active={sortField === 'invoice_number'}
                     direction={sortField === 'invoice_number' ? sortDir : 'asc'}
                     onClick={() => handleSort('invoice_number')}
+                    sx={sortLabelSx}
                   >
                     Invoice #
                   </TableSortLabel>
@@ -229,6 +238,7 @@ const InvoiceListPanel = ({
                     active={sortField === 'invoice_date'}
                     direction={sortField === 'invoice_date' ? sortDir : 'asc'}
                     onClick={() => handleSort('invoice_date')}
+                    sx={sortLabelSx}
                   >
                     Date
                   </TableSortLabel>
@@ -238,6 +248,7 @@ const InvoiceListPanel = ({
                     active={sortField === 'recipient_company'}
                     direction={sortField === 'recipient_company' ? sortDir : 'asc'}
                     onClick={() => handleSort('recipient_company')}
+                    sx={sortLabelSx}
                   >
                     Recipient
                   </TableSortLabel>
@@ -247,6 +258,7 @@ const InvoiceListPanel = ({
                     active={sortField === 'item_count'}
                     direction={sortField === 'item_count' ? sortDir : 'asc'}
                     onClick={() => handleSort('item_count')}
+                    sx={sortLabelSx}
                   >
                     Items
                   </TableSortLabel>
@@ -256,6 +268,7 @@ const InvoiceListPanel = ({
                     active={sortField === 'total'}
                     direction={sortField === 'total' ? sortDir : 'asc'}
                     onClick={() => handleSort('total')}
+                    sx={sortLabelSx}
                   >
                     Total
                   </TableSortLabel>
@@ -266,6 +279,7 @@ const InvoiceListPanel = ({
                     active={sortField === 'alert_deadline'}
                     direction={sortField === 'alert_deadline' ? sortDir : 'asc'}
                     onClick={() => handleSort('alert_deadline')}
+                    sx={sortLabelSx}
                   >
                     Deadline
                   </TableSortLabel>
