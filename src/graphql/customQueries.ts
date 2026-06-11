@@ -79,6 +79,7 @@ export const listInvoicesWithItems = /* GraphQL */ `
         payment_date
         alert_deadline
         notes
+        sent_to_client_attr
         pdf_s3_key
         clientID
         items {
@@ -191,6 +192,7 @@ export const updateInvoiceRecord = /* GraphQL */ `
       payment_date
       alert_deadline
       notes
+      sent_to_client_attr
       pdf_s3_key
       extra_line_items
       highlighted_sections
@@ -234,6 +236,7 @@ export const invoicesByClientBasic = /* GraphQL */ `
         payment_date
         alert_deadline
         notes
+        sent_to_client_attr
         clientID
         pdf_s3_key
         extra_line_items
@@ -318,6 +321,7 @@ export const getInvoiceWithItems = /* GraphQL */ `
       payment_date
       alert_deadline
       notes
+      sent_to_client_attr
       clientID
       pdf_s3_key
       extra_line_items

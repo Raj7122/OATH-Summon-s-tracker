@@ -32,7 +32,7 @@ import InvoiceListPanel from '../components/InvoiceListPanel';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import InvoiceSummaryCards from '../components/InvoiceSummaryCards';
 import { useInvoiceTracker } from '../contexts/InvoiceTrackerContext';
-import { Invoice, InvoiceHorizonFilter } from '../types/invoiceTracker';
+import { Invoice, InvoiceHorizonFilter, SentToClientAttribution } from '../types/invoiceTracker';
 import { runInvoiceClientBackfill } from '../utils/invoiceClientBackfill';
 
 // One-time backfill flag. Stamps clientID onto legacy invoices that predate
@@ -54,6 +54,7 @@ const InvoiceTracker = () => {
     markAsUnpaid,
     updateAlertDeadline,
     updateNotes,
+    markSentToClient,
     deleteInvoice,
     getHorizonStats,
   } = useInvoiceTracker();
@@ -171,6 +172,20 @@ const InvoiceTracker = () => {
     }
   }, [markAsUnpaid]);
 
+  const handleMarkSentToClient = useCallback(async (invoiceId: string, attr: SentToClientAttribution | null) => {
+    try {
+      await markSentToClient(invoiceId, attr);
+      setSnackbar({
+        open: true,
+        message: attr ? 'Invoice marked as sent to client' : 'Marked as not sent',
+        severity: 'success',
+      });
+      // Keep the modal open so the user sees the stamp update in place.
+    } catch {
+      setSnackbar({ open: true, message: 'Failed to update invoice', severity: 'error' });
+    }
+  }, [markSentToClient]);
+
   const handleDeleteInvoice = useCallback(async (invoice: Invoice) => {
     try {
       await deleteInvoice(invoice);
@@ -269,6 +284,7 @@ const InvoiceTracker = () => {
         onMarkUnpaid={handleModalMarkUnpaid}
         onUpdateDeadline={updateAlertDeadline}
         onUpdateNotes={updateNotes}
+        onMarkSentToClient={handleMarkSentToClient}
         onDelete={handleDeleteInvoice}
       />
 

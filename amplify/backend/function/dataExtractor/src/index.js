@@ -287,7 +287,7 @@ async function extractPDFData(pdfUrl) {
   "prior_offense_status": "first offense, repeat offense, or unknown",
   "violation_narrative": "brief description of the violation",
   "idling_duration_ocr": "how long the vehicle was idling (e.g., '15 minutes')",
-  "critical_flags_ocr": ["array of important flags like 'refrigeration unit', 'no driver present', etc."],
+  "critical_flags_ocr": ["Array of notable conditions that are EXPLICITLY stated in the violation document text (e.g. presence of a refrigeration/reefer unit, no driver present, idling adjacent to a school/school zone). ONLY include a flag if the document clearly states the condition. If none apply, return an empty array []. Do NOT guess, infer, or copy these examples as defaults - a flag must be supported by the actual document text."],
   "name_on_summons_ocr": "respondent/company name on the summons"
 }
 

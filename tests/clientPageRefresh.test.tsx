@@ -27,6 +27,12 @@ vi.mock('aws-amplify/storage', () => ({
   getUrl: vi.fn().mockResolvedValue({ url: new URL('https://example.com/invoice.pdf') }),
 }));
 
+// ClientInvoicesDialog renders InvoiceDetailModal, which reads useAuth for the
+// "Sent to Client" stamp. Mock it so the dialog renders without an AuthProvider.
+vi.mock('../src/contexts/AuthContext', () => ({
+  useAuth: () => ({ userInfo: { userId: 'u-1', username: 'arthur@test.com', displayName: 'Arthur' } }),
+}));
+
 import ClientInvoicesDialog from '../src/components/ClientInvoicesDialog';
 
 const UNPAID_INVOICE = {
