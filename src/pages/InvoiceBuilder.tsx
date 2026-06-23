@@ -913,6 +913,11 @@ const InvoiceBuilder = () => {
     setSaving(true);
     let partialFailureMessage: string | null = null;
 
+    // Saving an edit revises this invoice's date to now. Persisted to the Invoice
+    // record and stamped onto the regenerated PDF so the document and the Tracker
+    // list Date column agree. Only this invoice is affected — others keep their date.
+    const revisedDate = new Date().toISOString();
+
     try {
       // --- 1 & 2. Diff and apply InvoiceSummons changes ------------------
       const originalBySummons = new Map(originalJoinRows.map((r) => [r.summonsID, r]));
@@ -1079,6 +1084,7 @@ const InvoiceBuilder = () => {
           variables: {
             input: {
               id: editInvoiceId,
+              invoice_date: revisedDate,
               recipient_company: recipient.companyName,
               recipient_attention: recipient.attention || null,
               recipient_address: recipient.address || null,
@@ -1109,6 +1115,7 @@ const InvoiceBuilder = () => {
           editItems,
           recipient,
           {
+            invoiceDate: revisedDate,
             paymentInstructions,
             reviewText,
             additionalNotes,
@@ -2083,6 +2090,9 @@ const InvoiceBuilder = () => {
                   extras={displayExtras}
                   customMiddleText={customMiddleText}
                   highlightedSections={highlightedSections}
+                  // Edit mode: show the invoice's own stored date. Create mode:
+                  // loadedInvoice is null → undefined → preview defaults to today.
+                  invoiceDate={loadedInvoice?.invoice_date}
                 />
               </CardContent>
             </Card>

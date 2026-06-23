@@ -188,6 +188,7 @@ export const updateInvoiceRecord = /* GraphQL */ `
   mutation UpdateInvoiceRecord($input: UpdateInvoiceInput!) {
     updateInvoice(input: $input) {
       id
+      invoice_date
       payment_status
       payment_date
       alert_deadline

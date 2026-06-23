@@ -40,6 +40,9 @@ interface InvoicePreviewProps {
   extras?: InvoiceExtraLineItem[];
   customMiddleText?: string;
   highlightedSections?: HighlightedSections;
+  // ISO datetime of the invoice's stored date. Falls back to today when omitted
+  // (create mode), so each saved invoice's preview shows its own date.
+  invoiceDate?: string;
 }
 
 const HIGHLIGHT_BG = '#fff59d'; // MUI yellow.200 — matches PDF/DOCX yellow highlight
@@ -74,8 +77,12 @@ const InvoicePreview = ({
   extras = [],
   customMiddleText = '',
   highlightedSections = {},
+  invoiceDate: invoiceDateProp,
 }: InvoicePreviewProps) => {
-  const invoiceDate = dayjs().format('MMMM D, YYYY');
+  // Show the invoice's stored date when known (so each invoice shows its own date,
+  // not "today"); fall back to today for a brand-new invoice being created.
+  const invoiceDate = (invoiceDateProp ? dayjs.utc(invoiceDateProp) : dayjs())
+    .format('MMMM D, YYYY');
   const totalLegalFees =
     cartItems.reduce((sum, item) => sum + item.legal_fee, 0) + sumExtrasLegalFees(extras);
 

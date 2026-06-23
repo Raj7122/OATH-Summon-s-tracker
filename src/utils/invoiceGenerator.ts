@@ -170,9 +170,12 @@ export const generatePDF = async (
   rightY += 5;
   doc.text(SENDER.email, rightX, rightY, { align: 'right' });
 
-  // Date
+  // Date — use the invoice's stored date when provided (so each invoice shows its
+  // own date), falling back to today for newly-created invoices. dayjs.utc avoids a
+  // timezone shift on UTC-midnight stored values, matching formatDate above.
   rightY += 8;
-  const invoiceDate = dayjs().format('MMMM D, YYYY');
+  const invoiceDate = (options.invoiceDate ? dayjs.utc(options.invoiceDate) : dayjs())
+    .format('MMMM D, YYYY');
   doc.text(invoiceDate, rightX, rightY, { align: 'right' });
 
   // Recipient block - Contact name first, then company, address, etc.
@@ -430,7 +433,9 @@ export const generateDOCX = async (
 ): Promise<{ blob: Blob; filename: string }> => {
   const totalLegalFees =
     items.reduce((sum, item) => sum + item.legal_fee, 0) + sumExtrasLegalFees(extras);
-  const invoiceDate = dayjs().format('MMMM D, YYYY');
+  // Use the invoice's stored date when provided; fall back to today for new invoices.
+  const invoiceDate = (options.invoiceDate ? dayjs.utc(options.invoiceDate) : dayjs())
+    .format('MMMM D, YYYY');
 
   const doc = new Document({
     sections: [

@@ -120,6 +120,9 @@ export type InvoiceContextType = InvoiceContextState & InvoiceContextActions;
  * Only 3 fields are user-editable; other footer text uses hardcoded defaults
  */
 export interface InvoiceOptions {
+  // ISO datetime for the invoice's document date. Falls back to today when omitted
+  // (e.g. creating a brand-new invoice). On edit, the stored/revised date is passed.
+  invoiceDate?: string;
   paymentInstructions: string;
   reviewText: string;
   additionalNotes: string;
