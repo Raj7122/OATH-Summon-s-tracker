@@ -166,6 +166,97 @@ vi.mock('file-saver', () => ({
 
 // Import after mocks are set up
 import { generatePDF, generateDOCX } from '../src/utils/invoiceGenerator';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+dayjs.extend(utc);
+
+// ---------------------------------------------------------------------------
+// Invoice DATE rendering — the fix Jacky reported
+// ---------------------------------------------------------------------------
+//
+// Bug: the document (PDF/DOCX/preview) always stamped TODAY (dayjs()), never the
+// invoice's stored date. So every invoice looked like "today" and editing one
+// appeared to change others. Desired output: each document shows its OWN stored
+// date when provided, and falls back to today only for brand-new invoices.
+
+const baseOptions: InvoiceOptions = {
+  paymentInstructions: 'Pay via Zelle.',
+  reviewText: 'Review the evidence.',
+  additionalNotes: '',
+};
+
+// Pull the date TextRun out of the captured DOCX (rendered as `MMMM D, YYYY`).
+function docxHasText(text: string): boolean {
+  const children = capturedSections[0]?.children || [];
+  return children.some((child: any) =>
+    (child.children || []).some((run: any) => run.text === text),
+  );
+}
+
+describe('Invoice date — uses the stored per-invoice date, not today', () => {
+  beforeEach(() => {
+    pdfTextCalls.length = 0;
+    capturedSections = [];
+  });
+
+  it('PDF renders the stored invoice_date (formatted "MMMM D, YYYY"), not today', async () => {
+    const stored = '2025-03-14T00:00:00Z';
+    const expected = 'March 14, 2025';
+    const today = dayjs().format('MMMM D, YYYY');
+
+    await generatePDF(mockItems, mockRecipient, { ...baseOptions, invoiceDate: stored });
+
+    expect(pdfTextCalls).toContain(expected);
+    // Guard: it must NOT fall back to today (unless today happens to be that date).
+    if (today !== expected) {
+      expect(pdfTextCalls).not.toContain(today);
+    }
+  });
+
+  it('PDF falls back to today when no invoiceDate is provided (new-invoice flow)', async () => {
+    const today = dayjs().format('MMMM D, YYYY');
+
+    await generatePDF(mockItems, mockRecipient, baseOptions);
+
+    expect(pdfTextCalls).toContain(today);
+  });
+
+  it('two invoices with different stored dates each show their OWN date', async () => {
+    // This is Jacky's core complaint: editing one invoice must not bleed today's
+    // date onto another. Each render is driven solely by its own invoiceDate.
+    await generatePDF(mockItems, mockRecipient, { ...baseOptions, invoiceDate: '2025-03-14T00:00:00Z' });
+    const firstCalls = [...pdfTextCalls];
+
+    pdfTextCalls.length = 0;
+    await generatePDF(mockItems, mockRecipient, { ...baseOptions, invoiceDate: '2026-01-09T00:00:00Z' });
+    const secondCalls = [...pdfTextCalls];
+
+    expect(firstCalls).toContain('March 14, 2025');
+    expect(firstCalls).not.toContain('January 9, 2026');
+    expect(secondCalls).toContain('January 9, 2026');
+    expect(secondCalls).not.toContain('March 14, 2025');
+  });
+
+  it('DOCX renders the stored invoice_date, not today', async () => {
+    const stored = '2025-03-14T00:00:00Z';
+    const today = dayjs().format('MMMM D, YYYY');
+
+    await generateDOCX(mockItems, mockRecipient, { ...baseOptions, invoiceDate: stored });
+
+    expect(docxHasText('March 14, 2025')).toBe(true);
+    if (today !== 'March 14, 2025') {
+      expect(docxHasText(today)).toBe(false);
+    }
+  });
+
+  it('DOCX falls back to today when no invoiceDate is provided', async () => {
+    const today = dayjs().format('MMMM D, YYYY');
+
+    await generateDOCX(mockItems, mockRecipient, baseOptions);
+
+    expect(docxHasText(today)).toBe(true);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // DOCX tests
