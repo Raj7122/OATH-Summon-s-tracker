@@ -539,7 +539,12 @@ const InvoiceBuilder = () => {
             hearing_date: s?.hearing_date || null,
             hearing_result: s?.hearing_result || null,
             status: s?.status || '',
-            amount_due: j.amount_due ?? s?.amount_due ?? null,
+            // Auto-refresh the fine from the live summons on revise: the daily sweep keeps
+            // Summons.amount_due current with the NYC OATH balance_due, so an invoice opened
+            // for revision should reflect today's fine, not the snapshot frozen at creation.
+            // Fall back to the stored snapshot only when the summons is gone or has no fine.
+            // (`??` not `||` so a live amount_due of 0 — fine paid in full — still wins.)
+            amount_due: s?.amount_due ?? j.amount_due ?? null,
             legal_fee: j.legal_fee,
             addedAt: invoice.invoice_date,
             highlighted: !!j.highlighted,
