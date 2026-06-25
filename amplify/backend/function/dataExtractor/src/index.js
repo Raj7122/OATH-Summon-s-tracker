@@ -25,7 +25,11 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const dynamodb = new AWS.DynamoDB.DocumentClient();
 
 // Environment variables (configured in AWS Console)
-const SUMMONS_TABLE = process.env.SUMMONS_TABLE || 'Summons-dev';
+// NOTE: do NOT add a hardcoded fallback table name here. A previous
+// `|| 'Summons-dev'` default silently pointed prod at a nonexistent table, so
+// OCR "succeeded" but every DB write failed with AccessDenied — stranding
+// records. Missing config must fail loudly instead (see handler guard below).
+const SUMMONS_TABLE = process.env.SUMMONS_TABLE;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 // Initialize Google Gemini AI
@@ -38,6 +42,12 @@ exports.handler = async (event) => {
   console.log('Starting data extraction...', JSON.stringify(event));
 
   try {
+    // Fail fast on missing config: without a real table name, OCR would run and
+    // then silently fail to persist (the bug this guard replaces). Surface it.
+    if (!SUMMONS_TABLE) {
+      throw new Error('SUMMONS_TABLE environment variable is required but is not set');
+    }
+
     // Parse DynamoDB Stream event format
     let summons_id, summons_number, pdf_link, video_link, violation_date;
     let healingMode = false; // Backend flag to force re-OCR on partial records
