@@ -660,4 +660,118 @@ describe('InvoiceBuilder Integration', () => {
       expect(btn.disabled).toBe(false);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Edit-mode fine auto-refresh
+  //
+  // Jacky's bug: an invoice line item snapshots Summons.amount_due at creation,
+  // but the daily sweep keeps the live summons fine current. Revising an invoice
+  // must reflect today's fine, not the stale snapshot. The hydration prefers the
+  // live summons value (s?.amount_due) over the stored join row (j.amount_due),
+  // falling back to the snapshot only when the summons is gone.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Wire edit-mode mocks: the stored InvoiceSummons join row carries the frozen
+   * snapshot (500), while the live getSummons returns `liveAmountDue`. Pass null
+   * for the summons to simulate an archived/deleted record.
+   */
+  function wireEditModeMocks(liveAmountDue: number | null, summonsExists = true) {
+    mockGraphql.mockImplementation(({ query }: any) => {
+      if (typeof query === 'string' && query.includes('getInvoice(')) {
+        return Promise.resolve({
+          data: {
+            getInvoice: {
+              id: 'inv-edit-1',
+              invoice_number: 'INV-Test_Corp-2026-02-10',
+              invoice_date: '2026-02-10T00:00:00.000Z',
+              clientID: 'client-1',
+              recipient_company: 'Test Corp',
+              recipient_attention: 'John Smith',
+              recipient_address: '123 Main St',
+              recipient_email: 'john@test.com',
+              alert_deadline: null,
+              payment_status: 'unpaid',
+              items: {
+                items: [
+                  {
+                    id: 'join-1',
+                    summonsID: 'sum-1',
+                    summons_number: 'SUM-001',
+                    legal_fee: 250,
+                    amount_due: 500, // snapshot frozen at invoice creation
+                  },
+                ],
+              },
+            },
+          },
+        });
+      }
+      if (typeof query === 'string' && query.includes('getSummons')) {
+        return Promise.resolve({
+          data: {
+            getSummons: summonsExists
+              ? {
+                  id: 'sum-1',
+                  clientID: 'client-1',
+                  respondent_name: 'Test Corp',
+                  violation_date: '2026-01-15T00:00:00.000Z',
+                  hearing_date: '2026-02-01T00:00:00.000Z',
+                  hearing_result: 'DEFAULT',
+                  status: 'CLOSED',
+                  amount_due: liveAmountDue, // live fine, post-sweep
+                }
+              : null,
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+  }
+
+  it('refreshes the line-item fine to the live summons value when revising', async () => {
+    // Snapshot was $500; the fine has since been paid down to $200 on the website.
+    wireEditModeMocks(200);
+
+    render(
+      <MemoryRouter initialEntries={['/invoice-builder?editInvoiceId=inv-edit-1']}>
+        <InvoiceProvider>
+          <InvoiceBuilder />
+        </InvoiceProvider>
+      </MemoryRouter>
+    );
+
+    // Wait for edit-mode hydration.
+    await screen.findByRole('button', { name: /Add Summonses/i });
+
+    // The line-item fine input shows the live 200, not the stale snapshot 500...
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('200')).toBeDefined();
+    });
+    expect(screen.queryByDisplayValue('500')).toBeNull();
+
+    // ...and the recomputed Total Fines Due reflects it.
+    expect(screen.getByText('$200.00')).toBeDefined();
+    expect(screen.queryByText('$500.00')).toBeNull();
+  });
+
+  it('keeps the stored snapshot fine when the live summons is missing', async () => {
+    // Summons archived/deleted — getSummons resolves null. Fall back to snapshot 500.
+    wireEditModeMocks(null, false);
+
+    render(
+      <MemoryRouter initialEntries={['/invoice-builder?editInvoiceId=inv-edit-1']}>
+        <InvoiceProvider>
+          <InvoiceBuilder />
+        </InvoiceProvider>
+      </MemoryRouter>
+    );
+
+    await screen.findByRole('button', { name: /Add Summonses/i });
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('500')).toBeDefined();
+    });
+    expect(screen.getByText('$500.00')).toBeDefined();
+  });
 });
