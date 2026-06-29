@@ -164,8 +164,56 @@ vi.mock('file-saver', () => ({
   saveAs: vi.fn(),
 }));
 
+// Capture every cell written to the XLSX worksheet so tests can assert on the
+// values, fills (highlights), etc. Mirrors the docx capturedSections approach.
+let xlsxCells: any[] = [];
+
+vi.mock('exceljs', () => {
+  function makeCell() {
+    const cell: any = {
+      value: undefined,
+      font: undefined,
+      alignment: undefined,
+      border: undefined,
+      fill: undefined,
+    };
+    xlsxCells.push(cell);
+    return cell;
+  }
+  function makeWorksheet() {
+    const rows = new Map<number, any>();
+    const cols = new Map<number, any>();
+    return {
+      getRow(n: number) {
+        if (!rows.has(n)) {
+          const cells = new Map<number, any>();
+          rows.set(n, {
+            getCell(c: number) {
+              if (!cells.has(c)) cells.set(c, makeCell());
+              return cells.get(c);
+            },
+          });
+        }
+        return rows.get(n);
+      },
+      getColumn(n: number) {
+        if (!cols.has(n)) cols.set(n, { width: undefined });
+        return cols.get(n);
+      },
+      mergeCells() {},
+    };
+  }
+  class Workbook {
+    xlsx = { writeBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(8)) };
+    addWorksheet() {
+      return makeWorksheet();
+    }
+  }
+  return { default: { Workbook } };
+});
+
 // Import after mocks are set up
-import { generatePDF, generateDOCX } from '../src/utils/invoiceGenerator';
+import { generatePDF, generateDOCX, generateXLSX } from '../src/utils/invoiceGenerator';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 dayjs.extend(utc);
@@ -543,5 +591,89 @@ describe('PDF generator — footer pagination', () => {
     expect(pdfAddPageCalls.count).toBeGreaterThanOrEqual(1);
     // The overdue text must still be drawn (not silently clipped)
     expect(pdfTextCalls.some((t) => t.includes('Some fines are overdue.'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// XLSX tests — the new Excel export Jacky asked for
+// ---------------------------------------------------------------------------
+
+describe('XLSX generator', () => {
+  beforeEach(() => {
+    xlsxCells = [];
+  });
+
+  // All plain-string cell values written to the worksheet.
+  const stringValues = () =>
+    xlsxCells.map((c) => c.value).filter((v): v is string => typeof v === 'string');
+
+  // Values of cells that carry the yellow highlight fill.
+  const highlightedValues = () =>
+    xlsxCells
+      .filter((c) => c.fill?.fgColor?.argb === 'FFFFF59D')
+      .map((c) => c.value)
+      .filter((v): v is string => typeof v === 'string');
+
+  it('returns a .xlsx filename and an XLSX-typed Blob', async () => {
+    const { blob, filename } = await generateXLSX(mockItems, mockRecipient, baseOptions);
+
+    expect(filename.endsWith('.xlsx')).toBe(true);
+    expect(filename).toContain('Test_Corp'); // company name, sanitized
+    expect(blob.type).toBe(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+  });
+
+  it('writes the summons number, formatted dates, currency, and total', async () => {
+    await generateXLSX(mockItems, mockRecipient, baseOptions);
+    const values = stringValues();
+
+    expect(values).toContain('123456789'); // summons number
+    expect(values).toContain('6/01/24'); // violation_date formatted M/DD/YY
+    expect(values).toContain('$500'); // amount_due (FINE DUE)
+    expect(values).toContain('$250'); // legal_fee
+    expect(values).toContain('$250.00'); // LEGAL FEE total (with decimals)
+  });
+
+  it('renders the stored invoice_date, not today', async () => {
+    const today = dayjs().format('MMMM D, YYYY');
+    await generateXLSX(mockItems, mockRecipient, { ...baseOptions, invoiceDate: '2025-03-14T00:00:00Z' });
+
+    expect(stringValues()).toContain('March 14, 2025');
+    if (today !== 'March 14, 2025') {
+      expect(stringValues()).not.toContain(today);
+    }
+  });
+
+  it('applies the yellow highlight fill to highlighted line items', async () => {
+    const highlightedItems: InvoiceCartItem[] = [
+      { ...mockItems[0], highlighted: true },
+    ];
+    await generateXLSX(highlightedItems, mockRecipient, baseOptions);
+
+    // The highlighted row's cells (incl. the summons number) must be filled.
+    expect(highlightedValues()).toContain('123456789');
+  });
+
+  it('does NOT highlight rows when the item is not highlighted', async () => {
+    await generateXLSX(mockItems, mockRecipient, baseOptions);
+    expect(highlightedValues()).not.toContain('123456789');
+  });
+
+  it('omits the paymentInstructions paragraph when empty, includes it when set', async () => {
+    await generateXLSX(mockItems, mockRecipient, {
+      paymentInstructions: '',
+      reviewText: 'Review.',
+      additionalNotes: '',
+    });
+    expect(stringValues().some((v) => v.includes('Zelle'))).toBe(false);
+
+    xlsxCells = [];
+    await generateXLSX(mockItems, mockRecipient, {
+      paymentInstructions: 'Pay via Zelle.',
+      reviewText: 'Review.',
+      additionalNotes: '',
+    });
+    expect(stringValues().some((v) => v.includes('Pay via Zelle.'))).toBe(true);
   });
 });
