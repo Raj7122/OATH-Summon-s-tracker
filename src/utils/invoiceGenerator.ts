@@ -17,6 +17,7 @@ import {
   ShadingType,
 } from 'docx';
 import { saveAs } from 'file-saver';
+import ExcelJS from 'exceljs';
 import { InvoiceCartItem, InvoiceExtraLineItem, InvoiceRecipient, InvoiceOptions } from '../types/invoice';
 import {
   SENDER,
@@ -70,6 +71,15 @@ export const sumExtrasLegalFees = (extras: InvoiceExtraLineItem[] | undefined): 
 // Yellow marker color used for both PDF (RGB) and DOCX (hex) highlights.
 const HIGHLIGHT_RGB: [number, number, number] = [255, 245, 157];
 const HIGHLIGHT_HEX = 'FFF59D';
+// ExcelJS argb is alpha-first (8 hex digits); fully-opaque yellow = FF + FFF59D.
+const HIGHLIGHT_ARGB = 'FFFFF59D';
+
+// MIME types for the generated office documents. Exported so callers can pass
+// the correct content-type when uploading the file to S3.
+export const XLSX_MIME =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+export const DOCX_MIME =
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 // Top margin used when paginating footer paragraphs onto a fresh page.
 const FOOTER_PAGE_TOP = 20;
@@ -720,6 +730,266 @@ export const generateDOCX = async (
   // Generate and save the file
   const blob = await Packer.toBlob(doc);
   const filename = `Invoice-${recipient.companyName || 'Client'}-${dayjs().format('YYYY-MM-DD')}.docx`.replace(/[^a-zA-Z0-9-_.]/g, '_');
+  saveAs(blob, filename);
+  return { blob, filename };
+};
+
+/**
+ * Generate XLSX invoice using ExcelJS.
+ *
+ * Mirrors the PDF/DOCX layout in a single worksheet so the spreadsheet reads
+ * like the document: sender/recipient blocks, the Re: section, the line-item
+ * table, and the conditional footer paragraphs. Highlighted rows/sections get
+ * the same yellow marker fill (FFF59D) as the other two formats.
+ */
+export const generateXLSX = async (
+  items: InvoiceCartItem[],
+  recipient: InvoiceRecipient,
+  options: InvoiceOptions,
+  extras: InvoiceExtraLineItem[] = []
+): Promise<{ blob: Blob; filename: string }> => {
+  const totalLegalFees =
+    items.reduce((sum, item) => sum + item.legal_fee, 0) + sumExtrasLegalFees(extras);
+  // Use the invoice's stored date when provided; fall back to today for new invoices.
+  const invoiceDate = (options.invoiceDate ? dayjs.utc(options.invoiceDate) : dayjs())
+    .format('MMMM D, YYYY');
+  const hl = options.highlightedSections ?? {};
+
+  const workbook = new ExcelJS.Workbook();
+  const ws = workbook.addWorksheet('Invoice');
+
+  // The line-item table spans 7 columns (A–G); every other block aligns to it.
+  const LAST_COL = 7;
+  const HIGHLIGHT_FILL = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: HIGHLIGHT_ARGB },
+  } as const;
+  const CELL_BORDER = {
+    top: { style: 'thin' as const },
+    bottom: { style: 'thin' as const },
+    left: { style: 'thin' as const },
+    right: { style: 'thin' as const },
+  };
+
+  let r = 0;
+
+  // Write one full-width paragraph row (merged across A:G), optionally italic /
+  // bold / centered / highlighted. Used for headers, the Re: block, and footers.
+  const addLine = (
+    text: string,
+    opts: {
+      bold?: boolean;
+      italic?: boolean;
+      underline?: boolean;
+      size?: number;
+      align?: 'left' | 'center' | 'right';
+      highlight?: boolean;
+    } = {}
+  ): ExcelJS.Row => {
+    r += 1;
+    ws.mergeCells(r, 1, r, LAST_COL);
+    const row = ws.getRow(r);
+    const cell = row.getCell(1);
+    cell.value = text;
+    cell.font = {
+      bold: !!opts.bold,
+      italic: !!opts.italic,
+      underline: !!opts.underline,
+      size: opts.size ?? 10,
+    };
+    cell.alignment = { horizontal: opts.align ?? 'left', wrapText: true, vertical: 'top' };
+    if (opts.highlight) {
+      // Fill the whole merged range so the marker stripe spans the row.
+      for (let c = 1; c <= LAST_COL; c++) row.getCell(c).fill = HIGHLIGHT_FILL;
+    }
+    return row;
+  };
+
+  // --- Sender block ---------------------------------------------------------
+  addLine(SENDER.name, { bold: true, size: 16 });
+  addLine(SENDER.title, { underline: true });
+  addLine(SENDER.address);
+  addLine(SENDER.cityStateZip);
+  addLine(SENDER.phone);
+  addLine(SENDER.fax);
+  addLine(SENDER.email);
+  addLine('');
+  addLine(invoiceDate);
+  addLine('');
+
+  // --- Recipient block (skip empty lines, matching the PDF/DOCX) ------------
+  if (recipient.attention) addLine(recipient.attention);
+  if (recipient.companyName) addLine(recipient.companyName);
+  if (recipient.address) addLine(recipient.address);
+  if (recipient.cityStateZip) addLine(recipient.cityStateZip);
+  if (recipient.email) addLine(`Email: ${recipient.email}`);
+  addLine('');
+
+  // --- INVOICE title --------------------------------------------------------
+  addLine('INVOICE', { bold: true, size: 18, align: 'center' });
+  addLine('And Case Status', { align: 'center' });
+  addLine('');
+
+  // --- Re: section ----------------------------------------------------------
+  addLine(`Re:  ${INVOICE_SUBJECT}`);
+  addLine(INVOICE_SUBTITLE, { bold: true });
+  addLine('Ticket No.:  See below');
+  // Defendant value is bold — use rich text so only the company name is bold.
+  {
+    r += 1;
+    ws.mergeCells(r, 1, r, LAST_COL);
+    const cell = ws.getRow(r).getCell(1);
+    cell.value = {
+      richText: [
+        { text: 'Defendant:  ', font: { size: 10 } },
+        { text: recipient.companyName || 'COMPANY NAME', font: { size: 10, bold: true } },
+      ],
+    };
+    cell.alignment = { horizontal: 'left', wrapText: true, vertical: 'top' };
+  }
+  addLine(`Court:  ${COURT_NAME}`);
+  addLine('Court Dates:  As described below');
+  addLine('');
+
+  // --- Services description -------------------------------------------------
+  addLine(SERVICES_DESCRIPTION);
+  addLine('');
+
+  // --- LEGAL FEE total (right-aligned, echoing the document) ----------------
+  r += 1;
+  {
+    const row = ws.getRow(r);
+    const labelCell = row.getCell(LAST_COL - 1);
+    labelCell.value = 'LEGAL FEE';
+    labelCell.font = { bold: true, size: 11 };
+    labelCell.alignment = { horizontal: 'right' };
+    const valueCell = row.getCell(LAST_COL);
+    valueCell.value = formatCurrencyWithDecimals(totalLegalFees);
+    valueCell.font = { bold: true, size: 14 };
+    valueCell.alignment = { horizontal: 'right' };
+  }
+  addLine('');
+
+  // --- Data table -----------------------------------------------------------
+  const headers = [
+    'Summons Number',
+    'Violation Date',
+    'Hearing Status',
+    'Results',
+    'Hearing Date',
+    'FINE DUE',
+    'LEGAL FEE',
+  ];
+  r += 1;
+  {
+    const headerRow = ws.getRow(r);
+    headers.forEach((h, i) => {
+      const cell = headerRow.getCell(i + 1);
+      cell.value = h;
+      cell.font = { bold: true, size: 9 };
+      cell.border = CELL_BORDER;
+      // Money columns (FINE DUE, LEGAL FEE) right-align like the PDF/DOCX.
+      cell.alignment = { horizontal: i >= 5 ? 'right' : 'left', wrapText: true, vertical: 'top' };
+    });
+  }
+
+  // Write one table data row, applying the yellow fill when highlighted. Values
+  // arrive pre-formatted (summons items) or as free text (manual extras).
+  const addTableRow = (values: string[], highlighted?: boolean | null) => {
+    r += 1;
+    const row = ws.getRow(r);
+    values.forEach((v, i) => {
+      const cell = row.getCell(i + 1);
+      cell.value = v;
+      cell.font = { size: 9 };
+      cell.border = CELL_BORDER;
+      cell.alignment = { horizontal: i >= 5 ? 'right' : 'left', wrapText: true, vertical: 'top' };
+      if (highlighted) cell.fill = HIGHLIGHT_FILL;
+    });
+  };
+
+  items.forEach((item) =>
+    addTableRow(
+      [
+        item.summons_number,
+        formatDate(item.violation_date),
+        item.status || '',
+        item.hearing_result || '',
+        formatDate(item.hearing_date),
+        formatCurrency(item.amount_due),
+        formatCurrency(item.legal_fee),
+      ],
+      item.highlighted
+    )
+  );
+  // Manual extra-line rows (research fee, etc.) — free text exactly as entered.
+  extras.forEach((e) =>
+    addTableRow(
+      [
+        e.summons_number,
+        e.violation_date,
+        e.status,
+        e.hearing_result,
+        e.hearing_date,
+        e.amount_due,
+        e.legal_fee,
+      ],
+      e.highlighted
+    )
+  );
+  addLine('');
+
+  // --- Footer paragraphs (same conditional logic as PDF/DOCX) ---------------
+  // 1. Payment Instructions
+  if (options.paymentInstructions.trim()) {
+    addLine(options.paymentInstructions, { italic: true, highlight: !!hl.payment });
+    addLine('');
+  }
+  // 2. Review Text
+  if (options.reviewText.trim()) {
+    addLine(options.reviewText, { italic: true, highlight: !!hl.review });
+    addLine('');
+  }
+  // 3. Overdue Section — text + CityPay hyperlink, both highlighted together.
+  if (options.showOverdue) {
+    addLine(options.overdueText, { italic: true, highlight: !!hl.overdue });
+    r += 1;
+    ws.mergeCells(r, 1, r, LAST_COL);
+    const linkRow = ws.getRow(r);
+    const cell = linkRow.getCell(1);
+    cell.value = { text: FOOTER_TEXT.cityPayUrl, hyperlink: FOOTER_TEXT.cityPayUrl };
+    cell.font = { italic: true, size: 10, color: { argb: 'FF0000FF' }, underline: true };
+    cell.alignment = { horizontal: 'left', wrapText: true, vertical: 'top' };
+    if (hl.overdue) {
+      for (let c = 1; c <= LAST_COL; c++) linkRow.getCell(c).fill = HIGHLIGHT_FILL;
+    }
+    addLine('');
+  }
+  // 4. Custom middle paragraph
+  if (options.customMiddleText?.trim()) {
+    addLine(options.customMiddleText, { italic: true, highlight: !!hl.customMiddle });
+    addLine('');
+  }
+  // 5. Questions Text (hardcoded)
+  addLine(FOOTER_TEXT.questions, { italic: true });
+  // 6. Additional notes (editable, if provided)
+  if (options.additionalNotes) {
+    addLine(options.additionalNotes, { italic: true, highlight: !!hl.additional });
+  }
+  // 7. Closing Text (hardcoded)
+  addLine(FOOTER_TEXT.closing, { italic: true });
+
+  // Column widths roughly proportional to the PDF column widths.
+  const widths = [20, 14, 16, 14, 14, 12, 14];
+  widths.forEach((w, i) => {
+    ws.getColumn(i + 1).width = w;
+  });
+
+  // Generate and save the file
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: XLSX_MIME });
+  const filename = `Invoice-${recipient.companyName || 'Client'}-${dayjs().format('YYYY-MM-DD')}.xlsx`.replace(/[^a-zA-Z0-9-_.]/g, '_');
   saveAs(blob, filename);
   return { blob, filename };
 };

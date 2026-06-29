@@ -15,6 +15,7 @@ import {
   CardContent,
   Typography,
   TextField,
+  MenuItem,
   Button,
   Table,
   TableBody,
@@ -61,6 +62,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import DescriptionIcon from '@mui/icons-material/Description';
+import GridOnIcon from '@mui/icons-material/GridOn';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import EditIcon from '@mui/icons-material/Edit';
 import AddIcon from '@mui/icons-material/Add';
@@ -79,7 +81,7 @@ import { InvoiceCartItem, InvoiceExtraLineItem, HighlightedSections } from '../t
 
 import { useInvoice } from '../contexts/InvoiceContext';
 import { useInvoiceTracker } from '../contexts/InvoiceTrackerContext';
-import { generatePDF, generateDOCX, sumExtrasLegalFees } from '../utils/invoiceGenerator';
+import { generatePDF, generateDOCX, generateXLSX, sumExtrasLegalFees, XLSX_MIME, DOCX_MIME } from '../utils/invoiceGenerator';
 import { FOOTER_TEXT, DEFAULT_LEGAL_FEE } from '../constants/invoiceDefaults';
 import { markAsInvoiced } from '../utils/invoiceTracking';
 import { computeAlertDeadline, generateInvoiceNumber } from '../utils/invoiceTrackerHelpers';
@@ -90,6 +92,15 @@ import { v4 as uuidv4 } from 'uuid';
 import { Invoice as TrackerInvoice } from '../types/invoiceTracker';
 
 const apiClient = generateClient();
+
+// Derive the stored invoice format from its S3 key's file extension. Used to
+// default the edit-mode Format dropdown to whatever the invoice was saved as.
+const formatFromKey = (key?: string | null): 'pdf' | 'docx' | 'xlsx' => {
+  const lower = (key ?? '').toLowerCase();
+  if (lower.endsWith('.docx')) return 'docx';
+  if (lower.endsWith('.xlsx')) return 'xlsx';
+  return 'pdf';
+};
 
 interface Client {
   id: string;
@@ -170,6 +181,11 @@ const InvoiceBuilder = () => {
   const [loadedInvoice, setLoadedInvoice] = useState<TrackerInvoice | null>(null);
   const [loadingInvoice, setLoadingInvoice] = useState(false);
   const [editLoadError, setEditLoadError] = useState<string | null>(null);
+
+  // Format chosen for re-saving an edited invoice. Defaults to the format the
+  // invoice is currently stored in (derived from the file extension) so saving
+  // edits keeps the same format unless the user picks a different one.
+  const [saveFormat, setSaveFormat] = useState<'pdf' | 'docx' | 'xlsx'>('pdf');
 
   // Working copy of line items while editing an existing invoice.
   // Mirrors InvoiceCartItem shape so the table and preview components can be
@@ -553,6 +569,8 @@ const InvoiceBuilder = () => {
 
         if (cancelled) return;
         setLoadedInvoice(invoice);
+        // Default the Format dropdown to the invoice's current stored format.
+        setSaveFormat(formatFromKey(invoice.pdf_s3_key));
         setEditItems([...hydrated].sort(compareByHearingDateAsc));
 
         // Hydrate manual extra-line rows from the Invoice record. Stored as
@@ -875,7 +893,7 @@ const InvoiceBuilder = () => {
 
       // Upload the DOCX to S3 and link it to the invoice record
       if (invoiceId) {
-        await uploadInvoiceToS3(invoiceId, blob, filename, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        await uploadInvoiceToS3(invoiceId, blob, filename, DOCX_MIME);
       }
 
       setLastGeneratedItems(itemsToInvoice);
@@ -884,6 +902,50 @@ const InvoiceBuilder = () => {
     } catch (error) {
       console.error('Error generating DOCX:', error);
       alert('Failed to generate DOCX. Please try again.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleGenerateXLSX = async () => {
+    if (activeClientItems.length === 0) {
+      alert('Please add summonses to the cart before generating an invoice.');
+      return;
+    }
+
+    setGenerating(true);
+    const itemsToInvoice = activeClientItems;
+    const extrasToInvoice = activeClientID ? (createExtrasByClient[activeClientID] ?? []) : [];
+    try {
+      const { blob, filename } = await generateXLSX(
+        itemsToInvoice,
+        recipient,
+        {
+          paymentInstructions,
+          reviewText,
+          additionalNotes,
+          showOverdue,
+          overdueText,
+          customMiddleText,
+          highlightedSections,
+        },
+        extrasToInvoice,
+      );
+
+      // Mark only the active client's items as invoiced
+      const invoiceId = await markItemsAsInvoiced(itemsToInvoice, extrasToInvoice);
+
+      // Upload the XLSX to S3 and link it to the invoice record
+      if (invoiceId) {
+        await uploadInvoiceToS3(invoiceId, blob, filename, XLSX_MIME);
+      }
+
+      setLastGeneratedItems(itemsToInvoice);
+      setSuccessMessage(`Invoice generated! ${itemsToInvoice.length} summons${itemsToInvoice.length !== 1 ? 'es' : ''} marked as invoiced.`);
+      setSuccessDialogOpen(true);
+    } catch (error) {
+      console.error('Error generating XLSX:', error);
+      alert('Failed to generate XLSX. Please try again.');
     } finally {
       setGenerating(false);
     }
@@ -1114,9 +1176,20 @@ const InvoiceBuilder = () => {
         partialFailureMessage = 'Invoice record update failed.';
       }
 
-      // --- 5. Regenerate PDF + overwrite S3 -------------------------------
+      // --- 5. Regenerate the document in the chosen format + overwrite S3 -
+      // The user picks the format (PDF / DOCX / XLSX) from the Format dropdown;
+      // pick the matching generator and content-type so the stored file and
+      // its extension agree.
       try {
-        const { blob, filename } = await generatePDF(
+        const generator =
+          saveFormat === 'docx'
+            ? generateDOCX
+            : saveFormat === 'xlsx'
+            ? generateXLSX
+            : generatePDF;
+        const contentType =
+          saveFormat === 'docx' ? DOCX_MIME : saveFormat === 'xlsx' ? XLSX_MIME : 'application/pdf';
+        const { blob, filename } = await generator(
           editItems,
           recipient,
           {
@@ -1131,12 +1204,12 @@ const InvoiceBuilder = () => {
           },
           editExtras,
         );
-        await uploadInvoiceToS3(editInvoiceId, blob, filename, 'application/pdf');
+        await uploadInvoiceToS3(editInvoiceId, blob, filename, contentType);
       } catch (err) {
-        console.error('PDF regeneration failed:', err);
+        console.error('Invoice document regeneration failed:', err);
         partialFailureMessage =
           partialFailureMessage ||
-          'Invoice saved, but PDF regeneration failed. You can retry from the invoice detail view.';
+          'Invoice saved, but file regeneration failed. You can retry from the invoice detail view.';
       }
 
       // Refresh tracker so the detail view reflects changes.
@@ -1174,6 +1247,7 @@ const InvoiceBuilder = () => {
     overdueText,
     customMiddleText,
     highlightedSections,
+    saveFormat,
     fetchInvoices,
     navigate,
   ]);
@@ -2025,9 +2099,24 @@ const InvoiceBuilder = () => {
                 <Divider sx={{ my: 2 }} />
 
                 {/* Action Buttons — Generate (cart mode) vs Save/Cancel (edit mode) */}
-                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
                   {isEditMode ? (
                     <>
+                      {/* Format selector — re-save the edited invoice as PDF,
+                          Word, or Excel. Defaults to the invoice's stored format. */}
+                      <TextField
+                        select
+                        size="small"
+                        label="Format"
+                        value={saveFormat}
+                        onChange={(e) => setSaveFormat(e.target.value as 'pdf' | 'docx' | 'xlsx')}
+                        disabled={saving}
+                        sx={{ minWidth: 160 }}
+                      >
+                        <MenuItem value="pdf">PDF</MenuItem>
+                        <MenuItem value="docx">DOCX (Word)</MenuItem>
+                        <MenuItem value="xlsx">Excel (XLSX)</MenuItem>
+                      </TextField>
                       <Button
                         variant="contained"
                         color="primary"
@@ -2069,6 +2158,16 @@ const InvoiceBuilder = () => {
                         disabled={generating || activeClientItems.length === 0}
                       >
                         Generate DOCX
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        color="primary"
+                        size="large"
+                        startIcon={<GridOnIcon />}
+                        onClick={handleGenerateXLSX}
+                        disabled={generating || activeClientItems.length === 0}
+                      >
+                        Generate XLSX
                       </Button>
                     </>
                   )}
