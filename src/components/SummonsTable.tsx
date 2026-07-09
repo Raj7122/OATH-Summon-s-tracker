@@ -817,7 +817,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       headerName: 'Internal Status',
       width: 170,
       renderCell: (params: GridRenderCellParams) => {
-        const internalStatusOptions = ['New', 'Reviewing', 'Hearing Complete', 'Summons Paid', 'Archived'];
+        const internalStatusOptions = ['New', 'Not Handling', 'Reviewing', 'Hearing Complete', 'Summons Paid', 'Archived'];
         return (
           <Select
             value={params.value || 'New'}
@@ -1054,6 +1054,9 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
           },
         }}
         getRowClassName={(params: GridRowParams) => {
+          // "Not Handling" summonses are de-emphasized; this takes precedence over
+          // the fresh-row highlight so they don't also glow yellow.
+          if (params.row.internal_status === 'Not Handling') return 'not-handling-row';
           return isFreshSummons(params.row) ? 'fresh-row' : '';
         }}
         getRowHeight={() => 'auto'}
@@ -1068,6 +1071,14 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
           },
           '& .fresh-row': {
             backgroundColor: '#FFFDE7', // Pale "Attention Yellow" for 1-week freshness (TRD v1.9)
+          },
+          // De-emphasize summonses the firm is not handling (dim + grey). The inline
+          // Internal Status Select stays interactive so staff can switch a row back.
+          '& .not-handling-row': {
+            opacity: 0.6,
+            backgroundColor: '#F5F5F5',
+            '& .MuiDataGrid-cell': { color: 'text.disabled' },
+            '&:hover': { backgroundColor: '#EEEEEE' },
           },
           // Enhanced horizontal scrollbar visibility (works in Chrome, Safari, Edge, Firefox)
           '& .MuiDataGrid-virtualScroller': {
