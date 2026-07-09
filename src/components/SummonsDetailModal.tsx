@@ -161,7 +161,7 @@ interface SummonsDetailModalProps {
 }
 
 // Internal status options per TRD v1.8
-const INTERNAL_STATUS_OPTIONS = ['New', 'Reviewing', 'Hearing Complete', 'Summons Paid', 'Archived'];
+const INTERNAL_STATUS_OPTIONS = ['New', 'Not Handling', 'Reviewing', 'Hearing Complete', 'Summons Paid', 'Archived'];
 
 /**
  * Get background color for activity log entry based on type
