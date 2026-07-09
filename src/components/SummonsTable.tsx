@@ -590,7 +590,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
             sx={{
               fontWeight: 'bold',
               fontSize: '0.7rem',
-              bgcolor: 'grey.700',
+              bgcolor: '#7B1FA2',
               color: 'common.white',
               '& .MuiChip-icon': { color: 'common.white' },
             }}
@@ -1090,13 +1090,12 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
           '& .fresh-row': {
             backgroundColor: '#FFFDE7', // Pale "Attention Yellow" for 1-week freshness (TRD v1.9)
           },
-          // De-emphasize summonses the firm is not handling with a clear grey tint.
-          // No opacity fade here — that would wash out the bold "NOT HANDLING" chip in
-          // the Status column, which is the primary at-a-glance indicator.
+          // Flag summonses the firm is not handling with a clear lavender tint — a
+          // color unused elsewhere in the grid (vs. yellow=updated, amber=deadline).
+          // Text stays full-strength so the row reads clearly, not "disabled".
           '& .not-handling-row': {
-            backgroundColor: '#ECEFF1',
-            '& .MuiDataGrid-cell': { color: 'text.secondary' },
-            '&:hover': { backgroundColor: '#CFD8DC' },
+            backgroundColor: '#F3E5F5',
+            '&:hover': { backgroundColor: '#E1BEE7' },
           },
           // Enhanced horizontal scrollbar visibility (works in Chrome, Safari, Edge, Firefox)
           '& .MuiDataGrid-virtualScroller': {
