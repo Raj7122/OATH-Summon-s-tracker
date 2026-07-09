@@ -86,6 +86,8 @@ const FETCH_TIMEOUT_MS = 60000; // 60s per-request timeout for anchored grouped 
 const PROCESS_CONCURRENCY = 25; // Max parallel record-processing DB ops in Phase 1 (lower if DynamoDB throttles)
 const TERMS_PER_QUERY = 20; // Client search terms OR-grouped per Socrata query (fewer requests)
 const MAX_WHERE_CHARS = 3500; // Socrata $where length budget; a term group is split if its name clause exceeds this
+const MAX_PAGE_RETRIES = Number(process.env.MAX_PAGE_RETRIES ?? 3); // Retries for a timed-out / errored / rate-limited page before the group is marked incomplete
+const PAGE_RETRY_BASE_MS = Number(process.env.PAGE_RETRY_BASE_MS ?? 1000); // Base backoff between page retries (exponential: 1s, 2s, 4s); set to 0 in tests
 
 /**
  * Main handler for the daily sweep Lambda function
@@ -119,9 +121,16 @@ exports.handler = async (event, context) => {
     const phase1Results = await executePhase1MetadataSync(context);
     console.log('\nPhase 1 Complete:', phase1Results);
 
+    // A run is degraded if records failed to process (errors) OR the API fetch was
+    // incomplete (a query group's pages failed after retries — its client summonses
+    // may be missing). Both must surface, otherwise silently-dropped records look
+    // identical to a clean success.
+    const fetchIncomplete = (phase1Results.fetchFailedGroups || 0) > 0;
+    const phase1Degraded = phase1Results.errors > 0 || fetchIncomplete;
+
     // Update SyncStatus with Phase 1 results
     await updateSyncStatus({
-      phase1_status: phase1Results.errors > 0 ? 'partial' : 'success',
+      phase1_status: phase1Degraded ? 'partial' : 'success',
       phase1_completed_at: new Date().toISOString(),
       phase1_clients_processed: phase1Results.clientsProcessed,
       phase1_cases_from_api: phase1Results.casesFromAPI,
@@ -131,6 +140,8 @@ exports.handler = async (event, context) => {
       phase1_flagged_for_ocr: phase1Results.recordsFlaggedForOCR,
       phase1_records_archived: phase1Results.recordsArchived,
       phase1_error_count: phase1Results.errors,
+      phase1_incomplete_fetch_groups: phase1Results.fetchFailedGroups || 0,
+      phase1_fetch_complete: !fetchIncomplete,
       oath_api_reachable: true,
       oath_api_last_check: new Date().toISOString(),
       oath_api_error: null,  // Clear any stale error from previous failed runs
@@ -141,7 +152,7 @@ exports.handler = async (event, context) => {
       console.log('\n⚠️ Phase 1 timed out or insufficient time remaining — skipping Phase 2');
       console.log(`  Remaining time: ${Math.round(context.getRemainingTimeInMillis() / 1000)}s`);
       await updateSyncStatus({
-        phase1_status: phase1Results.timedOut ? 'partial_timeout' : (phase1Results.errors > 0 ? 'partial' : 'success'),
+        phase1_status: phase1Results.timedOut ? 'partial_timeout' : (phase1Degraded ? 'partial' : 'success'),
         phase2_status: 'skipped_timeout',
         phase2_completed_at: new Date().toISOString(),
         sync_in_progress: false,
@@ -261,6 +272,8 @@ async function executePhase1MetadataSync(context) {
     recordsArchived: 0,
     errors: 0,
     timedOut: false,
+    fetchFailedGroups: 0, // query groups with incomplete fetch (pages failed after retries)
+    fetchTotalGroups: 0,
   };
 
   const syncTime = new Date().toISOString();
@@ -287,9 +300,15 @@ async function executePhase1MetadataSync(context) {
   console.log(`Built name map with ${clientNameMap.size} unique names`);
 
   // Step 3: Fetch all summonses from NYC API (parallelized with timeout awareness)
-  const apiSummonses = await fetchNYCDataForClients(clients, context);
+  const fetchResult = await fetchNYCDataForClients(clients, context);
+  const apiSummonses = fetchResult.summonses;
+  // Groups whose pages could not be fetched after retries: their client summonses
+  // may be missing this run, so the sync is degraded (not a clean success).
+  results.fetchFailedGroups = fetchResult.failedGroups;
+  results.fetchTotalGroups = fetchResult.totalGroups;
   results.casesFromAPI = apiSummonses.length;
-  console.log(`Fetched ${apiSummonses.length} summonses from NYC API`);
+  console.log(`Fetched ${apiSummonses.length} summonses from NYC API` +
+    (fetchResult.failedGroups > 0 ? ` (⚠️ ${fetchResult.failedGroups}/${fetchResult.totalGroups} query groups incomplete)` : ''));
 
   // Step 3b: Pre-load all existing summons into a Map for O(1) lookups
   // This avoids ~3600 individual DB queries during processing
@@ -1747,6 +1766,7 @@ function groupSearchTerms(terms) {
 async function fetchNYCDataForClients(clients, context) {
   const allSummonses = [];
   const seenTickets = new Set();
+  let failedGroups = 0; // count of query groups that returned partial/no data (incomplete fetch)
 
   // Build unique search terms from client names and AKAs (generic terms dropped).
   // Each name yields an apostrophe-stripped term plus, when relevant, an
@@ -1799,46 +1819,79 @@ async function fetchNYCDataForClients(clients, context) {
     let offset = 0;
     let pageData;
     let groupTotal = 0;
+    let incomplete = false; // true if any page could not be fetched after retries — group data is partial
+
+    // Fetch a single page with bounded retries. Returns the parsed rows, or null
+    // if the page ultimately failed (timeout / non-2xx / network error). A null
+    // return means the group is INCOMPLETE — callers must not treat missing rows
+    // as "client has no summonses" (that silently drops real records).
+    async function fetchPage(pageOffset) {
+      for (let attempt = 0; attempt <= MAX_PAGE_RETRIES; attempt++) {
+        const url = new URL(NYC_API_URL);
+        url.searchParams.append('$limit', PAGE_SIZE);
+        url.searchParams.append('$offset', pageOffset);
+        url.searchParams.append('$where', whereClause);
+        // Stable, deterministic ordering by Socrata's internal row id. WITHOUT an
+        // explicit $order, offset pagination is unstable: rows are duplicated and
+        // DROPPED across page boundaries (proven empirically — a paginated fetch
+        // returned 217 rows / 216 unique). ':id' is always present and indexed, so
+        // paging is both correct and faster.
+        url.searchParams.append('$order', ':id');
+
+        // AbortController enforces per-request timeout so one slow Socrata query
+        // can't block the entire batch for minutes
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+        let response;
+        try {
+          response = await fetch(url.toString(), { headers: termHeaders, signal: controller.signal });
+        } catch (err) {
+          clearTimeout(timeoutId);
+          const kind = err.name === 'AbortError' ? `timeout (${FETCH_TIMEOUT_MS / 1000}s)` : `fetch error (${err.message})`;
+          if (attempt < MAX_PAGE_RETRIES) {
+            console.warn(`  ⚠️ ${kind} for ${label} (offset ${pageOffset}), retry ${attempt + 1}/${MAX_PAGE_RETRIES}`);
+            await sleep(PAGE_RETRY_BASE_MS * 2 ** attempt);
+            continue;
+          }
+          console.error(`  ❌ ${kind} for ${label} (offset ${pageOffset}) — exhausted ${MAX_PAGE_RETRIES} retries; group INCOMPLETE`);
+          return null;
+        }
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorBody = await response.text().catch(() => '');
+          // 429 (rate limit) and 5xx are transient — back off and retry.
+          const transient = response.status === 429 || response.status >= 500;
+          if (transient && attempt < MAX_PAGE_RETRIES) {
+            console.warn(`  ⚠️ NYC API ${response.status} for ${label} (offset ${pageOffset}), retry ${attempt + 1}/${MAX_PAGE_RETRIES}`);
+            await sleep(PAGE_RETRY_BASE_MS * 2 ** attempt);
+            continue;
+          }
+          console.error(`  ❌ NYC API error for ${label} (offset ${pageOffset}): ${response.status} - ${errorBody}; group INCOMPLETE`);
+          return null;
+        }
+
+        return await response.json();
+      }
+      return null;
+    }
 
     do {
-      const url = new URL(NYC_API_URL);
-      url.searchParams.append('$limit', PAGE_SIZE);
-      url.searchParams.append('$offset', offset);
-      url.searchParams.append('$where', whereClause);
-
-      // AbortController enforces per-request timeout so one slow Socrata query
-      // can't block the entire batch for minutes
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-      let response;
-      try {
-        response = await fetch(url.toString(), { headers: termHeaders, signal: controller.signal });
-      } catch (err) {
-        clearTimeout(timeoutId);
-        if (err.name === 'AbortError') {
-          console.warn(`  ⏱️ Timeout (${FETCH_TIMEOUT_MS / 1000}s) for ${label} (offset ${offset}) — skipping remaining pages`);
-        } else {
-          console.error(`  Fetch error for ${label} (offset ${offset}):`, err.message);
-        }
+      pageData = await fetchPage(offset);
+      if (pageData === null) {
+        // Page failed after retries: stop paging this group and flag it incomplete
+        // so its records are NOT mistaken for "no summonses" downstream.
+        incomplete = true;
         break;
       }
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorBody = await response.text().catch(() => '');
-        console.error(`NYC API error for ${label} (offset ${offset}): ${response.status} - ${errorBody}`);
-        break;
-      }
-
-      pageData = await response.json();
       groupSummonses.push(...pageData);
       groupTotal += pageData.length;
       offset += pageData.length;
     } while (pageData.length === PAGE_SIZE && offset < MAX_PER_QUERY);
 
-    console.log(`  Found ${groupTotal} IDLING (2022+) for ${label}${groupTotal >= MAX_PER_QUERY ? ' (capped)' : ''}`);
-    return groupSummonses;
+    console.log(`  Found ${groupTotal} IDLING (2022+) for ${label}${groupTotal >= MAX_PER_QUERY ? ' (capped)' : ''}${incomplete ? ' ⚠️ INCOMPLETE' : ''}`);
+    return { summonses: groupSummonses, incomplete, terms };
   }
 
   // Process term groups in parallel chunks of API_CONCURRENCY
@@ -1860,19 +1913,29 @@ async function fetchNYCDataForClients(clients, context) {
     // Dedup results from this batch into the global collections
     for (const result of settled) {
       if (result.status === 'fulfilled') {
-        for (const summons of result.value) {
+        const { summonses, incomplete } = result.value;
+        // An incomplete group returned only PARTIAL rows (some pages failed after
+        // retries). Count it so the run is reported as degraded rather than a clean
+        // success — otherwise dropped records look identical to "no summonses".
+        if (incomplete) failedGroups++;
+        for (const summons of summonses) {
           if (!seenTickets.has(summons.ticket_number)) {
             seenTickets.add(summons.ticket_number);
             allSummonses.push(summons);
           }
         }
       } else {
-        console.error(`  Batch term failed:`, result.reason?.message || result.reason);
+        // A rejected promise means the whole group produced nothing — also degraded.
+        failedGroups++;
+        console.error(`  ❌ Batch term group failed entirely:`, result.reason?.message || result.reason);
       }
     }
   }
 
-  return allSummonses;
+  if (failedGroups > 0) {
+    console.warn(`⚠️ ${failedGroups}/${termGroups.length} query groups were incomplete — some client summonses may be missing this run.`);
+  }
+  return { summonses: allSummonses, failedGroups, totalGroups: termGroups.length };
 }
 
 /**
@@ -2073,6 +2136,7 @@ exports._testExports = {
   groupSearchTerms,
   TERMS_PER_QUERY,
   processSummonsMetadataOnly,
+  fetchNYCDataForClients,
 };
 
 /**
