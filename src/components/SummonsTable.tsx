@@ -64,6 +64,7 @@ import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import FiberNewIcon from '@mui/icons-material/FiberNew';
+import BlockIcon from '@mui/icons-material/Block';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
@@ -579,6 +580,23 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
 
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        {/* "Not Handling" Indicator — bold, always-visible flag in the leftmost column
+            so staff can tell at a glance the firm is not working this summons */}
+        {summons.internal_status === 'Not Handling' && (
+          <Chip
+            label="NOT HANDLING"
+            icon={<BlockIcon />}
+            size="small"
+            sx={{
+              fontWeight: 'bold',
+              fontSize: '0.7rem',
+              bgcolor: 'grey.700',
+              color: 'common.white',
+              '& .MuiChip-icon': { color: 'common.white' },
+            }}
+          />
+        )}
+
         {/* Attachment Indicator */}
         {hasAttachments && (
           <Tooltip title={`${attachmentCount} file${attachmentCount > 1 ? 's' : ''} attached`} arrow placement="top">
@@ -1072,13 +1090,13 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
           '& .fresh-row': {
             backgroundColor: '#FFFDE7', // Pale "Attention Yellow" for 1-week freshness (TRD v1.9)
           },
-          // De-emphasize summonses the firm is not handling (dim + grey). The inline
-          // Internal Status Select stays interactive so staff can switch a row back.
+          // De-emphasize summonses the firm is not handling with a clear grey tint.
+          // No opacity fade here — that would wash out the bold "NOT HANDLING" chip in
+          // the Status column, which is the primary at-a-glance indicator.
           '& .not-handling-row': {
-            opacity: 0.6,
-            backgroundColor: '#F5F5F5',
-            '& .MuiDataGrid-cell': { color: 'text.disabled' },
-            '&:hover': { backgroundColor: '#EEEEEE' },
+            backgroundColor: '#ECEFF1',
+            '& .MuiDataGrid-cell': { color: 'text.secondary' },
+            '&:hover': { backgroundColor: '#CFD8DC' },
           },
           // Enhanced horizontal scrollbar visibility (works in Chrome, Safari, Edge, Firefox)
           '& .MuiDataGrid-virtualScroller': {
