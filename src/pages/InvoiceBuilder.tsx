@@ -7,7 +7,7 @@
  * @module pages/InvoiceBuilder
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -82,12 +82,12 @@ import { InvoiceCartItem, InvoiceExtraLineItem, HighlightedSections } from '../t
 import { useInvoice } from '../contexts/InvoiceContext';
 import { useInvoiceTracker } from '../contexts/InvoiceTrackerContext';
 import { generatePDF, generateDOCX, generateXLSX, sumExtrasLegalFees, XLSX_MIME, DOCX_MIME } from '../utils/invoiceGenerator';
-import { FOOTER_TEXT, DEFAULT_LEGAL_FEE } from '../constants/invoiceDefaults';
+import { FOOTER_TEXT, DEFAULT_LEGAL_FEE, DEFAULT_RECIPIENT } from '../constants/invoiceDefaults';
 import { markAsInvoiced } from '../utils/invoiceTracking';
 import { computeAlertDeadline, generateInvoiceNumber } from '../utils/invoiceTrackerHelpers';
 import { appendInvoiceAuditEntries, appendInvoiceModifiedEntry, appendInvoiceRemovedEntry } from '../utils/invoiceAuditLog';
 import { compareByHearingDateAsc } from '../utils/invoiceOrdering';
-import { parseContactAddress } from '../utils/parseContactAddress';
+import { deriveRecipient } from '../utils/deriveRecipient';
 import { v4 as uuidv4 } from 'uuid';
 import { Invoice as TrackerInvoice } from '../types/invoiceTracker';
 
@@ -240,6 +240,16 @@ const InvoiceBuilder = () => {
   }, [cartItems]);
 
   const clientIDs = useMemo(() => Array.from(itemsByClient.keys()), [itemsByClient]);
+
+  // Latest itemsByClient, mirrored into a ref so the recipient auto-fill effect
+  // can read a fallback company name (the summons' respondent_name) WITHOUT
+  // taking itemsByClient as a dependency. If it were a dependency, every cart
+  // mutation (legal-fee edits, etc.) would re-run the effect and clobber any
+  // manual edits the user made to the recipient fields.
+  const itemsByClientRef = useRef(itemsByClient);
+  useEffect(() => {
+    itemsByClientRef.current = itemsByClient;
+  }, [itemsByClient]);
 
   // Keep activeClientID valid as the cart changes:
   // - If it's null or points to a client that no longer has items, snap to the first available.
@@ -464,31 +474,33 @@ const InvoiceBuilder = () => {
     fetchMissingClients();
   }, [clientIDs, clientsByID]);
 
-  // When the active client changes, swap the detected-client chip and
-  // auto-populate the recipient form with that client's contact info.
-  // Skipped in edit mode — the recipient is loaded from the saved invoice.
+  // Keep the recipient form in sync with the active client. This effect is the
+  // single source of truth for the recipient in cart (non-edit) mode: it always
+  // sets the recipient for the current active client, or clears it when the cart
+  // is empty — so a previous client's info can never linger.
   useEffect(() => {
+    // Edit mode loads the recipient from the saved invoice — don't touch it.
     if (isEditMode) return;
+
+    // No active client (empty cart) — clear the recipient so a previous client's
+    // info can never linger (this is what carried "JLSHM" onto the next invoice,
+    // and what left a stale value in localStorage across logout/login).
     if (!activeClientID) {
       setDetectedClient(null);
+      setRecipient(DEFAULT_RECIPIENT);
       return;
     }
-    const client = clientsByID[activeClientID];
-    if (!client) return;
 
-    setDetectedClient(client);
-    // contact_address is stored as one multiline field ("street\nCITY ST ZIP").
-    // Split it so the street and city/state/zip land in their own recipient fields
-    // instead of dumping the whole string into `address` and leaving a stale
-    // cityStateZip carried over from a previous client.
-    const parsed = parseContactAddress(client.contact_address);
-    setRecipient({
-      companyName: client.name || '',
-      attention: client.contact_name || '',
-      address: parsed.address,
-      cityStateZip: parsed.cityStateZip,
-      email: client.contact_email1 || '',
-    });
+    // Always set the recipient for the CURRENT active client. deriveRecipient
+    // falls back to the summons' respondent_name (read from the ref so it isn't
+    // an effect dependency) when the Client record hasn't loaded yet or fails to
+    // resolve — so the company name is never stale and never silently blank.
+    // When the record does resolve, clientsByID changes, this effect re-runs,
+    // and the full address/attention/email fill in.
+    const client = clientsByID[activeClientID];
+    const fallbackName = itemsByClientRef.current.get(activeClientID)?.[0]?.respondent_name;
+    setDetectedClient(client ?? null);
+    setRecipient(deriveRecipient(client, fallbackName));
   }, [activeClientID, clientsByID, setRecipient, isEditMode]);
 
   // Edit mode: load the existing invoice and hydrate the working state.
@@ -1564,6 +1576,17 @@ const InvoiceBuilder = () => {
                     />
                   )}
                 </Box>
+
+                {/* Fallback notice: active client whose Client record didn't
+                    resolve. The company name is taken from the summons instead of
+                    the client, so flag it rather than silently masking a possibly
+                    broken/missing client record. */}
+                {!isEditMode && activeClientID && !detectedClient && (
+                  <Alert severity="warning" sx={{ mb: 2 }}>
+                    Client details couldn't be loaded for this invoice — the company
+                    name is taken from the summons. Please verify it before sending.
+                  </Alert>
+                )}
 
                 <Box
                   sx={{

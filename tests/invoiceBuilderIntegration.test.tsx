@@ -774,4 +774,119 @@ describe('InvoiceBuilder Integration', () => {
     });
     expect(screen.getByText('$500.00')).toBeDefined();
   });
+
+  // -------------------------------------------------------------------------
+  // Recipient never carries over the previous client / never goes blank
+  //
+  // Jacky's bug: invoicing JLSHM, then building an invoice for George
+  // Hildebrandt showed "JLSHM" as the company name (Symptom 1); after logging
+  // out and back in it went blank (Symptom 2). Root cause: the recipient
+  // auto-fill effect only ever *overwrote* the company name when the client
+  // record resolved — on the "not loaded / didn't resolve" branch it did
+  // nothing, so the stale (or empty) localStorage value survived. The fix makes
+  // the recipient a deterministic function of the active client with a fallback
+  // to the summons' respondent_name. These tests drive the real component along
+  // Jacky's exact path and would FAIL under the old effect.
+  // -------------------------------------------------------------------------
+
+  // George's cart item with a distinct respondent_name — the fallback company
+  // name when his Client record can't be resolved.
+  const georgeItem: InvoiceCartItem = {
+    id: 'sum-george',
+    summons_number: 'SUM-G01',
+    respondent_name: 'GEORGE HILDEBRANDT TRUCKING',
+    clientID: 'client-george',
+    violation_date: '2026-01-15T00:00:00.000Z',
+    hearing_date: '2026-02-01T00:00:00.000Z',
+    hearing_result: 'DEFAULT',
+    status: 'CLOSED',
+    amount_due: 500,
+    legal_fee: 250,
+    addedAt: '2026-02-01T00:00:00.000Z',
+  };
+
+  // Seed a STALE recipient from a previous invoice (JLSHM) plus George's item.
+  // InvoiceContext rehydrates the recipient from localStorage on mount, exactly
+  // as it did across Jacky's logout/login.
+  function setupGeorgeCartWithStaleJlshm() {
+    localStorage.setItem('oath-invoice-cart', JSON.stringify([georgeItem]));
+    localStorage.setItem(
+      'oath-invoice-recipient',
+      JSON.stringify({
+        companyName: 'JLSHM',
+        attention: 'Old Attn',
+        address: '999 Old Rd',
+        cityStateZip: 'Oldtown NY 11111',
+        email: 'old@jlshm.com',
+      })
+    );
+  }
+
+  it('uses the summons company name (never stale JLSHM / never blank) when the client record does not resolve', async () => {
+    // George's Client record cannot be loaded — getClient resolves null.
+    mockGraphql.mockImplementation(({ query }: any) => {
+      if (typeof query === 'string' && query.includes('getClient')) {
+        return Promise.resolve({ data: { getClient: null } });
+      }
+      if (typeof query === 'string' && query.includes('invoiceSummonsesBySummonsID')) {
+        return Promise.resolve({
+          data: { invoiceSummonsesBySummonsID: { items: [], nextToken: null } },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    setupGeorgeCartWithStaleJlshm();
+    renderBuilder();
+
+    // The Company Name field falls back to the summons name — NOT the stale
+    // JLSHM value rehydrated from localStorage, and not blank.
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('GEORGE HILDEBRANDT TRUCKING')).toBeDefined();
+    });
+    expect(screen.queryByDisplayValue('JLSHM')).toBeNull();
+
+    // And the fallback is surfaced so a genuinely broken client isn't masked.
+    expect(
+      screen.getByText(/Client details couldn't be loaded/i)
+    ).toBeDefined();
+  });
+
+  it('auto-fills the active client and drops the previous client when the record resolves', async () => {
+    // George's Client record resolves normally.
+    mockGraphql.mockImplementation(({ query }: any) => {
+      if (typeof query === 'string' && query.includes('getClient')) {
+        return Promise.resolve({
+          data: {
+            getClient: {
+              id: 'client-george',
+              name: 'George Hildebrandt',
+              contact_name: 'George H.',
+              contact_address: '12 Depot Lane\nAlbany NY 12207',
+              contact_email1: 'george@ghtruck.com',
+            },
+          },
+        });
+      }
+      if (typeof query === 'string' && query.includes('invoiceSummonsesBySummonsID')) {
+        return Promise.resolve({
+          data: { invoiceSummonsesBySummonsID: { items: [], nextToken: null } },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    setupGeorgeCartWithStaleJlshm();
+    renderBuilder();
+
+    // Company name becomes George's, the stale JLSHM is gone, and the full
+    // address block fills from the resolved client (no leftover Old Rd values).
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('George Hildebrandt')).toBeDefined();
+    });
+    expect(screen.queryByDisplayValue('JLSHM')).toBeNull();
+    expect(screen.getByDisplayValue('12 Depot Lane')).toBeDefined();
+    expect(screen.getByDisplayValue('Albany NY 12207')).toBeDefined();
+    expect(screen.queryByDisplayValue('999 Old Rd')).toBeNull();
+  });
 });
