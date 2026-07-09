@@ -53,6 +53,7 @@ import {
 } from '@mui/material';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import FiberNewIcon from '@mui/icons-material/FiberNew';
+import BlockIcon from '@mui/icons-material/Block';
 import UpdateIcon from '@mui/icons-material/Update';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import SearchIcon from '@mui/icons-material/Search';
@@ -252,6 +253,24 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
 
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+        {/* "Not Handling" flag — bold, leftmost, so staff see at a glance the
+            firm is not working this summons (matches the client summons grid) */}
+        {summons.internal_status === 'Not Handling' && (
+          <Chip
+            label="NOT HANDLING"
+            icon={<BlockIcon sx={{ fontSize: 14 }} />}
+            size="small"
+            sx={{
+              fontWeight: 'bold',
+              fontSize: '0.65rem',
+              height: 22,
+              bgcolor: '#7B1FA2',
+              color: 'common.white',
+              '& .MuiChip-icon': { color: 'common.white' },
+            }}
+          />
+        )}
+
         {/* Attachment Indicator */}
         {hasAttachments && (
           <Tooltip title={`${attachmentCount} file${attachmentCount > 1 ? 's' : ''} attached`} arrow placement="top">
@@ -724,6 +743,9 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
         }}
         onRowClick={handleRowClick}
         getRowClassName={(params: GridRowParams) => {
+          // "Not Handling" takes precedence over the fresh-row highlight so a
+          // summons the firm isn't working doesn't also glow as new/updated.
+          if ((params.row as Summons).internal_status === 'Not Handling') return 'not-handling-row';
           return isFreshSummons(params.row) ? 'fresh-row' : '';
         }}
         disableRowSelectionOnClick
@@ -769,6 +791,17 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
           },
           '& .fresh-row:hover': {
             backgroundColor: (theme) => alpha(theme.palette.info.main, 0.12),
+          },
+          // "Not Handling" row styling - clear lavender tint (unused elsewhere in
+          // the grid). Override zebra striping so the tint is consistent per row.
+          '& .not-handling-row': {
+            backgroundColor: '#F3E5F5',
+            '&:nth-of-type(even)': {
+              backgroundColor: '#F3E5F5',
+            },
+          },
+          '& .not-handling-row:hover': {
+            backgroundColor: '#E1BEE7',
           },
           // Allow horizontal scroll when extra columns are visible
           '& .MuiDataGrid-virtualScroller': {
