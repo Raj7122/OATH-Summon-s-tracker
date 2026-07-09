@@ -47,6 +47,7 @@ import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import GavelIcon from '@mui/icons-material/Gavel';
 import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import BlockIcon from '@mui/icons-material/Block';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
 import RemoveShoppingCartIcon from '@mui/icons-material/RemoveShoppingCart';
@@ -595,6 +596,24 @@ const ClientDetail: React.FC = () => {
 
         return (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            {/* "Not Handling" flag — bold, leftmost, so staff see at a glance the
+                firm is not working this summons (mirrors the dashboard grid) */}
+            {summons.internal_status === 'Not Handling' && (
+              <Chip
+                label="NOT HANDLING"
+                icon={<BlockIcon />}
+                size="small"
+                sx={{
+                  height: 20,
+                  fontSize: '0.65rem',
+                  fontWeight: 600,
+                  bgcolor: '#7B1FA2',
+                  color: '#fff',
+                  '& .MuiChip-icon': { color: '#fff' },
+                }}
+              />
+            )}
+
             {/* Attachment Indicator */}
             {hasAttachments && (
               <Tooltip title={`${attachmentCount} file${attachmentCount > 1 ? 's' : ''} attached`} arrow placement="top">
@@ -889,6 +908,9 @@ const ClientDetail: React.FC = () => {
    */
   const getRowClassName = useCallback((params: GridRowParams) => {
     const summons = params.row as Summons;
+    // "Not Handling" takes precedence over the critical-deadline highlight — a
+    // summons the firm isn't working shouldn't also flag as needing attention.
+    if (summons.internal_status === 'Not Handling') return 'not-handling-row';
     if (!summons.hearing_date) return '';
 
     // Use UTC parsing to avoid timezone shift
@@ -1291,6 +1313,13 @@ const ClientDetail: React.FC = () => {
               bgcolor: (theme) => alpha(theme.palette.warning.main, 0.08),
               '&:hover': {
                 bgcolor: (theme) => alpha(theme.palette.warning.main, 0.12),
+              },
+            },
+            // "Not Handling" row styling - clear lavender tint (unused elsewhere)
+            '& .MuiDataGrid-row.not-handling-row': {
+              bgcolor: '#F3E5F5',
+              '&:hover': {
+                bgcolor: '#E1BEE7',
               },
             },
             // Cell styling
