@@ -38,6 +38,10 @@ jest.mock('aws-sdk', () => ({
 const mockFetch = jest.fn();
 jest.mock('node-fetch', () => mockFetch);
 
+// Zero out page-retry backoff so resilience tests don't sleep for seconds.
+// Must be set before ./index is first required (constants read process.env at load).
+process.env.PAGE_RETRY_BASE_MS = '0';
+
 // Import the module after mocks are set up
 // We need to extract functions for testing - the module doesn't export them
 // So we'll test via the handler and mock appropriately
@@ -2184,6 +2188,49 @@ describe('Daily Sweep Lambda Function', () => {
 
       const clearing = updateParams.find(p => /is_archived = :false/.test(p.UpdateExpression || ''));
       expect(clearing).toBeUndefined();
+    });
+  });
+
+  // Regression coverage for the DAVID ROSEN BAKERY SUPPLIES bug: summons 001015341Y
+  // was silently dropped by the daily sweep because paginated NYC API queries had
+  // no $order (unstable offset paging drops rows), and page failures were swallowed
+  // and reported as "no summonses". These lock in the fix.
+  describe('fetchNYCDataForClients - pagination stability & fetch resilience', () => {
+    const { fetchNYCDataForClients } = require('./index')._testExports;
+    const ctx = { getRemainingTimeInMillis: () => 900000 };
+    // Single name, no AKAs -> exactly one search term -> one query group -> one page.
+    const client = { id: 'c1', name: 'DAVID ROSEN BAKERY SUPPLIES INC', akas: [] };
+    const okResponse = (rows) => ({ ok: true, status: 200, json: async () => rows });
+
+    beforeEach(() => { mockFetch.mockReset(); });
+
+    test('every page request pins $order=:id for deterministic offset pagination', async () => {
+      mockFetch.mockResolvedValue(okResponse([]));
+      await fetchNYCDataForClients([client], ctx);
+      expect(mockFetch).toHaveBeenCalled();
+      for (const call of mockFetch.mock.calls) {
+        expect(decodeURIComponent(String(call[0]))).toContain('$order=:id');
+      }
+    });
+
+    test('a page that fails after all retries marks the group incomplete (not silently dropped)', async () => {
+      mockFetch.mockRejectedValue(new Error('network boom'));
+      const result = await fetchNYCDataForClients([client], ctx);
+      expect(result.totalGroups).toBe(1);
+      expect(result.failedGroups).toBe(1);        // group flagged, so the run is reported degraded
+      expect(result.summonses).toHaveLength(0);
+      // Retried MAX_PAGE_RETRIES times (default 3) + initial attempt = 4 calls
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+    });
+
+    test('a transient 429 is retried and then succeeds (records kept, group not failed)', async () => {
+      const rows = [{ ticket_number: '001015341Y', respondent_last_name: 'DAVID ROSEN BAKERY SUPPLIES IN' }];
+      mockFetch
+        .mockResolvedValueOnce({ ok: false, status: 429, text: async () => 'rate limited' })
+        .mockResolvedValueOnce(okResponse(rows));
+      const result = await fetchNYCDataForClients([client], ctx);
+      expect(result.failedGroups).toBe(0);
+      expect(result.summonses.map(s => s.ticket_number)).toContain('001015341Y');
     });
   });
 });
