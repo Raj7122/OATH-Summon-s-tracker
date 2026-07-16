@@ -14,12 +14,14 @@ dayjs.extend(utc);
 
 export interface AdvancedFilterCriteria {
   statuses: string[];
+  hearingResults: string[];
   dateFrom: Date | null;
   dateTo: Date | null;
 }
 
 export const EMPTY_ADVANCED_FILTERS: AdvancedFilterCriteria = {
   statuses: [],
+  hearingResults: [],
   dateFrom: null,
   dateTo: null,
 };
@@ -27,6 +29,7 @@ export const EMPTY_ADVANCED_FILTERS: AdvancedFilterCriteria = {
 export function isAdvancedFilterActive(criteria: AdvancedFilterCriteria): boolean {
   return (
     criteria.statuses.length > 0 ||
+    criteria.hearingResults.length > 0 ||
     criteria.dateFrom !== null ||
     criteria.dateTo !== null
   );
@@ -64,6 +67,21 @@ export function getStatusOptions(summonses: Summons[]): string[] {
 }
 
 /**
+ * Sorted, deduplicated list of the distinct non-empty `hearing_result` values
+ * present in the loaded data. Unlike statuses there is no canonical list — the
+ * options are purely whatever OATH results currently exist (e.g. DISMISSED,
+ * IN VIOLATION), so the filter only ever offers values that can actually match.
+ */
+export function getHearingResultOptions(summonses: Summons[]): string[] {
+  const set = new Set<string>();
+  for (const s of summonses) {
+    const v = (s.hearing_result || '').trim();
+    if (v) set.add(v);
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+/**
  * Apply the multi-status + hearing date range filter.
  * - Empty `statuses` → status filter inactive.
  * - `dateFrom` / `dateTo` are inclusive; either may be null.
@@ -86,6 +104,13 @@ export function applyAdvancedFilters(
       ? criteria.statuses.map((v) => v.toUpperCase())
       : null;
 
+  // Hearing-result options ARE the distinct data values, so exact (normalized)
+  // equality is predictable — no substring over-matching like the status filter.
+  const hearingResultSet =
+    criteria.hearingResults.length > 0
+      ? new Set(criteria.hearingResults.map((v) => v.trim().toUpperCase()))
+      : null;
+
   const fromMs = criteria.dateFrom
     ? dayjs.utc(dayjs(criteria.dateFrom).format('YYYY-MM-DD')).startOf('day').valueOf()
     : null;
@@ -97,6 +122,13 @@ export function applyAdvancedFilters(
     if (statusNeedles) {
       const hay = (s.status || '').toUpperCase();
       if (!statusNeedles.some((needle) => hay.includes(needle))) {
+        return false;
+      }
+    }
+
+    if (hearingResultSet) {
+      const result = (s.hearing_result || '').trim().toUpperCase();
+      if (!hearingResultSet.has(result)) {
         return false;
       }
     }

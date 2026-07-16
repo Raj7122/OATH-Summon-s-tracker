@@ -795,6 +795,24 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       renderCell: renderStatusCell,
     },
     {
+      field: 'hearing_result',
+      headerName: 'Hearing Result',
+      width: 200,
+      // Mirror the chip styling used in SummonsDetailModal's "Hearing Result" row:
+      // empty → "Pending"; a dismissal result → green; anything else → default chip.
+      renderCell: (params: GridRenderCellParams) => {
+        const result = (params.value || '').trim();
+        if (!result) return 'Pending';
+        return (
+          <Chip
+            label={result}
+            size="small"
+            color={result.toLowerCase().includes('dismiss') ? 'success' : 'default'}
+          />
+        );
+      },
+    },
+    {
       field: 'code_description',
       headerName: 'Violation Type',
       width: 200,
@@ -1041,6 +1059,7 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
           columns: {
             columnVisibilityModel: {
               // Hide secondary columns by default (Progressive Disclosure)
+              hearing_result: false,
               license_plate_ocr: false,
               violation_date: false,
               video_created_date: false,
