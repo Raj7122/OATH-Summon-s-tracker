@@ -64,6 +64,7 @@ import { dataGridPremiumStyles } from '../theme';
 
 // Import shared types
 import { Summons, isNewRecord, isUpdatedRecord, isFreshSummons, getStatusColor } from '../types/summons';
+import { getHearingResultValueOptions } from '../lib/hearingResultOptions';
 
 // localStorage key for persisting column visibility preferences
 const COLUMN_VISIBILITY_KEY = 'oath-simple-table-column-visibility';
@@ -79,6 +80,7 @@ const DEFAULT_HIDDEN_COLUMNS: GridColumnVisibilityModel = {
   code_description: false,
   internal_status: false,
   offense_level: false,
+  hearing_result: false,
 };
 
 /**
@@ -383,6 +385,13 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
   
   // Define the 5 essential columns (Violation Type REMOVED - redundant for Idling-only app)
   // New column order: Status | Client Name | Violation Date | Hearing Date | Action
+  // Distinct hearing-result values (+ "Pending" for blanks) power the native
+  // DataGrid Filters-menu dropdown on the hearing_result column below.
+  const hearingResultOptions = useMemo(
+    () => getHearingResultValueOptions(summonses),
+    [summonses]
+  );
+
   const columns: GridColDef[] = [
     {
       field: 'status',
@@ -434,6 +443,29 @@ const SimpleSummonsTable: React.FC<SimpleSummonsTableProps> = ({
       },
     },
     // Additional columns — hidden by default, togglable via "Manage columns"
+    {
+      field: 'hearing_result',
+      headerName: 'Hearing Result',
+      width: 180,
+      sortable: true,
+      // singleSelect makes the DataGrid's native Filters menu offer a dropdown of
+      // the actual hearing-result values (+ "Pending" for blanks) to filter by.
+      type: 'singleSelect',
+      valueOptions: hearingResultOptions,
+      // Mirror the Dashboard / detail-modal chip: blank → "Pending", a dismissal
+      // result → green, anything else → default chip.
+      renderCell: (params: GridRenderCellParams) => {
+        const result = (params.value || '').trim();
+        if (!result) return 'Pending';
+        return (
+          <Chip
+            label={result}
+            size="small"
+            color={result.toLowerCase().includes('dismiss') ? 'success' : 'default'}
+          />
+        );
+      },
+    },
     {
       field: 'summons_number',
       headerName: 'Summons #',
