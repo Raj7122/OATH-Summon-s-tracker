@@ -778,6 +778,55 @@ describe('InvoiceBuilder Integration', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Clearing a fine persists 0 (removed), never null
+  //
+  // Jacky's remaining bug: she removes a fine by CLEARING the cell. That used to
+  // store null, which buildInvoiceDocInputs refills from the live NYC balance on
+  // the next edit (the null -> live fallback is intentional for never-set lines),
+  // so the fine reappeared. Clearing must now persist the removed-fine sentinel
+  // 0, which wins over the live balance and sticks on reopen. This drives the
+  // same handleAmountDueChange path (build-mode branch -> updateAmountDue(id, 0))
+  // and inspects the join row written on generate.
+  // -------------------------------------------------------------------------
+  it('persists a cleared fine as 0 (removed), not null, so it does not repopulate', async () => {
+    setupCart([cartItem1]); // amount_due starts at 500
+    renderBuilder();
+
+    await waitFor(() => {
+      expect(screen.getByText('SUM-001')).toBeDefined();
+    });
+
+    // Clear the FINE DUE cell (initial value 500).
+    const fineInput = screen.getByDisplayValue('500') as HTMLInputElement;
+    fireEvent.change(fineInput, { target: { value: '' } });
+
+    // A removed fine (0) renders blank, not "0" (`|| ''` in the input value).
+    expect(fineInput.value).toBe('');
+
+    vi.spyOn(window, 'alert').mockImplementation(() => {});
+    fireEvent.click(screen.getByText('Generate PDF'));
+
+    await waitFor(() => {
+      expect(mockGeneratePDF).toHaveBeenCalled();
+    });
+
+    // The join row persisted for this summons carries amount_due 0 — the removed
+    // sentinel — NOT null (which would repopulate) and NOT the original 500.
+    await waitFor(() => {
+      const joinCall = mockGraphql.mock.calls.find(
+        (call: any[]) =>
+          typeof call[0]?.query === 'string' && call[0].query.includes('createInvoiceSummons')
+      );
+      expect(joinCall).toBeDefined();
+      expect(joinCall![0].variables.input.amount_due).toBe(0);
+    });
+
+    // ...and the value handed to the generator is 0, not null/500.
+    const itemsPassedToPDF = mockGeneratePDF.mock.calls[0][0] as InvoiceCartItem[];
+    expect(itemsPassedToPDF[0].amount_due).toBe(0);
+  });
+
+  // -------------------------------------------------------------------------
   // Recipient never carries over the previous client / never goes blank
   //
   // Jacky's bug: invoicing JLSHM, then building an invoice for George

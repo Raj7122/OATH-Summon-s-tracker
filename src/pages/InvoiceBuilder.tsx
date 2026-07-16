@@ -1358,12 +1358,17 @@ const InvoiceBuilder = () => {
 
   const handleAmountDueChange = (summonsId: string, value: string) => {
     if (value === '' || value === null) {
+      // Clearing the fine cell means "no charge" — persist the removed-fine
+      // sentinel 0, NOT null. A saved null falls back to the live NYC balance in
+      // buildInvoiceDocInputs (that fallback is intentional for never-set lines),
+      // so a null here would silently repopulate the fine on the next edit. 0
+      // wins over the live balance and sticks. (Displayed blank via `|| ''`.)
       if (isEditMode) {
         setEditItems((prev) =>
-          prev.map((item) => (item.id === summonsId ? { ...item, amount_due: null } : item)),
+          prev.map((item) => (item.id === summonsId ? { ...item, amount_due: 0 } : item)),
         );
       } else {
-        updateAmountDue(summonsId, null);
+        updateAmountDue(summonsId, 0);
       }
       return;
     }
@@ -1701,7 +1706,9 @@ const InvoiceBuilder = () => {
                           <TableCell align="right">
                             <TextField
                               type="number"
-                              value={item.amount_due ?? ''}
+                              // `|| ''` (not `?? ''`) so a removed fine (0) shows
+                              // blank rather than "0" — reads as "no charge".
+                              value={item.amount_due || ''}
                               onChange={(e) => handleAmountDueChange(item.id, e.target.value)}
                               size="small"
                               inputProps={{ min: 0, step: 50, style: { textAlign: 'right' } }}
