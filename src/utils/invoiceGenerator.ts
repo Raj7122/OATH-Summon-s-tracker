@@ -141,7 +141,10 @@ export const generatePDF = async (
   items: InvoiceCartItem[],
   recipient: InvoiceRecipient,
   options: InvoiceOptions,
-  extras: InvoiceExtraLineItem[] = []
+  extras: InvoiceExtraLineItem[] = [],
+  // When true (default) the file is also downloaded to the user's computer. Callers that
+  // only need the blob (e.g. the Tracker regenerating a format to open in a tab) pass false.
+  autoSave = true
 ): Promise<{ blob: Blob; filename: string }> => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -428,7 +431,7 @@ export const generatePDF = async (
   // Save the PDF
   const filename = `Invoice-${recipient.companyName || 'Client'}-${dayjs().format('YYYY-MM-DD')}.pdf`.replace(/[^a-zA-Z0-9-_.]/g, '_');
   const blob = doc.output('blob');
-  doc.save(filename);
+  if (autoSave) doc.save(filename);
   return { blob, filename };
 };
 
@@ -439,7 +442,9 @@ export const generateDOCX = async (
   items: InvoiceCartItem[],
   recipient: InvoiceRecipient,
   options: InvoiceOptions,
-  extras: InvoiceExtraLineItem[] = []
+  extras: InvoiceExtraLineItem[] = [],
+  // When true (default) the file is also downloaded. Pass false to only get the blob.
+  autoSave = true
 ): Promise<{ blob: Blob; filename: string }> => {
   const totalLegalFees =
     items.reduce((sum, item) => sum + item.legal_fee, 0) + sumExtrasLegalFees(extras);
@@ -730,7 +735,7 @@ export const generateDOCX = async (
   // Generate and save the file
   const blob = await Packer.toBlob(doc);
   const filename = `Invoice-${recipient.companyName || 'Client'}-${dayjs().format('YYYY-MM-DD')}.docx`.replace(/[^a-zA-Z0-9-_.]/g, '_');
-  saveAs(blob, filename);
+  if (autoSave) saveAs(blob, filename);
   return { blob, filename };
 };
 
@@ -746,7 +751,9 @@ export const generateXLSX = async (
   items: InvoiceCartItem[],
   recipient: InvoiceRecipient,
   options: InvoiceOptions,
-  extras: InvoiceExtraLineItem[] = []
+  extras: InvoiceExtraLineItem[] = [],
+  // When true (default) the file is also downloaded. Pass false to only get the blob.
+  autoSave = true
 ): Promise<{ blob: Blob; filename: string }> => {
   const totalLegalFees =
     items.reduce((sum, item) => sum + item.legal_fee, 0) + sumExtrasLegalFees(extras);
@@ -990,7 +997,7 @@ export const generateXLSX = async (
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: XLSX_MIME });
   const filename = `Invoice-${recipient.companyName || 'Client'}-${dayjs().format('YYYY-MM-DD')}.xlsx`.replace(/[^a-zA-Z0-9-_.]/g, '_');
-  saveAs(blob, filename);
+  if (autoSave) saveAs(blob, filename);
   return { blob, filename };
 };
 

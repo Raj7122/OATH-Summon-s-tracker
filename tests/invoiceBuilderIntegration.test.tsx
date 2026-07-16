@@ -729,8 +729,10 @@ describe('InvoiceBuilder Integration', () => {
     });
   }
 
-  it('refreshes the line-item fine to the live summons value when revising', async () => {
-    // Snapshot was $500; the fine has since been paid down to $200 on the website.
+  it('keeps the fine SAVED on the invoice and does not repopulate it from the live summons', async () => {
+    // Jacky's bug: she had adjusted this fine to $500 on the invoice; the live
+    // NYC balance later moved to $200. Reopening to edit must NOT overwrite her
+    // saved $500 — the value she deliberately set has to stick.
     wireEditModeMocks(200);
 
     render(
@@ -744,15 +746,15 @@ describe('InvoiceBuilder Integration', () => {
     // Wait for edit-mode hydration.
     await screen.findByRole('button', { name: /Add Summonses/i });
 
-    // The line-item fine input shows the live 200, not the stale snapshot 500...
+    // The line-item fine input shows the saved 500, NOT the live 200...
     await waitFor(() => {
-      expect(screen.getByDisplayValue('200')).toBeDefined();
+      expect(screen.getByDisplayValue('500')).toBeDefined();
     });
-    expect(screen.queryByDisplayValue('500')).toBeNull();
+    expect(screen.queryByDisplayValue('200')).toBeNull();
 
-    // ...and the recomputed Total Fines Due reflects it.
-    expect(screen.getByText('$200.00')).toBeDefined();
-    expect(screen.queryByText('$500.00')).toBeNull();
+    // ...and the Total Fines Due reflects the saved value, not the live balance.
+    expect(screen.getByText('$500.00')).toBeDefined();
+    expect(screen.queryByText('$200.00')).toBeNull();
   });
 
   it('keeps the stored snapshot fine when the live summons is missing', async () => {

@@ -88,19 +88,12 @@ import { computeAlertDeadline, generateInvoiceNumber } from '../utils/invoiceTra
 import { appendInvoiceAuditEntries, appendInvoiceModifiedEntry, appendInvoiceRemovedEntry } from '../utils/invoiceAuditLog';
 import { compareByHearingDateAsc } from '../utils/invoiceOrdering';
 import { deriveRecipient } from '../utils/deriveRecipient';
+import { formatFromKey } from '../utils/invoiceFormat';
+import { buildInvoiceDocInputs } from '../utils/invoiceDocInputs';
 import { v4 as uuidv4 } from 'uuid';
 import { Invoice as TrackerInvoice } from '../types/invoiceTracker';
 
 const apiClient = generateClient();
-
-// Derive the stored invoice format from its S3 key's file extension. Used to
-// default the edit-mode Format dropdown to whatever the invoice was saved as.
-const formatFromKey = (key?: string | null): 'pdf' | 'docx' | 'xlsx' => {
-  const lower = (key ?? '').toLowerCase();
-  if (lower.endsWith('.docx')) return 'docx';
-  if (lower.endsWith('.xlsx')) return 'xlsx';
-  return 'pdf';
-};
 
 interface Client {
   id: string;
@@ -540,70 +533,24 @@ const InvoiceBuilder = () => {
         });
         setAlertDeadline(invoice.alert_deadline || null);
 
-        // Fetch full Summons details for each line item so the table and
-        // preview can show violation_date / status / etc. Fall back to sparse
-        // data if the summons was archived or deleted.
+        // Rebuild the working line items + extras via the shared helper so the
+        // fine-precedence rule — the fine SAVED on the invoice wins over the live
+        // NYC balance, so manually-removed fines don't reappear — stays identical
+        // to the Tracker's on-demand regeneration path. The helper fetches each
+        // line's live summons for the display-only columns and degrades to sparse
+        // data if a summons was archived or deleted.
         const joinItems = invoice.items?.items || [];
-        const summonsResults = await Promise.all(
-          joinItems.map(async (j) => {
-            try {
-              const res: any = await apiClient.graphql({ query: getSummons, variables: { id: j.summonsID } });
-              return res?.data?.getSummons ?? null;
-            } catch (err) {
-              console.error('Failed to fetch summons for edit hydration:', err);
-              return null;
-            }
-          }),
+        const { items: hydratedItems, extras: hydratedExtras } = await buildInvoiceDocInputs(
+          invoice,
+          apiClient,
         );
-
-        const hydrated: InvoiceCartItem[] = joinItems.map((j, idx) => {
-          const s = summonsResults[idx];
-          return {
-            id: j.summonsID,
-            summons_number: j.summons_number,
-            respondent_name: s?.respondent_name || '',
-            clientID: s?.clientID || invoice.clientID || '',
-            violation_date: s?.violation_date || null,
-            hearing_date: s?.hearing_date || null,
-            hearing_result: s?.hearing_result || null,
-            status: s?.status || '',
-            // Auto-refresh the fine from the live summons on revise: the daily sweep keeps
-            // Summons.amount_due current with the NYC OATH balance_due, so an invoice opened
-            // for revision should reflect today's fine, not the snapshot frozen at creation.
-            // Fall back to the stored snapshot only when the summons is gone or has no fine.
-            // (`??` not `||` so a live amount_due of 0 — fine paid in full — still wins.)
-            amount_due: s?.amount_due ?? j.amount_due ?? null,
-            legal_fee: j.legal_fee,
-            addedAt: invoice.invoice_date,
-            highlighted: !!j.highlighted,
-          };
-        });
 
         if (cancelled) return;
         setLoadedInvoice(invoice);
         // Default the Format dropdown to the invoice's current stored format.
         setSaveFormat(formatFromKey(invoice.pdf_s3_key));
-        setEditItems([...hydrated].sort(compareByHearingDateAsc));
-
-        // Hydrate manual extra-line rows from the Invoice record. Stored as
-        // AWSJSON (serialized array) — defensively parse to tolerate null,
-        // legacy records without the field, or malformed payloads.
-        const rawExtras = invoice.extra_line_items;
-        if (rawExtras) {
-          try {
-            const parsed = typeof rawExtras === 'string' ? JSON.parse(rawExtras) : rawExtras;
-            if (Array.isArray(parsed)) {
-              setEditExtras(parsed as InvoiceExtraLineItem[]);
-            } else {
-              setEditExtras([]);
-            }
-          } catch (parseErr) {
-            console.error('Failed to parse extra_line_items:', parseErr);
-            setEditExtras([]);
-          }
-        } else {
-          setEditExtras([]);
-        }
+        setEditItems(hydratedItems);
+        setEditExtras(hydratedExtras);
         setOriginalJoinRows(
           joinItems.map((j) => ({
             id: j.id,

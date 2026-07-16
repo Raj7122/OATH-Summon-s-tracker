@@ -39,6 +39,9 @@ import CloseIcon from '@mui/icons-material/Close';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import DescriptionIcon from '@mui/icons-material/Description';
+import GridOnIcon from '@mui/icons-material/GridOn';
+import { formatFromKey, formatLabel } from '../utils/invoiceFormat';
 import { generateClient } from 'aws-amplify/api';
 import { getUrl } from 'aws-amplify/storage';
 import dayjs from 'dayjs';
@@ -150,10 +153,18 @@ const InvoiceRow = ({ invoice, onOpen, onViewPdfError }: InvoiceRowProps) => {
         <TableCell align="right">{formatCurrency(invoice.total_fines_due)}</TableCell>
         <TableCell align="center">
           {invoice.pdf_s3_key ? (
-            <Tooltip title="View saved invoice file">
+            <Tooltip title={`View saved invoice file (${formatLabel(formatFromKey(invoice.pdf_s3_key))})`}>
               <span>
                 <IconButton size="small" color="primary" onClick={handleViewPdf} disabled={loadingPdf}>
-                  {loadingPdf ? <CircularProgress size={16} /> : <PictureAsPdfIcon fontSize="small" />}
+                  {loadingPdf ? (
+                    <CircularProgress size={16} />
+                  ) : formatFromKey(invoice.pdf_s3_key) === 'docx' ? (
+                    <DescriptionIcon fontSize="small" />
+                  ) : formatFromKey(invoice.pdf_s3_key) === 'xlsx' ? (
+                    <GridOnIcon fontSize="small" />
+                  ) : (
+                    <PictureAsPdfIcon fontSize="small" />
+                  )}
                 </IconButton>
               </span>
             </Tooltip>

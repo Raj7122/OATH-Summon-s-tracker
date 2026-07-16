@@ -275,4 +275,47 @@ describe('InvoiceDetailModal', () => {
     render(<InvoiceDetailModal {...defaultProps} invoice={paidInvoice} />);
     expect(screen.getByText('PAID')).toBeDefined();
   });
+
+  // -------------------------------------------------------------------------
+  // Format-aware "Get invoice file" menu (fixes "the only option is a PDF")
+  // -------------------------------------------------------------------------
+  describe('get invoice file menu', () => {
+    const openMenu = () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Get invoice file' }));
+    };
+
+    it('offers PDF, Word, and Excel regeneration options', () => {
+      render(<InvoiceDetailModal {...defaultProps} />);
+      openMenu();
+      expect(screen.getByText('Open as PDF')).toBeDefined();
+      expect(screen.getByText('Download as Word')).toBeDefined();
+      expect(screen.getByText('Download as Excel')).toBeDefined();
+    });
+
+    it('labels the saved-file option with the ACTUAL stored format (Word), not always PDF', () => {
+      const wordInvoice = makeInvoice({
+        pdf_s3_key: 'public/invoices/inv-1/Invoice-Test-2026-02-01.docx',
+      });
+      render(<InvoiceDetailModal {...defaultProps} invoice={wordInvoice} />);
+      openMenu();
+      expect(screen.getByText('Open saved file (Word)')).toBeDefined();
+    });
+
+    it('labels the saved-file option as PDF when the stored file is a PDF', () => {
+      const pdfInvoice = makeInvoice({
+        pdf_s3_key: 'public/invoices/inv-1/Invoice-Test-2026-02-01.pdf',
+      });
+      render(<InvoiceDetailModal {...defaultProps} invoice={pdfInvoice} />);
+      openMenu();
+      expect(screen.getByText('Open saved file (PDF)')).toBeDefined();
+    });
+
+    it('omits the saved-file option when no file was ever stored, but still allows regeneration', () => {
+      const noFile = makeInvoice({ pdf_s3_key: null });
+      render(<InvoiceDetailModal {...defaultProps} invoice={noFile} />);
+      openMenu();
+      expect(screen.queryByText(/Open saved file/)).toBeNull();
+      expect(screen.getByText('Download as Word')).toBeDefined();
+    });
+  });
 });

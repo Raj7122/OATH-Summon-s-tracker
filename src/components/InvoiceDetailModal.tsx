@@ -27,6 +27,10 @@ import {
   Paper,
   IconButton,
   Tooltip,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -35,6 +39,10 @@ import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditIcon from '@mui/icons-material/Edit';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import DescriptionIcon from '@mui/icons-material/Description';
+import GridOnIcon from '@mui/icons-material/GridOn';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import MarkEmailReadIcon from '@mui/icons-material/MarkEmailRead';
 import { useNavigate } from 'react-router-dom';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -45,6 +53,9 @@ import { Invoice, SentToClientAttribution } from '../types/invoiceTracker';
 import { getInvoiceHorizonColor, parseSentToClient } from '../utils/invoiceTrackerHelpers';
 import { horizonColors } from '../theme';
 import { useAuth } from '../contexts/AuthContext';
+import { formatFromKey, formatLabel, InvoiceFormat } from '../utils/invoiceFormat';
+import { buildInvoiceDocInputs } from '../utils/invoiceDocInputs';
+import { generatePDF, generateDOCX, generateXLSX } from '../utils/invoiceGenerator';
 
 dayjs.extend(utc);
 
@@ -78,6 +89,20 @@ const formatDateTime = (dateStr: string | null | undefined): string => {
   return d.isValid() ? d.format('M/DD/YY h:mm A') : '—';
 };
 
+// Icon that matches an invoice file format, so the UI reflects the ACTUAL
+// stored/target type (Word / Excel / PDF) instead of always showing PDF.
+const formatIcon = (format: InvoiceFormat) => {
+  switch (format) {
+    case 'docx':
+      return <DescriptionIcon fontSize="small" />;
+    case 'xlsx':
+      return <GridOnIcon fontSize="small" />;
+    case 'pdf':
+    default:
+      return <PictureAsPdfIcon fontSize="small" />;
+  }
+};
+
 const InvoiceDetailModal = ({
   open,
   invoice,
@@ -97,6 +122,10 @@ const InvoiceDetailModal = ({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [loadingPdf, setLoadingPdf] = useState(false);
+  // "Get invoice file" menu (view original / regenerate in another format).
+  const [fileMenuAnchor, setFileMenuAnchor] = useState<null | HTMLElement>(null);
+  // Which format is currently being regenerated on demand (null = idle).
+  const [regenerating, setRegenerating] = useState<InvoiceFormat | null>(null);
 
   // Navigate to the InvoiceBuilder page in edit mode. Closing the modal first
   // prevents a flash of a stale invoice detail on return.
@@ -137,6 +166,39 @@ const InvoiceDetailModal = ({
       console.error('Error getting invoice file URL:', error);
     } finally {
       setLoadingPdf(false);
+    }
+  };
+
+  // Regenerate the invoice in an arbitrary format from its saved data, so the
+  // Tracker isn't locked to whatever format it was first saved as. PDF opens in
+  // a new tab (blank tab opened synchronously to survive popup blockers, since
+  // the object URL is only ready after an await); Word/Excel download via the
+  // generator's own saveAs. Fees/fines come out exactly as saved (see
+  // buildInvoiceDocInputs); display-only columns reflect the latest case data.
+  const handleGetAs = async (format: InvoiceFormat) => {
+    if (!invoice) return;
+    setFileMenuAnchor(null);
+    const pdfTab = format === 'pdf' ? window.open('', '_blank') : null;
+    setRegenerating(format);
+    try {
+      const { items, recipient, options, extras } = await buildInvoiceDocInputs(invoice);
+      if (format === 'docx') {
+        await generateDOCX(items, recipient, options, extras, true);
+      } else if (format === 'xlsx') {
+        await generateXLSX(items, recipient, options, extras, true);
+      } else {
+        const { blob } = await generatePDF(items, recipient, options, extras, false);
+        const url = URL.createObjectURL(blob);
+        if (pdfTab) pdfTab.location.href = url;
+        else window.open(url, '_blank');
+        // Revoke after the tab has had time to load the document.
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      }
+    } catch (error) {
+      console.error(`Error regenerating invoice as ${format}:`, error);
+      if (pdfTab) pdfTab.close();
+    } finally {
+      setRegenerating(null);
     }
   };
 
@@ -195,18 +257,48 @@ const InvoiceDetailModal = ({
           <Chip size="small" {...statusChipProps} sx={{ ...statusChipProps.sx, fontWeight: 600 }} />
         </Box>
         <Box sx={{ display: 'flex', gap: 0.5 }}>
-          {invoice.pdf_s3_key && (
-            <Tooltip title="View saved invoice file">
-              <IconButton
-                onClick={handleViewInvoice}
-                size="small"
-                color="primary"
-                disabled={loadingPdf}
+          <Tooltip title="Get invoice file (view or download as PDF, Word, or Excel)">
+            <IconButton
+              aria-label="Get invoice file"
+              onClick={(e) => setFileMenuAnchor(e.currentTarget)}
+              size="small"
+              color="primary"
+              disabled={loadingPdf || regenerating !== null}
+            >
+              {loadingPdf || regenerating !== null ? <CircularProgress size={18} /> : <FileDownloadIcon />}
+            </IconButton>
+          </Tooltip>
+          <Menu
+            anchorEl={fileMenuAnchor}
+            open={Boolean(fileMenuAnchor)}
+            onClose={() => setFileMenuAnchor(null)}
+          >
+            {invoice.pdf_s3_key && (
+              <MenuItem
+                onClick={() => {
+                  setFileMenuAnchor(null);
+                  handleViewInvoice();
+                }}
               >
-                {loadingPdf ? <CircularProgress size={18} /> : <PictureAsPdfIcon />}
-              </IconButton>
-            </Tooltip>
-          )}
+                <ListItemIcon>{formatIcon(formatFromKey(invoice.pdf_s3_key))}</ListItemIcon>
+                <ListItemText>
+                  Open saved file ({formatLabel(formatFromKey(invoice.pdf_s3_key))})
+                </ListItemText>
+              </MenuItem>
+            )}
+            <MenuItem onClick={() => handleGetAs('pdf')}>
+              <ListItemIcon><OpenInNewIcon fontSize="small" /></ListItemIcon>
+              <ListItemText>Open as PDF</ListItemText>
+            </MenuItem>
+            <MenuItem onClick={() => handleGetAs('docx')}>
+              <ListItemIcon><DescriptionIcon fontSize="small" /></ListItemIcon>
+              <ListItemText>Download as Word</ListItemText>
+            </MenuItem>
+            <MenuItem onClick={() => handleGetAs('xlsx')}>
+              <ListItemIcon><GridOnIcon fontSize="small" /></ListItemIcon>
+              <ListItemText>Download as Excel</ListItemText>
+            </MenuItem>
+          </Menu>
           <Tooltip title="Edit invoice (recipient, line items, fees)">
             <IconButton onClick={handleEditInvoice} size="small" color="primary">
               <EditIcon />
