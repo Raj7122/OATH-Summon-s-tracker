@@ -36,6 +36,7 @@ import {
   GridPaginationModel,
   GridRowParams,
   GridSortModel,
+  GridToolbar,
 } from '@mui/x-data-grid';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
@@ -58,6 +59,7 @@ import { getClientWithPlateFilter, invoicesByClientBasic, invoiceSummonsForInvoi
 import { updateSummons } from '../graphql/mutations';
 import { Client, Summons, isNewRecord, isUpdatedRecord } from '../types/summons';
 import { applyClientPlateFilter } from '../lib/plateFilter';
+import { getHearingResultValueOptions } from '../lib/hearingResultOptions';
 import SummonsDetailModal from '../components/SummonsDetailModal';
 import ExportConfigurationModal from '../components/ExportConfigurationModal';
 import ClientInvoicesDialog from '../components/ClientInvoicesDialog';
@@ -455,6 +457,14 @@ const ClientDetail: React.FC = () => {
     [activeEraSummonses, advancedFilters]
   );
 
+  // Distinct hearing-result values (+ "Pending" for blanks) for the native
+  // DataGrid Filters-menu dropdown on the hearing_result column. Built from the
+  // full client history so every value stays selectable regardless of filtering.
+  const hearingResultOptions = useMemo(
+    () => getHearingResultValueOptions(summonses),
+    [summonses]
+  );
+
   /**
    * Calculate header stats
    *
@@ -668,6 +678,29 @@ const ClientDetail: React.FC = () => {
               sx={{ height: 22, fontSize: '0.7rem', fontWeight: 600 }}
             />
           </Box>
+        );
+      },
+    },
+    {
+      field: 'hearing_result',
+      headerName: 'Hearing Result',
+      width: 180,
+      // singleSelect makes the DataGrid's native Filters menu offer a dropdown of
+      // the actual hearing-result values (+ "Pending" for blanks) to filter by.
+      type: 'singleSelect',
+      valueOptions: hearingResultOptions,
+      // Mirror the Dashboard / detail-modal chip: blank → "Pending", a dismissal
+      // result → green, anything else → default chip.
+      renderCell: (params) => {
+        const result = (params.value || '').trim();
+        if (!result) return 'Pending';
+        return (
+          <Chip
+            label={result}
+            size="small"
+            color={result.toLowerCase().includes('dismiss') ? 'success' : 'default'}
+            sx={{ height: 22, fontSize: '0.7rem', fontWeight: 600 }}
+          />
         );
       },
     },
@@ -890,7 +923,7 @@ const ClientDetail: React.FC = () => {
         );
       },
     },
-  ], [isInCart, addToCart, removeFromCart, summonsPaymentMap]);
+  ], [isInCart, addToCart, removeFromCart, summonsPaymentMap, hearingResultOptions]);
 
   /**
    * Handle row click to open detail modal
@@ -1343,10 +1376,19 @@ const ClientDetail: React.FC = () => {
               columnVisibilityModel: {
                 evidence_reviewed: true,
                 is_invoiced: true,
+                // Opt-in column; still filterable from the Filters menu while hidden.
+                hearing_result: false,
               },
             },
           }}
+          slots={{ toolbar: GridToolbar }}
           slotProps={{
+            toolbar: {
+              showQuickFilter: true,
+              csvOptions: {
+                fileName: `client-summonses-${new Date().toISOString().split('T')[0]}`,
+              },
+            },
             pagination: {
               showFirstButton: true,
               showLastButton: true,

@@ -23,7 +23,7 @@
  * @see TRD.md FR-04, FR-05, FR-06, FR-07, FR-08 for specifications
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import { generateClient } from 'aws-amplify/api';
@@ -71,6 +71,7 @@ import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import { useInvoice } from '../contexts/InvoiceContext';
 import { SummonsForInvoice } from '../types/invoice';
+import { getHearingResultValueOptions } from '../lib/hearingResultOptions';
 
 const client = generateClient();
 
@@ -754,6 +755,13 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
   };
 
   // Define columns - "Actionable 7" visible by default (UX Improvement #3)
+  // Distinct hearing-result values (+ "Pending" for blanks) power the native
+  // DataGrid Filters-menu dropdown on the hearing_result column below.
+  const hearingResultOptions = useMemo(
+    () => getHearingResultValueOptions(summonses),
+    [summonses]
+  );
+
   const columns: GridColDef[] = [
     // Invoice Cart column - first for easy access
     {
@@ -798,6 +806,10 @@ const SummonsTable: React.FC<SummonsTableProps> = ({ summonses, onUpdate }) => {
       field: 'hearing_result',
       headerName: 'Hearing Result',
       width: 200,
+      // singleSelect makes the DataGrid's native Filters menu offer a dropdown of
+      // the actual hearing-result values (+ "Pending" for blanks) to filter by.
+      type: 'singleSelect',
+      valueOptions: hearingResultOptions,
       // Mirror the chip styling used in SummonsDetailModal's "Hearing Result" row:
       // empty → "Pending"; a dismissal result → green; anything else → default chip.
       renderCell: (params: GridRenderCellParams) => {

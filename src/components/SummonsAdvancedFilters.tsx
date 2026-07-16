@@ -34,7 +34,6 @@ import {
   AdvancedFilterCriteria,
   EMPTY_ADVANCED_FILTERS,
   getStatusOptions,
-  getHearingResultOptions,
   isAdvancedFilterActive,
 } from '../lib/advancedFilter';
 
@@ -56,10 +55,6 @@ const SummonsAdvancedFilters: React.FC<SummonsAdvancedFiltersProps> = ({
   filteredCount,
 }) => {
   const statusOptions = useMemo(() => getStatusOptions(summonses), [summonses]);
-  const hearingResultOptions = useMemo(
-    () => getHearingResultOptions(summonses),
-    [summonses]
-  );
   const active = isAdvancedFilterActive(value);
 
   return (
@@ -109,33 +104,6 @@ const SummonsAdvancedFilters: React.FC<SummonsAdvancedFiltersProps> = ({
               {...params}
               label="Status"
               placeholder={value.statuses.length === 0 ? 'Any status' : ''}
-            />
-          )}
-        />
-
-        <Autocomplete
-          multiple
-          size="small"
-          options={hearingResultOptions}
-          value={value.hearingResults}
-          onChange={(_, next) => onChange({ ...value, hearingResults: next })}
-          sx={{ flex: 2, minWidth: 260 }}
-          renderTags={(selected, getTagProps) =>
-            selected.map((option, index) => (
-              <Chip
-                {...getTagProps({ index })}
-                key={option}
-                label={option}
-                size="small"
-                sx={{ fontWeight: 600 }}
-              />
-            ))
-          }
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Hearing Result"
-              placeholder={value.hearingResults.length === 0 ? 'Any result' : ''}
             />
           )}
         />
