@@ -1784,10 +1784,95 @@ describe('Daily Sweep Lambda Function', () => {
       expect(buildSearchTerm('CERCONE')).toBe('CERCONE'); // bare-lastName pattern must stay fetchable
       expect(buildSearchTerm('ACME')).toBe('ACME');       // 4 chars — historical floor preserved
     });
-    test('drops too-short stubs (<= 3 chars after suffix strip)', () => {
-      expect(buildSearchTerm('ABC INC')).toBeNull();   // "ABC" 3 chars
+    test('keeps 3-char acronyms (needed to reach bare-acronym respondents)', () => {
+      expect(buildSearchTerm('ABC INC')).toBe('ABC');
+      expect(buildSearchTerm('IFL')).toBe('IFL');
+      expect(buildSearchTerm('E.W.F')).toBe('EWF'); // periods stripped
+    });
+    test('drops too-short stubs (<= 2 chars after suffix strip)', () => {
       expect(buildSearchTerm('Co LLC')).toBeNull();    // "CO" 2 chars
+      expect(buildSearchTerm('NY')).toBeNull();        // 2 chars
       expect(buildSearchTerm('')).toBeNull();
+    });
+  });
+
+  // Regression: summons 000847716R (client IFL) never appeared in the Tracker.
+  // The OATH respondent_last_name is the bare acronym "IFL", but MIN_TERM_CHARS
+  // was 4, so the term "IFL" was dropped before the query was ever built. The
+  // client-side matcher was always correct — only the fetch stage was broken.
+  describe('bare-acronym respondents are fetchable (Real Exports) - 000847716R', () => {
+    const { buildSearchTermVariants, buildClientNameMap, matchRespondentToClient } =
+      require('./index')._testExports;
+
+    // Real prod records at the time of the bug.
+    const IFL = {
+      id: 'ifl-1',
+      name: 'IFL',
+      akas: [
+        'IFL ART SERVICES',
+        'IFL ART SERVICES LTD',
+        'INTERNATIONAL FREIGHT LOGISTICS ART SERVICES LTD',
+        'International Freight',
+        'IFL',
+      ],
+    };
+    const EWF = {
+      id: 'ewf-1',
+      name: 'E.W.F',
+      akas: ['E W F', 'E. W. F.', 'EXQUISITE WOOD FLOORS'],
+    };
+
+    // Collect every term the sweep would send for a client (mirrors
+    // fetchNYCDataForClients' term-building).
+    const termsFor = (client) => {
+      const terms = new Set();
+      buildSearchTermVariants(client.name).forEach((t) => terms.add(t));
+      (client.akas || []).forEach((aka) =>
+        buildSearchTermVariants(aka).forEach((t) => terms.add(t))
+      );
+      return [...terms];
+    };
+
+    // buildNameClause is an ANCHORED prefix LIKE 'TERM%', so a term matches the
+    // API row only when it is a prefix of respondent_last_name.
+    const anchors = (terms, apiValue) =>
+      terms.some((t) => apiValue.toUpperCase().startsWith(t));
+
+    test('emits the 3-char term that anchors respondent "IFL"', () => {
+      expect(termsFor(IFL)).toContain('IFL');
+      expect(anchors(termsFor(IFL), 'IFL')).toBe(true);
+    });
+
+    test('longer AKAs cannot anchor the shorter API value (no data-only fix exists)', () => {
+      // Every AKA except the bare acronym overshoots "IFL", which is why adding
+      // more AKAs could never surface this summons.
+      const longAkas = ['IFL ART SERVICES', 'INTERNATIONAL FREIGHT']
+        .flatMap(buildSearchTermVariants);
+      expect(anchors(longAkas, 'IFL')).toBe(false);
+    });
+
+    test('still anchors and matches the longer IFL respondents', () => {
+      const map = buildClientNameMap([IFL]);
+      expect(anchors(termsFor(IFL), 'IFL ART SERVICES LIMITED')).toBe(true);
+      expect(matchRespondentToClient('', 'IFL ART SERVICES LIMITED', map).id).toBe('ifl-1');
+    });
+
+    test('matches respondent "IFL" client-side', () => {
+      const map = buildClientNameMap([IFL]);
+      expect(matchRespondentToClient('', 'IFL', map).id).toBe('ifl-1');
+    });
+
+    test('the widened fetch introduces no false positive', () => {
+      const map = buildClientNameMap([IFL]);
+      // "IFL%" over-fetches this real unrelated respondent; isStrongPrefixMatch
+      // rejects it (single-token prefix must be >= MIN_SINGLE_TOKEN_LEN chars).
+      expect(matchRespondentToClient('', 'IFLOODED RESTORATION', map)).toBeNull();
+    });
+
+    test('same fix covers client E.W.F / respondent "EWF" (000972148K)', () => {
+      const map = buildClientNameMap([EWF]);
+      expect(anchors(termsFor(EWF), 'EWF')).toBe(true);
+      expect(matchRespondentToClient('', 'EWF', map).id).toBe('ewf-1');
     });
   });
 

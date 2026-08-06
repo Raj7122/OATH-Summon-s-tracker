@@ -1632,14 +1632,27 @@ function buildClientNameMap(clients) {
   return nameMap;
 }
 
-// Minimum length for an API search term (suffix-stripped). The NYC API matches
-// with a substring LIKE '%TERM%', so a very short term pulls in too much.
+// Minimum length for an API search term (suffix-stripped). This floor was
+// originally 4 because the query used a substring LIKE '%TERM%', where a very
+// short term pulls in too much. That rationale is obsolete: buildNameClause now
+// emits an ANCHORED prefix LIKE 'TERM%', which is far more selective.
+//
+// The floor MUST stay at 3, because a term shorter than the API value is the
+// only way to reach a respondent whose registered name is a bare acronym.
+// Anchored matching requires the term to be a PREFIX of respondent_last_name,
+// so a longer AKA can never match a shorter API value — e.g. client IFL, whose
+// OATH respondent_last_name is literally "IFL": the AKAs "IFL ART SERVICES" and
+// "INTERNATIONAL FREIGHT" both overshoot it, so dropping the 3-char "IFL" term
+// made summons 000847716R permanently unfetchable and NO AKA edit could fix it.
+// Same for client E.W.F -> "EWF" (000972148K/000972149M).
+//
 // NOTE: This guard CANNOT cleanly stop a 2-token term like "ALL SEASON" without
 // also dropping legitimate two-word client names — the token-prefix matcher
-// (isStrongPrefixMatch) is the authoritative filter for the ALL SEASON bug.
-// This stays at the historical >3-char floor so it never drops a term that was
-// previously fetched (e.g. the bare "CERCONE" pattern from summons 000726080J).
-const MIN_TERM_CHARS = 4;
+// (isStrongPrefixMatch) is the authoritative filter for the ALL SEASON bug, and
+// it also rejects the extra over-fetch a 3-char term brings in (e.g. term "IFL"
+// pulls "IFLOODED RESTORATION", which fails the single-token >= 7 char rule).
+// 1-2 char stubs ("CO", "NY") stay blocked as too generic to query safely.
+const MIN_TERM_CHARS = 3;
 
 /**
  * Build a NYC API search term from a client name/AKA, or null if the name is
