@@ -724,6 +724,9 @@ const ClientDetail: React.FC = () => {
       field: 'hearing_date',
       headerName: 'Hearing',
       width: 120,
+      // valueFormatter drives CSV/Excel export (mirrors violation_date so the
+      // exported Hearing Date is a real, Excel-recognized date, not a raw ISO string)
+      valueFormatter: (params) => (params.value ? dayjs.utc(params.value).format('MM/DD/YY') : '—'),
       renderCell: (params) => {
         if (!params.value) return <Typography variant="body2" color="text.disabled">—</Typography>;
         const hearingDateUtc = dayjs.utc(params.value);
