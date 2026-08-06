@@ -21,7 +21,7 @@ interface InvoiceTrackerContextType {
   loading: boolean;
   error: string | null;
   fetchInvoices: () => Promise<void>;
-  markAsPaid: (invoiceId: string, paymentDate: string) => Promise<void>;
+  markAsPaid: (invoiceId: string, paymentDate: string, amountPaid: number) => Promise<void>;
   markAsUnpaid: (invoiceId: string) => Promise<void>;
   updateAlertDeadline: (invoiceId: string, newDeadline: string) => Promise<void>;
   updateNotes: (invoiceId: string, notes: string) => Promise<void>;
@@ -92,8 +92,10 @@ export const InvoiceTrackerProvider: React.FC<{ children: React.ReactNode }> = (
     }
   }, []);
 
-  // Mark an invoice as paid
-  const markAsPaid = useCallback(async (invoiceId: string, paymentDate: string) => {
+  // Mark an invoice as paid. amountPaid is the money the firm actually received —
+  // callers default it to the invoice's total_legal_fees, since fines are paid by
+  // the client directly to the court and never reach the firm.
+  const markAsPaid = useCallback(async (invoiceId: string, paymentDate: string, amountPaid: number) => {
     try {
       await client.graphql({
         query: updateInvoiceRecord,
@@ -102,6 +104,7 @@ export const InvoiceTrackerProvider: React.FC<{ children: React.ReactNode }> = (
             id: invoiceId,
             payment_status: 'paid',
             payment_date: paymentDate,
+            amount_paid: amountPaid,
           },
         },
       });
@@ -109,7 +112,7 @@ export const InvoiceTrackerProvider: React.FC<{ children: React.ReactNode }> = (
       setInvoices((prev) =>
         prev.map((inv) =>
           inv.id === invoiceId
-            ? { ...inv, payment_status: 'paid' as const, payment_date: paymentDate }
+            ? { ...inv, payment_status: 'paid' as const, payment_date: paymentDate, amount_paid: amountPaid }
             : inv
         )
       );
@@ -129,13 +132,16 @@ export const InvoiceTrackerProvider: React.FC<{ children: React.ReactNode }> = (
             id: invoiceId,
             payment_status: 'unpaid',
             payment_date: null,
+            // Clear the recorded receipt too, so undoing a payment can't leave a
+            // stale collected figure feeding the summaries and exports.
+            amount_paid: null,
           },
         },
       });
       setInvoices((prev) =>
         prev.map((inv) =>
           inv.id === invoiceId
-            ? { ...inv, payment_status: 'unpaid' as const, payment_date: null }
+            ? { ...inv, payment_status: 'unpaid' as const, payment_date: null, amount_paid: null }
             : inv
         )
       );

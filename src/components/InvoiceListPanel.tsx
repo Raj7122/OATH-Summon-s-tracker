@@ -28,7 +28,7 @@ import MarkEmailReadIcon from '@mui/icons-material/MarkEmailRead';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import { Invoice, InvoiceHorizonFilter } from '../types/invoiceTracker';
-import { getInvoiceHorizonColor, parseSentToClient } from '../utils/invoiceTrackerHelpers';
+import { getAmountReceived, getInvoiceHorizonColor, parseSentToClient } from '../utils/invoiceTrackerHelpers';
 import { downloadCSV } from '../lib/csvExport';
 import { generateInvoiceCSV, buildInvoiceCsvFilename } from '../lib/invoiceCsvExport';
 import { horizonColors } from '../theme';
@@ -65,7 +65,8 @@ interface InvoiceListPanelProps {
   invoices: Invoice[];
   horizonFilter: InvoiceHorizonFilter;
   onInvoiceClick: (invoice: Invoice) => void;
-  onMarkPaid: (invoiceId: string) => void;
+  /** Receives the whole invoice so the caller can default the payment to its legal fees. */
+  onMarkPaid: (invoice: Invoice) => void;
   onMarkUnpaid: (invoiceId: string) => void;
 }
 
@@ -153,11 +154,16 @@ const InvoiceListPanel = ({
           case 'item_count':
             cmp = a.item_count - b.item_count;
             break;
-          case 'total':
-            // Grand total = legal fees + fines, matching the displayed Total column.
-            cmp =
-              a.total_legal_fees + a.total_fines_due - (b.total_legal_fees + b.total_fines_due);
+          case 'total': {
+            // Sort on the value the column actually displays: the amount received on
+            // paid rows, the billed grand total (legal fees + fines) on unpaid ones.
+            const displayed = (inv: Invoice) =>
+              inv.payment_status === 'paid'
+                ? getAmountReceived(inv)
+                : inv.total_legal_fees + inv.total_fines_due;
+            cmp = displayed(a) - displayed(b);
             break;
+          }
         }
         return sortDir === 'desc' ? -cmp : cmp;
       });
@@ -270,7 +276,7 @@ const InvoiceListPanel = ({
                     onClick={() => handleSort('total')}
                     sx={sortLabelSx}
                   >
-                    Total
+                    Total / Paid
                   </TableSortLabel>
                 </TableCell>
                 <TableCell sx={{ fontWeight: 600 }} align="center">Status</TableCell>
@@ -317,7 +323,19 @@ const InvoiceListPanel = ({
                   </TableCell>
                   <TableCell align="center">{invoice.item_count}</TableCell>
                   <TableCell align="right">
-                    {formatCurrency(invoice.total_legal_fees + invoice.total_fines_due)}
+                    {invoice.payment_status === 'paid' ? (
+                      // Paid rows show what the firm actually received (legal fees), in green.
+                      // The billed grand total stays reachable via the tooltip.
+                      <Tooltip
+                        title={`Billed ${formatCurrency(invoice.total_legal_fees + invoice.total_fines_due)}`}
+                      >
+                        <Box component="span" sx={{ color: horizonColors.future, fontWeight: 600 }}>
+                          {formatCurrency(getAmountReceived(invoice))}
+                        </Box>
+                      </Tooltip>
+                    ) : (
+                      formatCurrency(invoice.total_legal_fees + invoice.total_fines_due)
+                    )}
                   </TableCell>
                   <TableCell align="center">{getStatusChip(invoice)}</TableCell>
                   <TableCell>{formatDate(invoice.alert_deadline)}</TableCell>
@@ -327,7 +345,7 @@ const InvoiceListPanel = ({
                         size="small"
                         variant="outlined"
                         color="success"
-                        onClick={() => onMarkPaid(invoice.id)}
+                        onClick={() => onMarkPaid(invoice)}
                       >
                         Mark Paid
                       </Button>

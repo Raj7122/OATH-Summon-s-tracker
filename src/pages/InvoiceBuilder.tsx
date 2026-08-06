@@ -1103,6 +1103,9 @@ const InvoiceBuilder = () => {
       );
 
       // --- 4. Update the Invoice record with new totals + recipient -------
+      // amount_paid is deliberately NOT written here: editing the fees on an already-paid
+      // invoice must not silently rewrite what the firm actually received. Correct a
+      // recorded payment from the Invoice Tracker detail modal instead.
       const hasAnyHighlight = Object.values(highlightedSections).some(Boolean);
       try {
         await apiClient.graphql({

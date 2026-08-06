@@ -78,4 +78,36 @@ describe('InvoiceListPanel sorting', () => {
     fireEvent.click(screen.getByRole('button', { name: /Invoice #/i }));
     expect(recipientOrder()).toEqual(['AAA EGG DEPOT', 'BENJAMIN MOORE CO', 'DESANTIS DESPATCH']);
   });
+
+  it('sorts the Total / Paid column on the value each row displays', () => {
+    // The column mixes units: unpaid rows show the billed total, paid rows show what
+    // was actually received. Sorting must follow the rendered figure, not the billed one.
+    const mixed: Invoice[] = [
+      // Billed 750, but only 250 was collected — belongs LAST when sorting ascending
+      makeInvoice({
+        id: 'paid',
+        recipient_company: 'PAID CO',
+        payment_status: 'paid',
+        payment_date: '2026-02-05T00:00:00.000Z',
+        total_legal_fees: 250,
+        total_fines_due: 500,
+      }),
+      makeInvoice({ id: 'small', recipient_company: 'SMALL CO', total_legal_fees: 50, total_fines_due: 50 }),
+      makeInvoice({ id: 'big', recipient_company: 'BIG CO', total_legal_fees: 900, total_fines_due: 900 }),
+    ];
+
+    render(
+      <InvoiceListPanel
+        invoices={mixed}
+        horizonFilter={null}
+        onInvoiceClick={() => {}}
+        onMarkPaid={() => {}}
+        onMarkUnpaid={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Total \/ Paid/i }));
+    // 100 (SMALL) < 250 (PAID, collected) < 1800 (BIG)
+    expect(recipientOrder()).toEqual(['SMALL CO', 'PAID CO', 'BIG CO']);
+  });
 });

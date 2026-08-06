@@ -124,6 +124,13 @@ const InvoiceSummaryCards = ({ invoices }: InvoiceSummaryCardsProps) => {
                     Outstanding: {formatCurrency(summary.totalAmountOutstanding)}
                   </Typography>
                 )}
+                {/* Cash the firm actually received — legal fees only. Outstanding above is
+                    the billed figure (legal fees + fines), so the two aren't the same unit. */}
+                {summary.totalAmountCollected > 0 && (
+                  <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 500, color: horizonColors.future }}>
+                    Collected (legal fees): {formatCurrency(summary.totalAmountCollected)}
+                  </Typography>
+                )}
               </CardContent>
             </Card>
           ))}

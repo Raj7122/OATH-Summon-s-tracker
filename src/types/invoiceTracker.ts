@@ -23,6 +23,7 @@ export interface Invoice {
   item_count: number;
   payment_status: InvoicePaymentStatus;
   payment_date?: string | null;
+  amount_paid?: number | null;  // Amount actually received (legal fees only); null on legacy paid rows
   alert_deadline: string;
   notes?: string | null;
   sent_to_client_attr?: string | null;  // AWSJSON — SentToClientAttribution
@@ -79,5 +80,6 @@ export interface InvoicePeriodSummary {
   overdueCount: number;
   paidCount: number;
   totalAmountOutstanding: number;
-  totalAmountPaid: number;
+  /** Cash actually received on paid invoices (legal fees), NOT the billed total */
+  totalAmountCollected: number;
 }

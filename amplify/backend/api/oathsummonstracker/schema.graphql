@@ -189,6 +189,9 @@ type Invoice @model @auth(rules: [{ allow: private }]) {
   item_count: Int!
   payment_status: String! @default(value: "unpaid")  # "paid" | "unpaid"
   payment_date: AWSDateTime
+  amount_paid: Float  # Amount actually received by the firm — defaults to total_legal_fees (the firm
+                      # collects legal fees only; fines are paid by the client directly to the court).
+                      # Null on legacy paid rows; readers fall back to total_legal_fees at read time.
   alert_deadline: AWSDateTime!
   notes: String
   sent_to_client_attr: AWSJSON  # { sent, by, userId, date } — who sent the invoice to the client and when

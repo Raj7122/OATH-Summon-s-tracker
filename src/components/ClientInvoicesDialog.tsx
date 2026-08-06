@@ -50,7 +50,7 @@ import utc from 'dayjs/plugin/utc';
 import { invoicesByClientBasic, invoiceSummonsForInvoice, updateInvoiceRecord } from '../graphql/customQueries';
 import { deleteInvoiceAndUnmarkSummonses } from '../utils/invoiceDeletion';
 import { Invoice, InvoiceSummonsItem, SentToClientAttribution } from '../types/invoiceTracker';
-import { getInvoiceHorizonColor } from '../utils/invoiceTrackerHelpers';
+import { getAmountReceived, getInvoiceHorizonColor } from '../utils/invoiceTrackerHelpers';
 import { horizonColors } from '../theme';
 import InvoiceDetailModal from './InvoiceDetailModal';
 
@@ -150,7 +150,16 @@ const InvoiceRow = ({ invoice, onOpen, onViewPdfError }: InvoiceRowProps) => {
         <TableCell>{formatDate(invoice.alert_deadline)}</TableCell>
         <TableCell align="center">{invoice.item_count}</TableCell>
         <TableCell align="right">{formatCurrency(invoice.total_legal_fees)}</TableCell>
-        <TableCell align="right">{formatCurrency(invoice.total_fines_due)}</TableCell>
+        {/* What the firm actually received (legal fees) — fines go to the court. */}
+        <TableCell align="right">
+          {invoice.payment_status === 'paid' ? (
+            <Box component="span" sx={{ color: horizonColors.future, fontWeight: 600 }}>
+              {formatCurrency(getAmountReceived(invoice))}
+            </Box>
+          ) : (
+            <Typography variant="caption" color="text.disabled">—</Typography>
+          )}
+        </TableCell>
         <TableCell align="center">
           {invoice.pdf_s3_key ? (
             <Tooltip title={`View saved invoice file (${formatLabel(formatFromKey(invoice.pdf_s3_key))})`}>
@@ -174,7 +183,7 @@ const InvoiceRow = ({ invoice, onOpen, onViewPdfError }: InvoiceRowProps) => {
         </TableCell>
       </TableRow>
       <TableRow>
-        <TableCell colSpan={10} sx={{ py: 0, borderBottom: expanded ? '1px solid' : 'none', borderColor: 'divider' }}>
+        <TableCell colSpan={11} sx={{ py: 0, borderBottom: expanded ? '1px solid' : 'none', borderColor: 'divider' }}>
           <Collapse in={expanded} timeout="auto" unmountOnExit>
             <Box sx={{ py: 2, px: 1, bgcolor: 'grey.50' }}>
               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -338,11 +347,13 @@ const ClientInvoicesDialog = ({ open, onClose, clientID, clientName, onCountChan
   // the client dialog reflects the new state immediately. Also notify the
   // parent page (ClientDetail) so its derived state (Paid column, invoice
   // count tile) refreshes without requiring navigation.
-  const handleMarkPaid = useCallback(async (invoiceId: string, paymentDate: string) => {
+  const handleMarkPaid = useCallback(async (invoiceId: string, paymentDate: string, amountPaid: number) => {
     try {
       await apiClient.graphql({
         query: updateInvoiceRecord,
-        variables: { input: { id: invoiceId, payment_status: 'paid', payment_date: paymentDate } },
+        variables: {
+          input: { id: invoiceId, payment_status: 'paid', payment_date: paymentDate, amount_paid: amountPaid },
+        },
       });
       setSnackbar({ open: true, message: 'Invoice marked as paid', severity: 'success' });
       await fetchInvoices();
@@ -358,7 +369,8 @@ const ClientInvoicesDialog = ({ open, onClose, clientID, clientName, onCountChan
     try {
       await apiClient.graphql({
         query: updateInvoiceRecord,
-        variables: { input: { id: invoiceId, payment_status: 'unpaid', payment_date: null } },
+        // amount_paid is cleared too — an undone payment must not leave a stale receipt.
+        variables: { input: { id: invoiceId, payment_status: 'unpaid', payment_date: null, amount_paid: null } },
       });
       setSnackbar({ open: true, message: 'Invoice marked as unpaid', severity: 'success' });
       await fetchInvoices();
@@ -487,6 +499,7 @@ const ClientInvoicesDialog = ({ open, onClose, clientID, clientName, onCountChan
                     <TableCell sx={{ fontWeight: 600 }} align="center">Items</TableCell>
                     <TableCell sx={{ fontWeight: 600 }} align="right">Legal Fees</TableCell>
                     <TableCell sx={{ fontWeight: 600 }} align="right">Fines Due</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }} align="right">Amount Paid</TableCell>
                     <TableCell sx={{ fontWeight: 600 }} align="center">PDF</TableCell>
                   </TableRow>
                 </TableHead>

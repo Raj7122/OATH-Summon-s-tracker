@@ -134,9 +134,12 @@ const InvoiceTracker = () => {
     setDetailModalOpen(true);
   }, []);
 
-  const handleMarkPaid = useCallback(async (invoiceId: string) => {
+  // Quick "Mark Paid" button in the list: records the legal fees as the amount
+  // received (the firm's actual take — fines are paid to the court by the client).
+  // Use the detail modal to record a different amount.
+  const handleMarkPaid = useCallback(async (invoice: Invoice) => {
     try {
-      await markAsPaid(invoiceId, new Date().toISOString());
+      await markAsPaid(invoice.id, new Date().toISOString(), invoice.total_legal_fees);
       setSnackbar({ open: true, message: 'Invoice marked as paid', severity: 'success' });
     } catch {
       setSnackbar({ open: true, message: 'Failed to update invoice', severity: 'error' });
@@ -152,9 +155,9 @@ const InvoiceTracker = () => {
     }
   }, [markAsUnpaid]);
 
-  const handleModalMarkPaid = useCallback(async (invoiceId: string, paymentDate: string) => {
+  const handleModalMarkPaid = useCallback(async (invoiceId: string, paymentDate: string, amountPaid: number) => {
     try {
-      await markAsPaid(invoiceId, paymentDate);
+      await markAsPaid(invoiceId, paymentDate, amountPaid);
       setSnackbar({ open: true, message: 'Invoice marked as paid', severity: 'success' });
       setDetailModalOpen(false);
     } catch {

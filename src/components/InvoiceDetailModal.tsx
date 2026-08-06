@@ -5,7 +5,7 @@
  * Follows SummonsDetailModal pattern (MUI Dialog, 2-column grid).
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -50,7 +50,7 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import { getUrl } from 'aws-amplify/storage';
 import { Invoice, SentToClientAttribution } from '../types/invoiceTracker';
-import { getInvoiceHorizonColor, parseSentToClient } from '../utils/invoiceTrackerHelpers';
+import { getAmountReceived, getInvoiceHorizonColor, parseSentToClient } from '../utils/invoiceTrackerHelpers';
 import { horizonColors } from '../theme';
 import { useAuth } from '../contexts/AuthContext';
 import { formatFromKey, formatLabel, InvoiceFormat } from '../utils/invoiceFormat';
@@ -63,7 +63,8 @@ interface InvoiceDetailModalProps {
   open: boolean;
   invoice: Invoice | null;
   onClose: () => void;
-  onMarkPaid: (invoiceId: string, paymentDate: string) => Promise<void>;
+  /** amountPaid is the money the firm actually received (legal fees), not the billed total. */
+  onMarkPaid: (invoiceId: string, paymentDate: string, amountPaid: number) => Promise<void>;
   onMarkUnpaid: (invoiceId: string) => Promise<void>;
   onUpdateDeadline: (invoiceId: string, newDeadline: string) => Promise<void>;
   onUpdateNotes: (invoiceId: string, notes: string) => Promise<void>;
@@ -117,6 +118,9 @@ const InvoiceDetailModal = ({
   const navigate = useNavigate();
   const { userInfo } = useAuth();
   const [paymentDate, setPaymentDate] = useState<dayjs.Dayjs | null>(dayjs());
+  // Held as a raw string so the field can be cleared and typed through ("1" -> "1." -> "1.5");
+  // parsed only on submit.
+  const [amountPaidInput, setAmountPaidInput] = useState('');
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesValue, setNotesValue] = useState('');
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -126,6 +130,18 @@ const InvoiceDetailModal = ({
   const [fileMenuAnchor, setFileMenuAnchor] = useState<null | HTMLElement>(null);
   // Which format is currently being regenerated on demand (null = idle).
   const [regenerating, setRegenerating] = useState<InvoiceFormat | null>(null);
+
+  // Re-prime the payment inputs whenever a different invoice is opened. This modal
+  // instance is long-lived (the parent keeps it mounted and swaps the `invoice` prop),
+  // so without this the previous invoice's payment date and amount leak into the next.
+  // Amount defaults to the legal fees — the firm collects those; the fines on the
+  // invoice are paid by the client directly to the court.
+  useEffect(() => {
+    if (open && invoice) {
+      setAmountPaidInput(invoice.total_legal_fees.toFixed(2));
+      setPaymentDate(dayjs());
+    }
+  }, [open, invoice?.id, invoice?.total_legal_fees]);
 
   // Navigate to the InvoiceBuilder page in edit mode. Closing the modal first
   // prevents a flash of a stale invoice detail on return.
@@ -204,7 +220,11 @@ const InvoiceDetailModal = ({
 
   const handleMarkPaid = async () => {
     const dateStr = paymentDate ? paymentDate.toISOString() : new Date().toISOString();
-    await onMarkPaid(invoice.id, dateStr);
+    // Blank or unusable input falls back to the legal-fees default rather than
+    // blocking the user — same amount the quick "Mark Paid" button in the list uses.
+    const parsed = parseFloat(amountPaidInput);
+    const amount = Number.isFinite(parsed) && parsed >= 0 ? parsed : invoice.total_legal_fees;
+    await onMarkPaid(invoice.id, dateStr, amount);
   };
 
   // Toggle the "sent to client" stamp. Marks sent with the current user + time,
@@ -355,7 +375,7 @@ const InvoiceDetailModal = ({
             <Typography variant="caption" color="text.secondary">Payment Status</Typography>
             {invoice.payment_status === 'paid' ? (
               <Typography variant="body1" sx={{ color: horizonColors.future }}>
-                Paid on {formatDate(invoice.payment_date)}
+                {formatCurrency(getAmountReceived(invoice))} paid on {formatDate(invoice.payment_date)}
               </Typography>
             ) : (
               <Typography variant="body1" color="text.secondary">Unpaid</Typography>
@@ -389,8 +409,9 @@ const InvoiceDetailModal = ({
           </Box>
         </Box>
 
-        {/* Financial Summary */}
-        <Box sx={{ display: 'flex', gap: 4, mb: 3, p: 2, bgcolor: 'grey.50', borderRadius: 2 }}>
+        {/* Financial Summary. Total is what was BILLED; the Paid tile (paid invoices only)
+            is what the firm actually RECEIVED — legal fees, since fines go to the court. */}
+        <Box sx={{ display: 'flex', gap: 4, mb: 3, p: 2, bgcolor: 'grey.50', borderRadius: 2, flexWrap: 'wrap' }}>
           <Box>
             <Typography variant="caption" color="text.secondary">Legal Fees</Typography>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>{formatCurrency(invoice.total_legal_fees)}</Typography>
@@ -405,6 +426,14 @@ const InvoiceDetailModal = ({
               {formatCurrency(invoice.total_legal_fees + invoice.total_fines_due)}
             </Typography>
           </Box>
+          {invoice.payment_status === 'paid' && (
+            <Box>
+              <Typography variant="caption" color="text.secondary">Paid</Typography>
+              <Typography variant="h6" sx={{ fontWeight: 700, color: horizonColors.future }}>
+                {formatCurrency(getAmountReceived(invoice))}
+              </Typography>
+            </Box>
+          )}
         </Box>
 
         <Divider sx={{ my: 2 }} />
@@ -476,7 +505,7 @@ const InvoiceDetailModal = ({
 
       <DialogActions sx={{ px: 3, py: 2 }}>
         {invoice.payment_status === 'unpaid' ? (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%', flexWrap: 'wrap' }}>
             <LocalizationProvider dateAdapter={AdapterDayjs}>
               <DatePicker
                 label="Payment Date"
@@ -485,6 +514,16 @@ const InvoiceDetailModal = ({
                 slotProps={{ textField: { size: 'small', sx: { width: 180 } } }}
               />
             </LocalizationProvider>
+            <TextField
+              label="Amount Paid"
+              type="number"
+              size="small"
+              value={amountPaidInput}
+              onChange={(e) => setAmountPaidInput(e.target.value)}
+              inputProps={{ min: 0, step: 25, style: { textAlign: 'right' } }}
+              helperText="Legal fees only"
+              sx={{ width: 160 }}
+            />
             <Button variant="contained" color="success" onClick={handleMarkPaid}>
               Mark as Paid
             </Button>

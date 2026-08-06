@@ -320,7 +320,8 @@ describe('summarizeInvoicePeriod', () => {
     expect(result.paidCount).toBe(1);
     expect(result.unpaidCount).toBe(2);
     expect(result.overdueCount).toBe(1); // invoice 2 is past deadline
-    expect(result.totalAmountPaid).toBe(750); // 250 + 500
+    // Collected = legal fees actually received, NOT legal fees + fines (fines go to the court)
+    expect(result.totalAmountCollected).toBe(250);
     expect(result.totalAmountOutstanding).toBe(850); // (250+300) + (100+200)
   });
 
@@ -335,7 +336,20 @@ describe('summarizeInvoicePeriod', () => {
     expect(result.unpaidCount).toBe(0);
     expect(result.overdueCount).toBe(0);
     expect(result.totalAmountOutstanding).toBe(0);
-    expect(result.totalAmountPaid).toBe(300);
+    expect(result.totalAmountCollected).toBe(100); // legal fees only
+  });
+
+  it('should sum recorded payment amounts when present', () => {
+    const invoices = [
+      // Explicit short payment wins over the legal-fees default
+      makeInvoice({ id: '1', payment_status: 'paid', total_legal_fees: 250, total_fines_due: 500, amount_paid: 150 }),
+      // Legacy paid row with no recorded amount falls back to legal fees
+      makeInvoice({ id: '2', payment_status: 'paid', total_legal_fees: 400, total_fines_due: 900 }),
+    ];
+
+    const result = summarizeInvoicePeriod('2026-01', '2026-01-01T00:00:00.000Z', invoices);
+
+    expect(result.totalAmountCollected).toBe(550); // 150 + 400
   });
 
   it('should handle empty invoices', () => {
@@ -346,6 +360,6 @@ describe('summarizeInvoicePeriod', () => {
     expect(result.unpaidCount).toBe(0);
     expect(result.overdueCount).toBe(0);
     expect(result.totalAmountOutstanding).toBe(0);
-    expect(result.totalAmountPaid).toBe(0);
+    expect(result.totalAmountCollected).toBe(0);
   });
 });

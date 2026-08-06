@@ -8,7 +8,7 @@
  */
 
 import { Invoice } from '../types/invoiceTracker';
-import { getInvoiceHorizonColor } from '../utils/invoiceTrackerHelpers';
+import { getAmountReceived, getInvoiceHorizonColor } from '../utils/invoiceTrackerHelpers';
 import { escapeCSVValue, formatDate } from './csvExport';
 
 /** Human-readable status label matching the on-screen status chip. */
@@ -42,6 +42,8 @@ const HEADERS = [
   'Status',
   'Deadline',
   'Payment Date',
+  // Appended last so existing column positions don't shift for anyone keying off them.
+  'Amount Paid',
 ];
 
 /**
@@ -64,6 +66,9 @@ export function generateInvoiceCSV(invoices: Invoice[]): string {
       statusLabel(inv),
       formatDate(inv.alert_deadline, 'us'),
       formatDate(inv.payment_date, 'us'),
+      // Money actually received (legal fees), blank when unpaid so a SUM() over the
+      // column is the true collected figure and "not yet paid" stays distinct from $0.
+      inv.payment_status === 'paid' ? amount(getAmountReceived(inv)) : '',
     ];
     return cells.map(escapeCSVValue).join(',');
   });
