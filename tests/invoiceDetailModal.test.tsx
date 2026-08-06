@@ -134,7 +134,7 @@ describe('InvoiceDetailModal', () => {
       payment_date: '2026-02-05T00:00:00.000Z',
     });
     render(<InvoiceDetailModal {...defaultProps} invoice={paidInvoice} />);
-    expect(screen.getByText(/Paid on 2\/05\/26/)).toBeDefined();
+    expect(screen.getByText(/\$500\.00 paid on 2\/05\/26/)).toBeDefined();
   });
 
   it('renders financial summary with Legal Fees, Fines Due, and Total', () => {
@@ -145,6 +145,34 @@ describe('InvoiceDetailModal', () => {
     expect(screen.getByText('$500.00')).toBeDefined();
     expect(screen.getByText('$1,200.00')).toBeDefined();
     expect(screen.getByText('$1,700.00')).toBeDefined();
+  });
+
+  it('hides the Paid tile on unpaid invoices', () => {
+    render(<InvoiceDetailModal {...defaultProps} />);
+    expect(screen.queryByText('Paid')).toBeNull();
+  });
+
+  it('shows a Paid tile with the amount received on paid invoices', () => {
+    const paidInvoice = makeInvoice({
+      payment_status: 'paid',
+      payment_date: '2026-02-05T00:00:00.000Z',
+      amount_paid: 425,
+    });
+    render(<InvoiceDetailModal {...defaultProps} invoice={paidInvoice} />);
+    expect(screen.getByText('Paid')).toBeDefined();
+    expect(screen.getByText('$425.00')).toBeDefined();
+    // The billed total is still shown alongside it
+    expect(screen.getByText('$1,700.00')).toBeDefined();
+  });
+
+  it('falls back to legal fees on a legacy paid invoice with no recorded amount', () => {
+    const legacyPaid = makeInvoice({
+      payment_status: 'paid',
+      payment_date: '2026-02-05T00:00:00.000Z',
+    });
+    render(<InvoiceDetailModal {...defaultProps} invoice={legacyPaid} />);
+    // $500 legal fees, NOT the $1,700 billed total
+    expect(screen.getAllByText('$500.00').length).toBeGreaterThan(0);
   });
 
   it('renders summons list with correct count', () => {
@@ -165,13 +193,56 @@ describe('InvoiceDetailModal', () => {
     expect(screen.getByText('Mark as Paid')).toBeDefined();
   });
 
-  it('calls onMarkPaid when "Mark as Paid" is clicked', async () => {
+  it('pre-fills the Amount Paid input with the invoice legal fees', () => {
+    render(<InvoiceDetailModal {...defaultProps} />);
+    const input = screen.getByLabelText('Amount Paid') as HTMLInputElement;
+    expect(input.value).toBe('500.00');
+  });
+
+  it('calls onMarkPaid with the pre-filled legal fees by default', async () => {
     vi.useRealTimers();
     render(<InvoiceDetailModal {...defaultProps} />);
     fireEvent.click(screen.getByText('Mark as Paid'));
     await waitFor(() => {
-      expect(defaultProps.onMarkPaid).toHaveBeenCalledWith('inv-1', expect.any(String));
+      expect(defaultProps.onMarkPaid).toHaveBeenCalledWith('inv-1', expect.any(String), 500);
     });
+  });
+
+  it('calls onMarkPaid with an overridden amount', async () => {
+    vi.useRealTimers();
+    render(<InvoiceDetailModal {...defaultProps} />);
+    fireEvent.change(screen.getByLabelText('Amount Paid'), { target: { value: '150' } });
+    fireEvent.click(screen.getByText('Mark as Paid'));
+    await waitFor(() => {
+      expect(defaultProps.onMarkPaid).toHaveBeenCalledWith('inv-1', expect.any(String), 150);
+    });
+  });
+
+  it('falls back to legal fees when the amount input is cleared', async () => {
+    vi.useRealTimers();
+    render(<InvoiceDetailModal {...defaultProps} />);
+    fireEvent.change(screen.getByLabelText('Amount Paid'), { target: { value: '' } });
+    fireEvent.click(screen.getByText('Mark as Paid'));
+    await waitFor(() => {
+      expect(defaultProps.onMarkPaid).toHaveBeenCalledWith('inv-1', expect.any(String), 500);
+    });
+  });
+
+  it('re-primes the amount when a different invoice is opened in the same modal', () => {
+    // The modal instance is long-lived and only the `invoice` prop swaps — the previous
+    // invoice's amount must not leak into the next one.
+    const { rerender } = render(<InvoiceDetailModal {...defaultProps} />);
+    expect((screen.getByLabelText('Amount Paid') as HTMLInputElement).value).toBe('500.00');
+
+    rerender(
+      <MemoryRouter>
+        <InvoiceDetailModal
+          {...defaultProps}
+          invoice={makeInvoice({ id: 'inv-2', total_legal_fees: 250 })}
+        />
+      </MemoryRouter>
+    );
+    expect((screen.getByLabelText('Amount Paid') as HTMLInputElement).value).toBe('250.00');
   });
 
   it('renders "Mark as Unpaid" button for paid invoices', () => {

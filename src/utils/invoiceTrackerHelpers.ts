@@ -104,6 +104,31 @@ export function generateInvoiceNumber(company: string, date: string): string {
 }
 
 /**
+ * The amount the firm actually received for an invoice.
+ *
+ * - Unpaid invoice -> 0.
+ * - Paid with a recorded amount -> that amount. A recorded 0 is a real value (a written-off or
+ *   $0 collection), so the check is an explicit finite-number test, never `||`.
+ * - Paid with no recorded amount (legacy rows created before amount_paid existed) -> total_legal_fees.
+ *   The firm only ever collects legal fees; the fines on an invoice are paid by the client directly
+ *   to the court, so falling back to the billed grand total would overstate revenue. This is a
+ *   read-time rule only — no stored data is backfilled.
+ */
+export function getAmountReceived(
+  invoice: Pick<Invoice, 'payment_status' | 'total_legal_fees'> & { amount_paid?: number | null }
+): number {
+  if (invoice.payment_status !== INVOICE_STATUS.PAID) return 0;
+  const recorded = invoice.amount_paid;
+  if (typeof recorded === 'number' && Number.isFinite(recorded)) return recorded;
+  return invoice.total_legal_fees ?? 0;
+}
+
+/** True when the invoice carries an explicitly recorded receipt (vs. the legacy legal-fees fallback). */
+export function hasRecordedAmountPaid(invoice: { amount_paid?: number | null }): boolean {
+  return typeof invoice.amount_paid === 'number' && Number.isFinite(invoice.amount_paid);
+}
+
+/**
  * Summarize a group of invoices for a given period.
  */
 export function summarizeInvoicePeriod(periodLabel: string, periodStart: string, invoices: Invoice[]): InvoicePeriodSummary {
@@ -111,12 +136,13 @@ export function summarizeInvoicePeriod(periodLabel: string, periodStart: string,
   let overdueCount = 0;
   let paidCount = 0;
   let totalAmountOutstanding = 0;
-  let totalAmountPaid = 0;
+  let totalAmountCollected = 0;
 
   for (const inv of invoices) {
     if (inv.payment_status === INVOICE_STATUS.PAID) {
       paidCount++;
-      totalAmountPaid += inv.total_legal_fees + inv.total_fines_due;
+      // Cash received, not the billed total — fines go to the court, not to the firm.
+      totalAmountCollected += getAmountReceived(inv);
     } else {
       unpaidCount++;
       totalAmountOutstanding += inv.total_legal_fees + inv.total_fines_due;
@@ -134,7 +160,7 @@ export function summarizeInvoicePeriod(periodLabel: string, periodStart: string,
     overdueCount,
     paidCount,
     totalAmountOutstanding,
-    totalAmountPaid,
+    totalAmountCollected,
   };
 }
 

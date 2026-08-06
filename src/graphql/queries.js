@@ -327,8 +327,10 @@ export const getInvoice = /* GraphQL */ `
       item_count
       payment_status
       payment_date
+      amount_paid
       alert_deadline
       notes
+      sent_to_client_attr
       clientID
       pdf_s3_key
       extra_line_items
@@ -369,8 +371,10 @@ export const listInvoices = /* GraphQL */ `
         item_count
         payment_status
         payment_date
+        amount_paid
         alert_deadline
         notes
+        sent_to_client_attr
         clientID
         pdf_s3_key
         extra_line_items
@@ -413,8 +417,10 @@ export const getInvoiceSummons = /* GraphQL */ `
         item_count
         payment_status
         payment_date
+        amount_paid
         alert_deadline
         notes
+        sent_to_client_attr
         clientID
         pdf_s3_key
         extra_line_items
@@ -753,8 +759,10 @@ export const invoicesByClientID = /* GraphQL */ `
         item_count
         payment_status
         payment_date
+        amount_paid
         alert_deadline
         notes
+        sent_to_client_attr
         clientID
         pdf_s3_key
         extra_line_items

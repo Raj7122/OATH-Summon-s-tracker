@@ -7,7 +7,7 @@ import type { Invoice } from '../src/types/invoiceTracker';
 dayjs.extend(utc);
 
 const EXPECTED_HEADER =
-  'Invoice #,Invoice Date,Recipient,Attention,Items,Legal Fees,Fines Due,Total,Status,Deadline,Payment Date';
+  'Invoice #,Invoice Date,Recipient,Attention,Items,Legal Fees,Fines Due,Total,Status,Deadline,Payment Date,Amount Paid';
 
 const invoice = (overrides: Partial<Invoice>): Invoice => ({
   id: 'inv-1',
@@ -49,6 +49,19 @@ describe('generateInvoiceCSV', () => {
     expect(status(paid)).toBe('Paid');
     expect(status(overdue)).toBe('Overdue');
     expect(status(unpaid)).toBe('Unpaid');
+  });
+
+  it('exports the amount actually received, not the billed total', () => {
+    const amountPaid = (inv: Invoice) => generateInvoiceCSV([inv]).split('\n')[1].split(',')[11];
+
+    // Legacy paid invoice with no recorded amount → legal fees, never legal fees + fines
+    expect(amountPaid(invoice({ payment_status: 'paid', payment_date: '2026-05-10T00:00:00.000Z' })))
+      .toBe('1000.00');
+    // Recorded short payment wins
+    expect(amountPaid(invoice({ payment_status: 'paid', payment_date: '2026-05-10T00:00:00.000Z', amount_paid: 600 })))
+      .toBe('600.00');
+    // Unpaid → blank, so SUM() over the column is the true collected figure
+    expect(amountPaid(invoice({ payment_status: 'unpaid' }))).toBe('');
   });
 
   it('escapes a comma in the recipient name so it stays in one cell', () => {

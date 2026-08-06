@@ -144,6 +144,29 @@ describe('InvoiceSummaryCards', () => {
     expect(screen.getAllByText(/Outstanding/i).length).toBeGreaterThan(0);
   });
 
+  it('shows the collected legal fees for periods with paid invoices', () => {
+    render(<InvoiceSummaryCards invoices={testInvoices} />);
+    // inv-2 is paid with 300 legal fees + 600 fines and no recorded amount —
+    // the firm collected the 300 legal fees, not the 900 billed total.
+    expect(screen.getByText(/Collected \(legal fees\): \$300\.00/)).toBeDefined();
+  });
+
+  it('uses the recorded payment amount when one exists', () => {
+    const invoices = [
+      makeInvoice({
+        id: 'inv-partial',
+        invoice_date: '2026-02-03T00:00:00.000Z',
+        payment_status: 'paid',
+        payment_date: '2026-02-05T00:00:00.000Z',
+        total_legal_fees: 300,
+        total_fines_due: 600,
+        amount_paid: 175,
+      }),
+    ];
+    render(<InvoiceSummaryCards invoices={invoices} />);
+    expect(screen.getByText(/Collected \(legal fees\): \$175\.00/)).toBeDefined();
+  });
+
   it('renders different period labels in monthly vs weekly view', () => {
     const { rerender } = render(<InvoiceSummaryCards invoices={testInvoices} />);
 

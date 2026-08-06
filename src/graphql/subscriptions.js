@@ -484,8 +484,10 @@ export const onCreateInvoice = /* GraphQL */ `
       item_count
       payment_status
       payment_date
+      amount_paid
       alert_deadline
       notes
+      sent_to_client_attr
       clientID
       pdf_s3_key
       extra_line_items
@@ -521,8 +523,10 @@ export const onUpdateInvoice = /* GraphQL */ `
       item_count
       payment_status
       payment_date
+      amount_paid
       alert_deadline
       notes
+      sent_to_client_attr
       clientID
       pdf_s3_key
       extra_line_items
@@ -558,8 +562,10 @@ export const onDeleteInvoice = /* GraphQL */ `
       item_count
       payment_status
       payment_date
+      amount_paid
       alert_deadline
       notes
+      sent_to_client_attr
       clientID
       pdf_s3_key
       extra_line_items
@@ -605,8 +611,10 @@ export const onCreateInvoiceSummons = /* GraphQL */ `
         item_count
         payment_status
         payment_date
+        amount_paid
         alert_deadline
         notes
+        sent_to_client_attr
         clientID
         pdf_s3_key
         extra_line_items
@@ -652,8 +660,10 @@ export const onUpdateInvoiceSummons = /* GraphQL */ `
         item_count
         payment_status
         payment_date
+        amount_paid
         alert_deadline
         notes
+        sent_to_client_attr
         clientID
         pdf_s3_key
         extra_line_items
@@ -699,8 +709,10 @@ export const onDeleteInvoiceSummons = /* GraphQL */ `
         item_count
         payment_status
         payment_date
+        amount_paid
         alert_deadline
         notes
+        sent_to_client_attr
         clientID
         pdf_s3_key
         extra_line_items

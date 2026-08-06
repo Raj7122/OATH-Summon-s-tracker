@@ -101,7 +101,7 @@ describe('InvoiceListPanel', () => {
     expect(screen.getByText('Date')).toBeDefined();
     expect(screen.getByText('Recipient')).toBeDefined();
     expect(screen.getByText('Items')).toBeDefined();
-    expect(screen.getByText('Total')).toBeDefined();
+    expect(screen.getByText('Total / Paid')).toBeDefined();
     expect(screen.getByText('Status')).toBeDefined();
     expect(screen.getByText('Deadline')).toBeDefined();
     expect(screen.getByText('Action')).toBeDefined();
@@ -188,7 +188,10 @@ describe('InvoiceListPanel', () => {
     render(<InvoiceListPanel {...defaultProps} />);
     const markPaidButtons = screen.getAllByText('Mark Paid');
     fireEvent.click(markPaidButtons[0]);
-    expect(defaultProps.onMarkPaid).toHaveBeenCalledWith('inv-overdue');
+    // Passes the whole invoice so the caller can default the payment to its legal fees
+    expect(defaultProps.onMarkPaid).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'inv-overdue' })
+    );
   });
 
   it('calls onMarkUnpaid when "Undo" is clicked', () => {

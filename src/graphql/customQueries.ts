@@ -77,6 +77,7 @@ export const listInvoicesWithItems = /* GraphQL */ `
         item_count
         payment_status
         payment_date
+        amount_paid
         alert_deadline
         notes
         sent_to_client_attr
@@ -191,6 +192,7 @@ export const updateInvoiceRecord = /* GraphQL */ `
       invoice_date
       payment_status
       payment_date
+      amount_paid
       alert_deadline
       notes
       sent_to_client_attr
@@ -235,6 +237,7 @@ export const invoicesByClientBasic = /* GraphQL */ `
         item_count
         payment_status
         payment_date
+        amount_paid
         alert_deadline
         notes
         sent_to_client_attr
@@ -320,6 +323,7 @@ export const getInvoiceWithItems = /* GraphQL */ `
       item_count
       payment_status
       payment_date
+      amount_paid
       alert_deadline
       notes
       sent_to_client_attr

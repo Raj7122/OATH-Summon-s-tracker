@@ -529,11 +529,13 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
   // Mutation handlers for the nested InvoiceDetailModal. Pattern copied from
   // ClientInvoicesDialog so Arthur gets the same behavior (mark paid, edit,
   // delete) whether he opens an invoice from the client page or from a summons.
-  const handleInvoiceMarkPaid = async (invoiceId: string, paymentDate: string) => {
+  const handleInvoiceMarkPaid = async (invoiceId: string, paymentDate: string, amountPaid: number) => {
     try {
       await invoiceApiClient.graphql({
         query: updateInvoiceRecord,
-        variables: { input: { id: invoiceId, payment_status: 'paid', payment_date: paymentDate } },
+        variables: {
+          input: { id: invoiceId, payment_status: 'paid', payment_date: paymentDate, amount_paid: amountPaid },
+        },
       });
       setInvoiceSnackbar({ open: true, message: 'Invoice marked as paid', severity: 'success' });
       if (summons?.id) await refreshLinkedInvoices(summons.id);
@@ -549,7 +551,8 @@ const SummonsDetailModal: React.FC<SummonsDetailModalProps> = ({
     try {
       await invoiceApiClient.graphql({
         query: updateInvoiceRecord,
-        variables: { input: { id: invoiceId, payment_status: 'unpaid', payment_date: null } },
+        // amount_paid is cleared too — an undone payment must not leave a stale receipt.
+        variables: { input: { id: invoiceId, payment_status: 'unpaid', payment_date: null, amount_paid: null } },
       });
       setInvoiceSnackbar({ open: true, message: 'Invoice marked as unpaid', severity: 'success' });
       if (summons?.id) await refreshLinkedInvoices(summons.id);
