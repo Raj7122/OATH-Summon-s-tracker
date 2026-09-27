@@ -44,18 +44,47 @@ import { generatePDF, generateDOCX, generateXLSX } from '../src/utils/invoiceGen
 // Fakes
 // ---------------------------------------------------------------------------
 
-// A fake Amplify client whose getSummons returns whatever the caller registered
-// for a given summons id. `throwFor` simulates a deleted/archived summons.
+// A fake Amplify client serving the two queries the helper issues:
+//   1. invoiceSummonsForInvoice — the join rows, paged off the byInvoice GSI.
+//      buildInvoiceDocInputs reads them from HERE, never from invoice.items.items,
+//      because that connection's resolver silently caps at 100 rows.
+//   2. getSummons — the live summons behind each row (display-only columns).
+// `throwFor` simulates a deleted/archived summons.
+//
+// `joinRowPages` lets a test serve the join rows across several pages (and
+// independently of what invoice.items.items happens to contain), which is how we
+// reproduce the real 214-item Corporate Express invoice.
 const makeClient = (
   summonsById: Record<string, Record<string, unknown> | null>,
   throwFor: Set<string> = new Set(),
+  joinRowPages?: Record<string, unknown>[][],
 ) => ({
-  graphql: vi.fn(async ({ variables }: { variables: { id: string } }) => {
+  graphql: vi.fn(async ({ query, variables }: { query: string; variables: { id: string; nextToken?: string | null } }) => {
+    if (typeof query === 'string' && query.includes('invoiceSummonsByInvoiceIDAndSummonsID')) {
+      const pages = joinRowPages ?? [[]];
+      const idx = variables.nextToken ? Number(variables.nextToken) : 0;
+      return {
+        data: {
+          invoiceSummonsByInvoiceIDAndSummonsID: {
+            items: pages[idx] ?? [],
+            nextToken: idx + 1 < pages.length ? String(idx + 1) : null,
+          },
+        },
+      };
+    }
     const id = variables.id;
     if (throwFor.has(id)) throw new Error('summons not found');
     return { data: { getSummons: summonsById[id] ?? null } };
   }),
 });
+
+// The join rows the baseline makeInvoice() describes. Served via the GSI fake so
+// the tests exercise the real read path.
+const BASE_JOIN_ROWS = [
+  { id: 'j1', invoiceID: 'inv-1', summonsID: 's-zeroed', summons_number: '000760540K', legal_fee: 0, amount_due: 0, highlighted: false },
+  { id: 'j2', invoiceID: 'inv-1', summonsID: 's-null', summons_number: '000883250M', legal_fee: 200, amount_due: null, highlighted: true },
+  { id: 'j3', invoiceID: 'inv-1', summonsID: 's-live', summons_number: '000817904R', legal_fee: 200, amount_due: null, highlighted: false },
+];
 
 // Base invoice with three line items mirroring the AAA Egg scenario: a fine the
 // user zeroed out, a fine left null, and one left at its live value.
@@ -103,7 +132,7 @@ const bySummons = (items: { id: string; amount_due: number | null }[]) =>
 
 describe('buildInvoiceDocInputs — fine precedence (the bug fix)', () => {
   it('keeps a manually-removed fine at 0 instead of repopulating from the live NYC balance', async () => {
-    const client = makeClient(summonsById);
+    const client = makeClient(summonsById, new Set(), [BASE_JOIN_ROWS]);
     const { items } = await buildInvoiceDocInputs(makeInvoice(), client);
     const map = bySummons(items.map((i) => ({ id: i.summons_number, amount_due: i.amount_due })));
     // Live NYC balance is 1300, but the invoice saved 0 — the saved 0 must win.
@@ -111,7 +140,7 @@ describe('buildInvoiceDocInputs — fine precedence (the bug fix)', () => {
   });
 
   it('falls back to the live summons fine only when the invoice stored no fine', async () => {
-    const client = makeClient(summonsById);
+    const client = makeClient(summonsById, new Set(), [BASE_JOIN_ROWS]);
     const { items } = await buildInvoiceDocInputs(makeInvoice(), client);
     const map = bySummons(items.map((i) => ({ id: i.summons_number, amount_due: i.amount_due })));
     // j2 stored amount_due: null → falls back to live 420.
@@ -120,14 +149,14 @@ describe('buildInvoiceDocInputs — fine precedence (the bug fix)', () => {
 
   it('yields null when neither the invoice nor the live summons has a fine', async () => {
     const invoice = makeInvoice();
-    const client = makeClient({ ...summonsById, 's-null': { ...summonsById['s-null'], amount_due: null } });
+    const client = makeClient({ ...summonsById, 's-null': { ...summonsById['s-null'], amount_due: null } }, new Set(), [BASE_JOIN_ROWS]);
     const { items } = await buildInvoiceDocInputs(invoice, client);
     const target = items.find((i) => i.summons_number === '000883250M');
     expect(target?.amount_due).toBeNull();
   });
 
   it('takes legal_fee and highlight from the saved join row, not the live summons', async () => {
-    const client = makeClient(summonsById);
+    const client = makeClient(summonsById, new Set(), [BASE_JOIN_ROWS]);
     const { items } = await buildInvoiceDocInputs(makeInvoice(), client);
     const highlighted = items.find((i) => i.summons_number === '000883250M');
     expect(highlighted?.legal_fee).toBe(200);
@@ -137,7 +166,7 @@ describe('buildInvoiceDocInputs — fine precedence (the bug fix)', () => {
 
 describe('buildInvoiceDocInputs — display + metadata', () => {
   it('pulls display-only columns (dates, status, results, respondent) from the live summons', async () => {
-    const client = makeClient(summonsById);
+    const client = makeClient(summonsById, new Set(), [BASE_JOIN_ROWS]);
     const { items } = await buildInvoiceDocInputs(makeInvoice(), client);
     const row = items.find((i) => i.summons_number === '000760540K')!;
     expect(row.status).toBe('DEFAULTED');
@@ -147,7 +176,7 @@ describe('buildInvoiceDocInputs — display + metadata', () => {
   });
 
   it('sorts line items by hearing date ascending', async () => {
-    const client = makeClient(summonsById);
+    const client = makeClient(summonsById, new Set(), [BASE_JOIN_ROWS]);
     const { items } = await buildInvoiceDocInputs(makeInvoice(), client);
     const hearingOrder = items.map((i) => i.summons_number);
     // s-zeroed 2023-09-11, s-live 2026-05-06 <-> wait ordering: 2023 < 2026-03 < 2026-05
@@ -155,7 +184,7 @@ describe('buildInvoiceDocInputs — display + metadata', () => {
   });
 
   it('degrades gracefully when a summons was deleted (keeps saved fine, sparse display)', async () => {
-    const client = makeClient(summonsById, new Set(['s-zeroed']));
+    const client = makeClient(summonsById, new Set(['s-zeroed']), [BASE_JOIN_ROWS]);
     const { items } = await buildInvoiceDocInputs(makeInvoice(), client);
     const row = items.find((i) => i.summons_number === '000760540K')!;
     // Saved fine still honored even though the live fetch failed.
@@ -166,7 +195,7 @@ describe('buildInvoiceDocInputs — display + metadata', () => {
   });
 
   it('maps recipient fields from the invoice record', async () => {
-    const client = makeClient(summonsById);
+    const client = makeClient(summonsById, new Set(), [BASE_JOIN_ROWS]);
     const { recipient } = await buildInvoiceDocInputs(makeInvoice(), client);
     expect(recipient.companyName).toBe('AAA EGG DEPOT');
     expect(recipient.attention).toBe('Jelly');
@@ -177,7 +206,7 @@ describe('buildInvoiceDocInputs — display + metadata', () => {
 describe('buildInvoiceDocInputs — extras + footer options', () => {
   it('parses extra_line_items from a JSON string', async () => {
     const extras = [{ id: 'x1', summons_number: 'RESEARCH', violation_date: '', status: 'Research fee', hearing_result: '', hearing_date: '', amount_due: '', legal_fee: '150' }];
-    const client = makeClient(summonsById);
+    const client = makeClient(summonsById, new Set(), [BASE_JOIN_ROWS]);
     const { extras: parsed } = await buildInvoiceDocInputs(
       makeInvoice({ extra_line_items: JSON.stringify(extras) }),
       client,
@@ -187,7 +216,7 @@ describe('buildInvoiceDocInputs — extras + footer options', () => {
   });
 
   it('tolerates malformed extra_line_items and highlighted_sections', async () => {
-    const client = makeClient(summonsById);
+    const client = makeClient(summonsById, new Set(), [BASE_JOIN_ROWS]);
     const { extras, options } = await buildInvoiceDocInputs(
       makeInvoice({ extra_line_items: '{not json', highlighted_sections: 'also bad' }),
       client,
@@ -197,7 +226,7 @@ describe('buildInvoiceDocInputs — extras + footer options', () => {
   });
 
   it('falls back to default footer text for legacy invoices missing those fields', async () => {
-    const client = makeClient(summonsById);
+    const client = makeClient(summonsById, new Set(), [BASE_JOIN_ROWS]);
     const { options } = await buildInvoiceDocInputs(makeInvoice(), client);
     expect(options.paymentInstructions).toBe(FOOTER_TEXT.payment);
     expect(options.reviewText).toBe(FOOTER_TEXT.review);
@@ -207,7 +236,7 @@ describe('buildInvoiceDocInputs — extras + footer options', () => {
   });
 
   it('uses persisted footer text when present', async () => {
-    const client = makeClient(summonsById);
+    const client = makeClient(summonsById, new Set(), [BASE_JOIN_ROWS]);
     const { options } = await buildInvoiceDocInputs(
       makeInvoice({
         payment_instructions: 'Pay by Zelle.',
@@ -236,7 +265,7 @@ const toBuffer = async (blob: Blob): Promise<Buffer> => Buffer.from(await blob.a
 
 describe('regenerate stored invoice into each format', () => {
   it('PDF: valid document with the removed fine reflected, not the live balance', async () => {
-    const client = makeClient(summonsById);
+    const client = makeClient(summonsById, new Set(), [BASE_JOIN_ROWS]);
     const { items, recipient, options, extras } = await buildInvoiceDocInputs(makeInvoice(), client);
     const { blob, filename } = await generatePDF(items, recipient, options, extras, false);
     const buf = await toBuffer(blob);
@@ -249,7 +278,7 @@ describe('regenerate stored invoice into each format', () => {
   });
 
   it('DOCX: valid Word file whose fine column shows the saved 0, never the live 1,300', async () => {
-    const client = makeClient(summonsById);
+    const client = makeClient(summonsById, new Set(), [BASE_JOIN_ROWS]);
     const { items, recipient, options, extras } = await buildInvoiceDocInputs(makeInvoice(), client);
     const { blob, filename } = await generateDOCX(items, recipient, options, extras, true);
     const buf = await toBuffer(blob);
@@ -268,7 +297,7 @@ describe('regenerate stored invoice into each format', () => {
   });
 
   it('XLSX: valid workbook that round-trips through ExcelJS', async () => {
-    const client = makeClient(summonsById);
+    const client = makeClient(summonsById, new Set(), [BASE_JOIN_ROWS]);
     const { items, recipient, options, extras } = await buildInvoiceDocInputs(makeInvoice(), client);
     const { blob, filename } = await generateXLSX(items, recipient, options, extras, true);
     const buf = await toBuffer(blob);
@@ -287,5 +316,73 @@ describe('regenerate stored invoice into each format', () => {
       });
     });
     expect(found).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Truncation regression — the CORPORATE EXPRESS bug
+// ---------------------------------------------------------------------------
+
+describe('buildInvoiceDocInputs — ignores the truncated items connection', () => {
+  // Reproduces the real invoice f309f597 (CORPORATE EXPRESS INC): 214 join rows
+  // in DynamoDB, but the `Invoice.items` hasMany resolver hardcodes
+  // `defaultIfNull($ctx.args.limit, 100)`, so every query that read
+  // invoice.items.items got exactly 100 rows. That is what made "half the
+  // violations" disappear from the edit screen and produced 100-row documents
+  // from the Tracker's "Get as PDF/DOCX/XLSX" actions.
+  //
+  // The helper must ignore invoice.items.items entirely and page the byInvoice
+  // GSI, so the 100-row connection below is a decoy: all 214 must come back.
+  const TOTAL = 214;
+  const FEE = 100;
+
+  const allRows = Array.from({ length: TOTAL }, (_, i) => ({
+    id: `join-${i}`,
+    invoiceID: 'inv-corp',
+    summonsID: `sum-${i}`,
+    summons_number: `00${String(1000000 + i)}X`,
+    legal_fee: FEE,
+    amount_due: 0,
+    highlighted: false,
+  }));
+
+  const corpInvoice = (): Invoice =>
+    ({
+      id: 'inv-corp',
+      invoice_number: 'INV-CORPORATE_EXPRESS_IN-2026-09-02',
+      invoice_date: '2026-09-02T17:08:47.103Z',
+      recipient_company: 'CORPORATE EXPRESS INC',
+      total_legal_fees: TOTAL * FEE,
+      total_fines_due: 0,
+      item_count: TOTAL,
+      payment_status: 'unpaid',
+      alert_deadline: '2026-09-09T00:00:00.000Z',
+      clientID: 'client-corp',
+      // The decoy: exactly what the capped connection would have returned.
+      items: { items: allRows.slice(0, 100) },
+    }) as Invoice;
+
+  // Serve the GSI in 100/100/14 pages, as DynamoDB actually would.
+  const pages = [allRows.slice(0, 100), allRows.slice(100, 200), allRows.slice(200)];
+
+  it('returns all 214 line items even though invoice.items.items holds only 100', async () => {
+    const client = makeClient({}, new Set(), pages);
+    const { items } = await buildInvoiceDocInputs(corpInvoice(), client);
+
+    expect(items).toHaveLength(TOTAL);
+    // No duplicates and nothing dropped across the page boundaries.
+    expect(new Set(items.map((i) => i.summons_number)).size).toBe(TOTAL);
+    // The full fee total, not the truncated $10,000.
+    expect(items.reduce((sum, i) => sum + i.legal_fee, 0)).toBe(TOTAL * FEE);
+  });
+
+  it('honours pre-fetched rows without re-reading the GSI', async () => {
+    const client = makeClient({}, new Set(), pages);
+    const { items } = await buildInvoiceDocInputs(corpInvoice(), client, allRows);
+
+    expect(items).toHaveLength(TOTAL);
+    // Only the per-row getSummons lookups — no invoiceSummons query at all.
+    const queries = client.graphql.mock.calls.map((c) => String(c[0].query));
+    expect(queries.some((q) => q.includes('invoiceSummonsByInvoiceIDAndSummonsID'))).toBe(false);
   });
 });

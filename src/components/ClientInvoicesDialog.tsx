@@ -47,9 +47,10 @@ import { getUrl } from 'aws-amplify/storage';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
-import { invoicesByClientBasic, invoiceSummonsForInvoice, updateInvoiceRecord } from '../graphql/customQueries';
+import { invoicesByClientBasic, updateInvoiceRecord } from '../graphql/customQueries';
+import { fetchAllInvoiceItems } from '../utils/fetchAllInvoiceItems';
 import { deleteInvoiceAndUnmarkSummonses } from '../utils/invoiceDeletion';
-import { Invoice, InvoiceSummonsItem, SentToClientAttribution } from '../types/invoiceTracker';
+import { Invoice, SentToClientAttribution } from '../types/invoiceTracker';
 import { getAmountReceived, getInvoiceHorizonColor } from '../utils/invoiceTrackerHelpers';
 import { horizonColors } from '../theme';
 import InvoiceDetailModal from './InvoiceDetailModal';
@@ -253,10 +254,6 @@ const ClientInvoicesDialog = ({ open, onClose, clientID, clientName, onCountChan
       data?: { invoicesByClientID?: { items?: Invoice[]; nextToken?: string | null } };
       errors?: Array<{ message?: string; errorType?: string }>;
     };
-    type InvoiceSummonsResponse = {
-      data?: { invoiceSummonsByInvoiceIDAndSummonsID?: { items?: InvoiceSummonsItem[]; nextToken?: string | null } };
-      errors?: Array<{ message?: string }>;
-    };
 
     const all: Invoice[] = [];
     let nextToken: string | null = null;
@@ -294,11 +291,10 @@ const ClientInvoicesDialog = ({ open, onClose, clientID, clientName, onCountChan
       // summons list.
       await Promise.all(all.map(async (inv) => {
         try {
-          const itemsResp = (await apiClient.graphql({
-            query: invoiceSummonsForInvoice,
-            variables: { invoiceID: inv.id, limit: 1000 },
-          })) as InvoiceSummonsResponse;
-          const items = itemsResp?.data?.invoiceSummonsByInvoiceIDAndSummonsID?.items || [];
+          // Paged helper rather than a bare limit — DynamoDB caps a Query page at
+          // 1 MB regardless of `limit`, so a single request can come back short
+          // with a nextToken and quietly hide line items.
+          const items = await fetchAllInvoiceItems(apiClient, inv.id);
           inv.items = { items };
         } catch (err) {
           console.warn(`[ClientInvoicesDialog] Could not load summons for invoice ${inv.id}:`, err);

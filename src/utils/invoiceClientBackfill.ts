@@ -16,6 +16,7 @@ import { generateClient } from 'aws-amplify/api';
 import { getSummons } from '../graphql/queries';
 import { listInvoicesWithItems, updateInvoiceRecord } from '../graphql/customQueries';
 import { Invoice, InvoiceSummonsItem } from '../types/invoiceTracker';
+import { fetchAllInvoiceItems } from './fetchAllInvoiceItems';
 
 const client = generateClient();
 const MAX_FETCHES = 50;
@@ -85,7 +86,20 @@ export async function runInvoiceClientBackfill(): Promise<BackfillResult> {
   if (orphans.length === 0) return result;
 
   for (const invoice of orphans) {
-    const items = invoice.items?.items || [];
+    // Fetch the real join rows rather than reading invoice.items.items: the list
+    // query caps that connection at 1 row on purpose (it is truncating and must
+    // never be trusted), and resolveClientIDFromItems wants every candidate —
+    // it walks rows until one yields a clientID, so a summons that was deleted
+    // or has no clientID shouldn't cost us the whole invoice.
+    let items: InvoiceSummonsItem[] = [];
+    try {
+      items = await fetchAllInvoiceItems(client, invoice.id);
+    } catch (err) {
+      console.error(`Backfill: could not load line items for invoice ${invoice.id}:`, err);
+      result.errors++;
+      result.details.push({ invoiceID: invoice.id, action: 'error', reason: 'could not load linked summonses' });
+      continue;
+    }
     if (items.length === 0) {
       result.skipped++;
       result.details.push({ invoiceID: invoice.id, action: 'skipped', reason: 'no linked summonses' });

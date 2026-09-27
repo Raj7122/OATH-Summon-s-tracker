@@ -55,7 +55,8 @@ import RemoveShoppingCartIcon from '@mui/icons-material/RemoveShoppingCart';
 import { generateClient } from 'aws-amplify/api';
 
 import { getClient, listSummons } from '../graphql/queries';
-import { getClientWithPlateFilter, invoicesByClientBasic, invoiceSummonsForInvoice } from '../graphql/customQueries';
+import { getClientWithPlateFilter, invoicesByClientBasic } from '../graphql/customQueries';
+import { fetchAllInvoiceItems } from '../utils/fetchAllInvoiceItems';
 import { updateSummons } from '../graphql/mutations';
 import { Client, Summons, isNewRecord, isUpdatedRecord } from '../types/summons';
 import { applyClientPlateFilter } from '../lib/plateFilter';
@@ -318,12 +319,8 @@ const ClientDetail: React.FC = () => {
         payment_status: 'paid' | 'unpaid';
         payment_date?: string | null;
       };
-      type InvoiceSummonsLite = { summonsID: string };
       type InvoicesResp = {
         data?: { invoicesByClientID?: { items?: InvoiceLite[]; nextToken?: string | null } };
-      };
-      type ItemsResp = {
-        data?: { invoiceSummonsByInvoiceIDAndSummonsID?: { items?: InvoiceSummonsLite[]; nextToken?: string | null } };
       };
 
       const invoices: InvoiceLite[] = [];
@@ -349,11 +346,10 @@ const ClientDetail: React.FC = () => {
       const map = new Map<string, { paid: boolean; paymentDate: string | null; invoiceNumber: string }>();
       await Promise.all(invoices.map(async (inv) => {
         try {
-          const itemsResp = (await apiClient.graphql({
-            query: invoiceSummonsForInvoice,
-            variables: { invoiceID: inv.id, limit: 1000 },
-          })) as ItemsResp;
-          const items = itemsResp?.data?.invoiceSummonsByInvoiceIDAndSummonsID?.items || [];
+          // Paged helper rather than a bare limit — a single Query page is capped
+          // at 1 MB, so a >100-item invoice could return short with a nextToken and
+          // leave summonses missing from the Paid column.
+          const items = await fetchAllInvoiceItems(apiClient, inv.id);
           const paid = inv.payment_status === 'paid';
           items.forEach((it) => {
             const existing = map.get(it.summonsID);

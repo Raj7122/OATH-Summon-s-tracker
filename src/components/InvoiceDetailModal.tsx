@@ -31,6 +31,7 @@ import {
   MenuItem,
   ListItemIcon,
   ListItemText,
+  Alert,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -49,15 +50,19 @@ import CircularProgress from '@mui/material/CircularProgress';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import { getUrl } from 'aws-amplify/storage';
-import { Invoice, SentToClientAttribution } from '../types/invoiceTracker';
+import { generateClient } from 'aws-amplify/api';
+import { Invoice, InvoiceSummonsItem, SentToClientAttribution } from '../types/invoiceTracker';
 import { getAmountReceived, getInvoiceHorizonColor, parseSentToClient } from '../utils/invoiceTrackerHelpers';
 import { horizonColors } from '../theme';
 import { useAuth } from '../contexts/AuthContext';
 import { formatFromKey, formatLabel, InvoiceFormat } from '../utils/invoiceFormat';
 import { buildInvoiceDocInputs } from '../utils/invoiceDocInputs';
+import { fetchAllInvoiceItems } from '../utils/fetchAllInvoiceItems';
 import { generatePDF, generateDOCX, generateXLSX } from '../utils/invoiceGenerator';
 
 dayjs.extend(utc);
+
+const apiClient = generateClient();
 
 interface InvoiceDetailModalProps {
   open: boolean;
@@ -130,6 +135,10 @@ const InvoiceDetailModal = ({
   const [fileMenuAnchor, setFileMenuAnchor] = useState<null | HTMLElement>(null);
   // Which format is currently being regenerated on demand (null = idle).
   const [regenerating, setRegenerating] = useState<InvoiceFormat | null>(null);
+  // Complete join rows for this invoice, paged off the byInvoice GSI (see the effect below).
+  const [summonsItems, setSummonsItems] = useState<InvoiceSummonsItem[]>([]);
+  const [loadingItems, setLoadingItems] = useState(false);
+  const [itemsError, setItemsError] = useState<string | null>(null);
 
   // Re-prime the payment inputs whenever a different invoice is opened. This modal
   // instance is long-lived (the parent keeps it mounted and swaps the `invoice` prop),
@@ -142,6 +151,41 @@ const InvoiceDetailModal = ({
       setPaymentDate(dayjs());
     }
   }, [open, invoice?.id, invoice?.total_legal_fees]);
+
+  // Load the invoice's real line items. We can't use invoice.items.items — the
+  // parent's list/get query reads that through the hasMany connection, whose
+  // resolver caps it at 100 rows, so a 214-item invoice rendered 100 here and
+  // regenerated 100-row documents. Page the byInvoice GSI instead.
+  useEffect(() => {
+    if (!open || !invoice?.id) {
+      setSummonsItems([]);
+      setItemsError(null);
+      return;
+    }
+    let cancelled = false;
+    const loadItems = async () => {
+      setLoadingItems(true);
+      setItemsError(null);
+      try {
+        const rows = await fetchAllInvoiceItems(apiClient, invoice.id);
+        if (!cancelled) setSummonsItems(rows);
+      } catch (err) {
+        console.error('Failed to load invoice line items:', err);
+        // Surface it rather than rendering an empty/partial list as if it were
+        // the whole invoice — the regenerate actions read the same rows.
+        if (!cancelled) {
+          setSummonsItems([]);
+          setItemsError('Could not load the line items for this invoice.');
+        }
+      } finally {
+        if (!cancelled) setLoadingItems(false);
+      }
+    };
+    loadItems();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, invoice?.id]);
 
   // Navigate to the InvoiceBuilder page in edit mode. Closing the modal first
   // prevents a flash of a stale invoice detail on return.
@@ -193,11 +237,24 @@ const InvoiceDetailModal = ({
   // buildInvoiceDocInputs); display-only columns reflect the latest case data.
   const handleGetAs = async (format: InvoiceFormat) => {
     if (!invoice) return;
+    // Refuse to regenerate from an incomplete line-item list — producing a document
+    // that silently omits violations is the bug this whole change exists to stop.
+    if (loadingItems || itemsError || summonsItems.length === 0) {
+      console.error('Refusing to regenerate invoice: line items are not fully loaded.');
+      setFileMenuAnchor(null);
+      return;
+    }
     setFileMenuAnchor(null);
     const pdfTab = format === 'pdf' ? window.open('', '_blank') : null;
     setRegenerating(format);
     try {
-      const { items, recipient, options, extras } = await buildInvoiceDocInputs(invoice);
+      // Pass the rows we already paged in; buildInvoiceDocInputs would otherwise
+      // fetch them again.
+      const { items, recipient, options, extras } = await buildInvoiceDocInputs(
+        invoice,
+        apiClient,
+        summonsItems,
+      );
       if (format === 'docx') {
         await generateDOCX(items, recipient, options, extras, true);
       } else if (format === 'xlsx') {
@@ -264,8 +321,6 @@ const InvoiceDetailModal = ({
     setNotesValue(invoice.notes || '');
     setEditingNotes(true);
   };
-
-  const summonsItems = invoice.items?.items || [];
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -439,9 +494,15 @@ const InvoiceDetailModal = ({
         <Divider sx={{ my: 2 }} />
 
         {/* Summonses on this invoice */}
-        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-          Summonses ({summonsItems.length})
+        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+          Summonses ({loadingItems ? '…' : summonsItems.length})
+          {loadingItems && <CircularProgress size={14} />}
         </Typography>
+        {itemsError && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {itemsError}
+          </Alert>
+        )}
         {summonsItems.length > 0 ? (
           <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
             <Table size="small">
@@ -467,7 +528,7 @@ const InvoiceDetailModal = ({
           </TableContainer>
         ) : (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            No linked summonses found.
+            {loadingItems ? 'Loading summonses…' : itemsError ? '' : 'No linked summonses found.'}
           </Typography>
         )}
 

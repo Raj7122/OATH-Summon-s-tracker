@@ -26,6 +26,8 @@ import {
 import { Invoice as TrackerInvoice } from '../types/invoiceTracker';
 import { FOOTER_TEXT } from '../constants/invoiceDefaults';
 import { compareByHearingDateAsc } from './invoiceOrdering';
+import { fetchAllInvoiceItems } from './fetchAllInvoiceItems';
+import { InvoiceSummonsItem } from '../types/invoiceTracker';
 
 export interface InvoiceDocInputs {
   items: InvoiceCartItem[];
@@ -48,8 +50,11 @@ const parseJsonField = <T>(raw: unknown, fallback: T, isValid: (v: unknown) => b
 
 /**
  * Hydrate a stored invoice into generator inputs.
- * @param invoice  The Invoice record, including its `items.items` join rows.
- * @param client   Optional Amplify GraphQL client (injectable for testing).
+ * @param invoice    The Invoice record.
+ * @param client     Optional Amplify GraphQL client (injectable for testing).
+ * @param prefetchedItems  Optional pre-fetched join rows. Callers that already paged the
+ *                   byInvoice GSI pass them in to skip a second round trip; everyone
+ *                   else leaves this undefined and we fetch them here.
  */
 export const buildInvoiceDocInputs = async (
   invoice: TrackerInvoice,
@@ -57,8 +62,12 @@ export const buildInvoiceDocInputs = async (
   // to accept the real client without tripping strictFunctionTypes on its overloads.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   client: { graphql: (...args: any[]) => any } = generateClient(),
+  prefetchedItems?: InvoiceSummonsItem[],
 ): Promise<InvoiceDocInputs> => {
-  const joinItems = invoice.items?.items ?? [];
+  // Never read invoice.items.items here: that connection is capped at 100 rows by
+  // its resolver, which is exactly how a 214-item invoice regenerated as a 100-row
+  // document. Page the byInvoice GSI instead (see utils/fetchAllInvoiceItems).
+  const joinItems = prefetchedItems ?? (await fetchAllInvoiceItems(client, invoice.id));
 
   // Fetch each line item's live summons for the display-only columns. A failed or
   // missing summons degrades to sparse data rather than dropping the line item.
