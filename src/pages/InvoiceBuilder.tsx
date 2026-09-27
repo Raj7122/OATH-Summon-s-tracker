@@ -90,10 +90,16 @@ import { compareByHearingDateAsc } from '../utils/invoiceOrdering';
 import { deriveRecipient } from '../utils/deriveRecipient';
 import { formatFromKey } from '../utils/invoiceFormat';
 import { buildInvoiceDocInputs } from '../utils/invoiceDocInputs';
+import { fetchAllInvoiceItems } from '../utils/fetchAllInvoiceItems';
 import { v4 as uuidv4 } from 'uuid';
 import { Invoice as TrackerInvoice } from '../types/invoiceTracker';
 
 const apiClient = generateClient();
+
+// Bounds the "Add summonses" picker's pagination loop. 20 pages of 1000 is far
+// beyond any real client (the largest has 440 summonses), so tripping it means
+// something is wrong rather than that a client is genuinely that big.
+const MAX_PICKER_FETCHES = 20;
 
 interface Client {
   id: string;
@@ -533,16 +539,22 @@ const InvoiceBuilder = () => {
         });
         setAlertDeadline(invoice.alert_deadline || null);
 
+        // Load the COMPLETE join-row set by paging the byInvoice GSI. The
+        // `invoice.items.items` connection we used to read here is capped at 100
+        // rows by its resolver, so a 214-item invoice opened for editing showed
+        // 100 — the "half my violations are missing" bug. Pass the rows into the
+        // doc-inputs helper so it doesn't re-fetch them.
+        const joinItems = await fetchAllInvoiceItems(apiClient, invoice.id);
         // Rebuild the working line items + extras via the shared helper so the
         // fine-precedence rule — the fine SAVED on the invoice wins over the live
         // NYC balance, so manually-removed fines don't reappear — stays identical
         // to the Tracker's on-demand regeneration path. The helper fetches each
         // line's live summons for the display-only columns and degrades to sparse
         // data if a summons was archived or deleted.
-        const joinItems = invoice.items?.items || [];
         const { items: hydratedItems, extras: hydratedExtras } = await buildInvoiceDocInputs(
           invoice,
           apiClient,
+          joinItems,
         );
 
         if (cancelled) return;
@@ -936,6 +948,26 @@ const InvoiceBuilder = () => {
       return;
     }
 
+    // Belt-and-braces stop on the truncation class of bug. `originalJoinRows` must
+    // account for every line item the stored invoice claims; if it doesn't, we
+    // loaded a partial invoice and saving would rewrite item_count and the fee
+    // totals down to what we happened to see, and overwrite the stored document
+    // with a short one — exactly the silent half-invoice failure this guards.
+    // Bail out instead of destroying the record.
+    const storedItemCount = loadedInvoice.item_count ?? 0;
+    if (storedItemCount > 0 && originalJoinRows.length !== storedItemCount) {
+      console.error(
+        `Refusing to save invoice ${loadedInvoice.invoice_number}: loaded ` +
+          `${originalJoinRows.length} line items but the record says ${storedItemCount}.`,
+      );
+      alert(
+        `This invoice didn't load completely — ${originalJoinRows.length} of ${storedItemCount} ` +
+          `line items are present. Saving now would drop the rest, so the save was cancelled. ` +
+          `Please close and reopen the invoice, then try again.`,
+      );
+      return;
+    }
+
     setSaving(true);
     let partialFailureMessage: string | null = null;
 
@@ -1246,12 +1278,40 @@ const InvoiceBuilder = () => {
     setPickerLoading(true);
     setPickerSelection(new Set());
     try {
-      const result: { data?: { summonsByClientIDAndHearing_date?: { items?: PickerCandidate[] } } } =
-        await apiClient.graphql({
+      // Page the byClient GSI to exhaustion. A bare `limit: 1000` is not enough:
+      // DynamoDB caps a Query page at 1 MB no matter the limit, and Summons rows
+      // are wide (activity_log, violation_narrative, OCR fields), so a big client
+      // can come back short with a nextToken — silently hiding candidates the
+      // user needs to add. MAX_PICKER_FETCHES bounds a malformed token.
+      type PickerPage = {
+        data?: {
+          summonsByClientIDAndHearing_date?: {
+            items?: PickerCandidate[];
+            nextToken?: string | null;
+          };
+        };
+      };
+      const items: PickerCandidate[] = [];
+      let pickerToken: string | null = null;
+      let pickerFetches = 0;
+      do {
+        const result: PickerPage = (await apiClient.graphql({
           query: summonsesByClientForPicker,
-          variables: { clientID: loadedInvoice.clientID, limit: 1000 },
-        }) as { data?: { summonsByClientIDAndHearing_date?: { items?: PickerCandidate[] } } };
-      const items: PickerCandidate[] = result?.data?.summonsByClientIDAndHearing_date?.items || [];
+          variables: { clientID: loadedInvoice.clientID, limit: 1000, nextToken: pickerToken },
+        })) as PickerPage;
+        const page = result?.data?.summonsByClientIDAndHearing_date;
+        if (!page) break;
+        items.push(...(page.items || []));
+        pickerToken = page.nextToken || null;
+        pickerFetches++;
+        if (pickerFetches >= MAX_PICKER_FETCHES && pickerToken) {
+          console.error(
+            `Picker pagination guard tripped for client ${loadedInvoice.clientID} after ` +
+              `${items.length} summonses; the candidate list may be incomplete.`,
+          );
+          break;
+        }
+      } while (pickerToken);
 
       // Exclude summonses already on this invoice's working copy and those on
       // a DIFFERENT invoice (still invoiced). We allow previously un-invoiced

@@ -24,6 +24,7 @@ import { getSummons } from '../graphql/queries';
 import { updateSummons } from '../graphql/mutations';
 import { appendInvoiceRemovedEntry } from './invoiceAuditLog';
 import { isInvoiced as isInvoicedLocally, unmarkAsInvoiced } from './invoiceTracking';
+import { fetchAllInvoiceItems } from './fetchAllInvoiceItems';
 
 // Minimal client shape — typing this as the full generateClient() return triggers
 // excessive generic stack depth in tsc. Callers pass their own Amplify client.
@@ -37,13 +38,21 @@ interface ApiClient {
  * another invoice (in which case it must stay flagged).
  *
  * @param apiClient - An Amplify GraphQL client (caller passes their own instance)
- * @param invoice   - The invoice to delete; must include items[].id and items[].summonsID
+ * @param invoice   - The invoice to delete. Only its `id` and `invoice_number` are
+ *                    read; the join rows are fetched here, not taken from the caller.
  */
 export async function deleteInvoiceAndUnmarkSummonses(
   apiClient: ApiClient,
   invoice: Invoice,
 ): Promise<void> {
-  const items = invoice.items?.items || [];
+  // Page the byInvoice GSI for the real row set rather than trusting whatever the
+  // caller's query returned. Reading invoice.items.items here is what stranded 166
+  // join rows in production: a ~266-item invoice was deleted, the resolver's 100-row
+  // cap hid the rest, so the Invoice record went away and 166 orphans stayed behind
+  // — flagging their summonses as invoiced forever, with no invoice to point at.
+  // If this throws we delete nothing, which is the right failure: a half-deleted
+  // invoice is strictly worse than one that is still there.
+  const items = await fetchAllInvoiceItems(apiClient, invoice.id);
   // Unique summons IDs covered by this invoice (a summons can appear once per invoice).
   const summonsIds = [...new Set(items.map((i) => i.summonsID).filter(Boolean))];
 

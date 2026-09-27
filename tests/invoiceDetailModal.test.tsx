@@ -90,11 +90,32 @@ const defaultProps = {
 // Tests
 // ---------------------------------------------------------------------------
 
+// The modal loads its line items by paging the byInvoice GSI. It deliberately does
+// NOT read invoice.items.items — that connection's resolver caps at 100 rows, which
+// is how a 214-item invoice rendered 100 line items and regenerated 100-row
+// documents. Tests set `joinRows` to control what the GSI returns.
+let joinRows: NonNullable<Invoice['items']>['items'] = [];
+
 describe('InvoiceDetailModal', () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    // shouldAdvanceTime keeps the pinned system time (the horizon chips depend on
+    // it) while still letting timers tick, so findBy*/waitFor polling can resolve
+    // the modal's async line-item load instead of hanging.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date('2026-02-10T00:00:00.000Z'));
     vi.clearAllMocks();
+    joinRows = makeInvoice().items!.items;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockGraphql.mockImplementation(async ({ query }: any) => {
+      if (typeof query === 'string' && query.includes('invoiceSummonsByInvoiceIDAndSummonsID')) {
+        return {
+          data: {
+            invoiceSummonsByInvoiceIDAndSummonsID: { items: joinRows, nextToken: null },
+          },
+        };
+      }
+      return { data: {} };
+    });
   });
 
   afterEach(() => {
@@ -175,17 +196,42 @@ describe('InvoiceDetailModal', () => {
     expect(screen.getAllByText('$500.00').length).toBeGreaterThan(0);
   });
 
-  it('renders summons list with correct count', () => {
+  it('renders summons list with correct count', async () => {
     render(<InvoiceDetailModal {...defaultProps} />);
-    expect(screen.getByText('Summonses (2)')).toBeDefined();
+    // Line items arrive asynchronously off the GSI.
+    expect(await screen.findByText('Summonses (2)')).toBeDefined();
     expect(screen.getByText('SUM-001')).toBeDefined();
     expect(screen.getByText('SUM-002')).toBeDefined();
   });
 
-  it('shows empty summons message when no items', () => {
-    const noItemsInvoice = makeInvoice({ items: { items: [] } });
-    render(<InvoiceDetailModal {...defaultProps} invoice={noItemsInvoice} />);
-    expect(screen.getByText('No linked summonses found.')).toBeDefined();
+  it('shows empty summons message when no items', async () => {
+    joinRows = [];
+    render(<InvoiceDetailModal {...defaultProps} invoice={makeInvoice({ items: { items: [] } })} />);
+    expect(await screen.findByText('No linked summonses found.')).toBeDefined();
+  });
+
+  // Regression: the modal must render every line item, not the 100 the
+  // invoice.items.items connection would have returned. This is the display side
+  // of the CORPORATE EXPRESS bug (invoice f309f597: 214 rows, 100 shown).
+  it('renders all line items for a >100-item invoice, ignoring the capped connection', async () => {
+    const TOTAL = 214;
+    const allRows = Array.from({ length: TOTAL }, (_, i) => ({
+      id: `item-${i}`,
+      invoiceID: 'inv-1',
+      summonsID: `sum-${i}`,
+      summons_number: `SUM-${String(i).padStart(4, '0')}`,
+      legal_fee: 100,
+      amount_due: 0,
+    }));
+    joinRows = allRows;
+    // The prop carries only the truncated 100 — the modal must ignore it.
+    const bigInvoice = makeInvoice({ item_count: TOTAL, items: { items: allRows.slice(0, 100) } });
+
+    render(<InvoiceDetailModal {...defaultProps} invoice={bigInvoice} />);
+
+    expect(await screen.findByText(`Summonses (${TOTAL})`)).toBeDefined();
+    // A row beyond the old 100-row boundary is present.
+    expect(screen.getByText('SUM-0213')).toBeDefined();
   });
 
   it('renders "Mark as Paid" button for unpaid invoices', () => {

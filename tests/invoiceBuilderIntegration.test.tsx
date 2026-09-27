@@ -177,6 +177,32 @@ function renderBuilder() {
 // Tests
 // ---------------------------------------------------------------------------
 
+/** Minimal shape of an Amplify graphql() call, for inspecting mock invocations. */
+type GqlCall = {
+  query: string;
+  variables?: {
+    id?: string;
+    nextToken?: string | null;
+    input?: { id?: string; item_count?: number; total_legal_fees?: number };
+  };
+};
+
+// The one join row the edit-mode fixtures describe, served via the byInvoice GSI
+// fake (see wireEditModeMocks). amount_due is the snapshot frozen at invoice
+// creation; the live getSummons value is deliberately different so the
+// fine-precedence rule is observable.
+const EDIT_MODE_JOIN_ROWS = [
+  {
+    id: 'join-1',
+    invoiceID: 'inv-edit-1',
+    summonsID: 'sum-1',
+    summons_number: 'SUM-001',
+    legal_fee: 250,
+    amount_due: 500,
+    highlighted: false,
+  },
+];
+
 describe('InvoiceBuilder Integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -555,6 +581,22 @@ describe('InvoiceBuilder Integration', () => {
     // Dedicated mock wiring for edit mode: getInvoiceWithItems, getSummons,
     // and summonsesByClientForPicker all need to resolve.
     mockGraphql.mockImplementation(({ query }: any) => {
+      // The edit screen reads its line items from the byInvoice GSI now — the
+      // invoice.items.items connection is capped at 100 rows by its resolver, so
+      // it can never be trusted as a complete list.
+      if (
+        typeof query === 'string' &&
+        query.includes('invoiceSummonsByInvoiceIDAndSummonsID')
+      ) {
+        return Promise.resolve({
+          data: {
+            invoiceSummonsByInvoiceIDAndSummonsID: {
+              items: EDIT_MODE_JOIN_ROWS,
+              nextToken: null,
+            },
+          },
+        });
+      }
       if (typeof query === 'string' && query.includes('getInvoice(')) {
         return Promise.resolve({
           data: {
@@ -678,6 +720,22 @@ describe('InvoiceBuilder Integration', () => {
    */
   function wireEditModeMocks(liveAmountDue: number | null, summonsExists = true) {
     mockGraphql.mockImplementation(({ query }: any) => {
+      // The edit screen reads its line items from the byInvoice GSI now — the
+      // invoice.items.items connection is capped at 100 rows by its resolver, so
+      // it can never be trusted as a complete list.
+      if (
+        typeof query === 'string' &&
+        query.includes('invoiceSummonsByInvoiceIDAndSummonsID')
+      ) {
+        return Promise.resolve({
+          data: {
+            invoiceSummonsByInvoiceIDAndSummonsID: {
+              items: EDIT_MODE_JOIN_ROWS,
+              nextToken: null,
+            },
+          },
+        });
+      }
       if (typeof query === 'string' && query.includes('getInvoice(')) {
         return Promise.resolve({
           data: {
@@ -756,6 +814,170 @@ describe('InvoiceBuilder Integration', () => {
     expect(screen.getByText('$500.00')).toBeDefined();
     expect(screen.queryByText('$200.00')).toBeNull();
   });
+
+  // -------------------------------------------------------------------------
+  // Truncation regression — the CORPORATE EXPRESS edit bug
+  //
+  // Invoice f309f597 has 214 join rows in DynamoDB. The edit screen used to read
+  // them from invoice.items.items, whose resolver hardcodes a 100-row cap, so it
+  // loaded 100 and Raj reported "half the violations I billed were missing".
+  // Saving from that state would have written item_count: 100, recomputed the fee
+  // total from 100 rows, and overwritten the stored document.
+  // -------------------------------------------------------------------------
+
+  /** Wire a large invoice: `total` join rows served over the GSI in 100-row pages. */
+  function wireLargeInvoiceMocks(total: number, storedItemCount = total) {
+    const allRows = Array.from({ length: total }, (_, i) => ({
+      id: `join-${i}`,
+      invoiceID: 'inv-big',
+      summonsID: `sum-${i}`,
+      summons_number: `SUM-${String(i).padStart(4, '0')}`,
+      legal_fee: 100,
+      amount_due: 0,
+      highlighted: false,
+    }));
+    const pages: (typeof allRows)[] = [];
+    for (let i = 0; i < total; i += 100) pages.push(allRows.slice(i, i + 100));
+
+    mockGraphql.mockImplementation(({ query, variables }: GqlCall) => {
+      if (typeof query === 'string' && query.includes('invoiceSummonsByInvoiceIDAndSummonsID')) {
+        const idx = variables?.nextToken ? Number(variables.nextToken) : 0;
+        return Promise.resolve({
+          data: {
+            invoiceSummonsByInvoiceIDAndSummonsID: {
+              items: pages[idx] ?? [],
+              nextToken: idx + 1 < pages.length ? String(idx + 1) : null,
+            },
+          },
+        });
+      }
+      if (typeof query === 'string' && query.includes('getInvoice(')) {
+        return Promise.resolve({
+          data: {
+            getInvoice: {
+              id: 'inv-big',
+              invoice_number: 'INV-CORPORATE_EXPRESS_IN-2026-09-02',
+              invoice_date: '2026-09-02T17:08:47.103Z',
+              clientID: 'client-1',
+              recipient_company: 'CORPORATE EXPRESS INC',
+              recipient_attention: null,
+              recipient_address: 'PO BOX 144',
+              recipient_email: null,
+              alert_deadline: null,
+              payment_status: 'unpaid',
+              item_count: storedItemCount,
+              total_legal_fees: total * 100,
+              total_fines_due: 0,
+              // The decoy: what the capped connection would have returned.
+              items: { items: allRows.slice(0, 100) },
+            },
+          },
+        });
+      }
+      if (typeof query === 'string' && query.includes('getSummons')) {
+        return Promise.resolve({
+          data: {
+            getSummons: {
+              id: variables?.id ?? 'sum-0',
+              clientID: 'client-1',
+              respondent_name: 'CORPORATE EXPRESS INC',
+              violation_date: '2025-03-28T00:00:00.000Z',
+              hearing_date: '2027-04-12T00:00:00.000Z',
+              hearing_result: null,
+              status: 'RESCHEDULED',
+              amount_due: 0,
+            },
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    return { allRows };
+  }
+
+  const renderEdit = (invoiceId: string) =>
+    render(
+      <MemoryRouter initialEntries={[`/invoice-builder?editInvoiceId=${invoiceId}`]}>
+        <InvoiceProvider>
+          <InvoiceBuilder />
+        </InvoiceProvider>
+      </MemoryRouter>
+    );
+
+  it('loads every line item in edit mode, not the 100 the items connection returns', async () => {
+    wireLargeInvoiceMocks(120);
+    renderEdit('inv-big');
+
+    await screen.findByRole('button', { name: /Add Summonses/i });
+
+    // Rows beyond index 99 lived past the cap that used to truncate this list.
+    await screen.findByText('SUM-0119', {}, { timeout: 20000 });
+    expect(screen.getByText('SUM-0000')).toBeDefined();
+    // The row that sat exactly at the old boundary is there too.
+    expect(screen.getByText('SUM-0100')).toBeDefined();
+  }, 30000);
+
+  it('saves the full item_count for a >100-item invoice', async () => {
+    wireLargeInvoiceMocks(120);
+    renderEdit('inv-big');
+
+    await screen.findByRole('button', { name: /Add Summonses/i });
+    await screen.findByText('SUM-0119', {}, { timeout: 20000 });
+
+    vi.spyOn(window, 'alert').mockImplementation(() => {});
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
+
+    // The Invoice record must be updated with all 120, never a truncated 100.
+    await waitFor(
+      () => {
+        const updateCall = mockGraphql.mock.calls.find(
+          ([arg]: [GqlCall]) =>
+            typeof arg?.query === 'string' &&
+            arg.query.includes('UpdateInvoiceRecord') &&
+            arg.variables?.input?.id === 'inv-big'
+        );
+        expect(updateCall).toBeDefined();
+        expect(updateCall[0].variables.input.item_count).toBe(120);
+        expect(updateCall[0].variables.input.total_legal_fees).toBe(12000);
+      },
+      { timeout: 20000 }
+    );
+  }, 30000);
+
+  it('refuses to save when fewer items loaded than the invoice record claims', async () => {
+    // Belt-and-braces guard: the GSI hands back 100 rows but the record says 214,
+    // so we loaded a partial invoice. Saving would silently drop 114 line items.
+    wireLargeInvoiceMocks(100, 214);
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderEdit('inv-big');
+
+    await screen.findByRole('button', { name: /Add Summonses/i });
+    await screen.findByText('SUM-0099', {}, { timeout: 20000 });
+
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
+
+    await waitFor(
+      () => {
+        expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('100 of 214'));
+      },
+      { timeout: 20000 }
+    );
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Refusing to save'));
+
+    // Nothing was written.
+    const wrote = mockGraphql.mock.calls.some(
+      ([arg]: [GqlCall]) =>
+        typeof arg?.query === 'string' &&
+        (arg.query.includes('UpdateInvoiceRecord') ||
+          arg.query.includes('DeleteInvoiceSummonsRecord') ||
+          arg.query.includes('CreateInvoiceSummonsRecord'))
+    );
+    expect(wrote).toBe(false);
+
+    alertSpy.mockRestore();
+    errorSpy.mockRestore();
+  }, 30000);
 
   it('keeps the stored snapshot fine when the live summons is missing', async () => {
     // Summons archived/deleted — getSummons resolves null. Fall back to snapshot 500.

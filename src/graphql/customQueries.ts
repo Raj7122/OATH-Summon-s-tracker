@@ -83,14 +83,14 @@ export const listInvoicesWithItems = /* GraphQL */ `
         sent_to_client_attr
         pdf_s3_key
         clientID
-        items {
+        # Deliberately capped at ONE row. The hasMany resolver silently truncates
+        # this connection at 100, so nothing may treat it as a complete line-item
+        # list — use fetchAllInvoiceItems for that. The only consumer left is
+        # invoiceClientBackfill, which needs a single summonsID to infer clientID.
+        items(limit: 1) {
           items {
             id
-            invoiceID
             summonsID
-            summons_number
-            legal_fee
-            amount_due
           }
         }
         createdAt
@@ -253,6 +253,13 @@ export const invoicesByClientBasic = /* GraphQL */ `
 `;
 
 // Fetch InvoiceSummons rows for a single invoice. Uses the byInvoice index.
+//
+// This — paged via fetchAllInvoiceItems — is the ONLY safe way to read an
+// invoice's line items. Do NOT read them through the `Invoice.items` hasMany
+// connection: its generated resolver hardcodes `defaultIfNull($ctx.args.limit, 100)`,
+// so a 214-item invoice silently comes back with 100 rows. That truncation showed
+// up as "half the violations vanished when I edited the invoice", and on the
+// delete path it stranded 166 join rows whose invoice no longer existed.
 export const invoiceSummonsForInvoice = /* GraphQL */ `
   query InvoiceSummonsForInvoice(
     $invoiceID: ID!
@@ -271,6 +278,7 @@ export const invoiceSummonsForInvoice = /* GraphQL */ `
         summons_number
         legal_fee
         amount_due
+        highlighted
       }
       nextToken
     }
@@ -337,15 +345,15 @@ export const getInvoiceWithItems = /* GraphQL */ `
       overdue_text
       additional_notes
       show_overdue
-      items {
+      # Capped at ONE row on purpose — same reason as listInvoicesWithItems: this
+      # connection's resolver truncates at 100 and must never be mistaken for a
+      # complete line-item list. Callers that need the real items (the edit
+      # screen, the detail modal, document regeneration, deletion) page the
+      # byInvoice GSI via fetchAllInvoiceItems instead.
+      items(limit: 1) {
         items {
           id
-          invoiceID
           summonsID
-          summons_number
-          legal_fee
-          amount_due
-          highlighted
         }
       }
       createdAt
